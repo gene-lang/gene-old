@@ -9,7 +9,7 @@
 ### Example Usage
 ```gene
 (macro m []
-  ($caller_eval :a)
+  ($caller_eval `a)
 )
 (fn f []
   (var a 1)

@@ -1,12 +1,12 @@
 (var text "abcdefghij")
-(var chunks (genex/ai/documents/chunk text {^strategy :fixed ^size 5 ^overlap 1}))
+(var chunks (genex/ai/documents/chunk text {^strategy `fixed ^size 5 ^overlap 1}))
 (assert ((len chunks) == 3))
 (assert (chunks/0/text == "abcde"))
 (assert (chunks/1/text == "efghi"))
 (assert (chunks/2/text == "ij"))
 
 (var sentence_text "One. Two. Three. Four.")
-(var sentence_chunks (genex/ai/documents/chunk sentence_text {^strategy :sentence ^size 2}))
+(var sentence_chunks (genex/ai/documents/chunk sentence_text {^strategy `sentence ^size 2}))
 (assert ((len sentence_chunks) == 2))
 (assert (sentence_chunks/0/text == "One. Two."))
 (assert (sentence_chunks/1/text == "Three. Four."))
@@ -14,11 +14,11 @@
 (var paragraph_text """Para one line.
 
 Para two line.""")
-(var paragraph_chunks (genex/ai/documents/chunk paragraph_text {^strategy :paragraph ^size 1}))
+(var paragraph_chunks (genex/ai/documents/chunk paragraph_text {^strategy `paragraph ^size 1}))
 (assert ((len paragraph_chunks) == 2))
 (assert (paragraph_chunks/0/text == "Para one line."))
 (assert (paragraph_chunks/1/text == "Para two line."))
 
 (var recursive_text "abcdefghij klmnopqr")
-(var recursive_chunks (genex/ai/documents/chunk recursive_text {^strategy :recursive ^size 5}))
+(var recursive_chunks (genex/ai/documents/chunk recursive_text {^strategy `recursive ^size 5}))
 (assert (recursive_chunks/0/metadata/strategy == "recursive"))

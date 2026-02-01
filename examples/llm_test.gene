@@ -17,7 +17,7 @@
 # Create a session with inference parameters
 (println "")
 (println "🔧 Creating inference session...")
-(var session (model.new_session {:context_len 2048 :temperature 0.7 :top_p 0.9 :top_k 40 :seed 42 :max_tokens 100}))
+(var session (model.new_session {^context_len 2048 ^temperature 0.7 ^top_p 0.9 ^top_k 40 ^seed 42 ^max_tokens 100}))
 
 (println "✅ Session created successfully!")
 (println "   Session object: " session)

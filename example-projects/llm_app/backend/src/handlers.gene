@@ -90,7 +90,7 @@
   )
 
   (if (document_text != nil)
-    (var chunks (genex/ai/documents/chunk document_text {^strategy :recursive ^size 800 ^overlap 80}))
+    (var chunks (genex/ai/documents/chunk document_text {^strategy `recursive ^size 800 ^overlap 80}))
     (document_chunks = chunks/.size)
     (var context_parts [])
     (var i 0)

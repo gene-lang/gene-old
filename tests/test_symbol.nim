@@ -35,8 +35,8 @@ import ./helpers
 # self/.meth  # call meth on self
 
 # Basic symbol tests
-test_vm ":a", "a".to_symbol_value()
-test_vm ":test", "test".to_symbol_value()
+test_vm "`a", "a".to_symbol_value()
+test_vm "`test", "test".to_symbol_value()
 
 # Namespace tests that work with our VM
 test_vm """

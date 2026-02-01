@@ -29,7 +29,7 @@
 (i = 0)
 (while (< i iterations)
   # Simple gene expression creation
-  (var g (:test a 1 b 2))
+  (var g (`test a 1 b 2))
   (gene_sum = (+ gene_sum 1))
   (i = (+ i 1)))
 (println "Gene operations completed: " gene_sum)

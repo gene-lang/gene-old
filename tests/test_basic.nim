@@ -11,7 +11,7 @@ test_vm "false", false
 test_vm "_", PLACEHOLDER
 test_vm "\"string\"", "string"
 
-test_vm ":a", "a".to_symbol_value()
+test_vm "`a", "a".to_symbol_value()
 
 test_vm "[]", new_array_value()
 test_vm "[1 2]", new_array_value(1, 2)
@@ -151,7 +151,7 @@ test_vm """
   )
 """, 1
 
-test_vm ":(1 + 2)", proc(r: Value) =
+test_vm "`(1 + 2)", proc(r: Value) =
   check r.gene.type == 1
   check r.gene.children[0] == "+".to_symbol_value()
   check r.gene.children[1] == 2
@@ -160,7 +160,7 @@ test_vm "(_ 1 2)", proc(r: Value) =
   check r.gene.children[0] == 1
   check r.gene.children[1] == 2
 
-test_vm "(:a 1 2)", proc(r: Value) =
+test_vm "(`a 1 2)", proc(r: Value) =
   check r.gene.type == "a".to_symbol_value()
   check r.gene.children[0] == 1
   check r.gene.children[1] == 2
@@ -281,13 +281,13 @@ test_vm """
 # eval and $parse tests
 test_vm """
   (var a 1)
-  (eval :a)
+  (eval `a)
 """, 1
 
 test_vm """
   (var a 1)
   (var b 2)
-  (eval :a :b)
+  (eval `a `b)
 """, 2
 
 # $parse basic and eval parsed expression

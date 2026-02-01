@@ -8,7 +8,7 @@
     (var arr [1 2 3 4 5])
     (var map {^a 1 ^b 2 ^c 3})
     # Create a gene expression (not using gene constructor)
-    (var g (:test value i))
+    (var g (`test value i))
     (count = (+ count 1))
     (i = (+ i 1)))
   count)
@@ -20,7 +20,7 @@
 
 (println "Creating simple gene objects...")
 # Use gene expressions directly instead of gene constructor
-(var g1 (:test1))
-(var g2 (:test2 value 42))
-(var g3 (:test3 a 1 b 2))
+(var g1 (`test1))
+(var g2 (`test2 value 42))
+(var g3 (`test3 a 1 b 2))
 (println "Gene objects created successfully")

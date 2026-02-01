@@ -3,7 +3,7 @@
 (import genex/html/tags/*)
 (import genex/html/style)
 
-(var doc :(HTML
+(var doc `(HTML
   (HEAD
     (TITLE "Test HTML")
   )
@@ -18,7 +18,7 @@
 ))
 
 (var css (@*
-  (@ _ :BODY (style ^line-height 1.5))
+  (@ _ `BODY (style ^line-height 1.5))
 ))
 
 # Apply css to doc

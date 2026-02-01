@@ -64,7 +64,7 @@ suite "LLM Mock Backend":
       (var session (model .new_session {}))
       (session .close)
       (model .close)
-      :ok
+      `ok
     """)
     check success.kind == VkSymbol
     check success.str == "ok"

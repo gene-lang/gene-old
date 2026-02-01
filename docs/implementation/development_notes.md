@@ -38,7 +38,7 @@ A: Value's size is 8 bytes. Range doesn't fit in 8 bytes.
 7. ❌ Control flow: `elif`, `then`, `not`, `continue`, `while`
 8. ❌ Special operations: `void`, `$with`, `$tap`, `eval`, `$parse`
 9. ❌ Array/gene spread operator `...`
-10. ❌ Gene expressions with properties `(:test ^a a b)`
+10. ❌ Gene expressions with properties ``(`test ^a a b)``
 
 **Question**: What's the priority order for implementing these features? Should we focus on completing the basic variable system first, or move to other features?
 A: 3 6 7 4 8 5 9 10

@@ -67,9 +67,9 @@ To approach CSS selector + XPath query power, selectors need to support **match-
 
 Recommendation:
 - `Selector.call(selector, target, [default])` → value-mode (existing)
-- `Selector.query(selector, target, ^mode :all|:first)` → selection-mode (new)
-  - `^mode :all`: returns an array (empty when no matches)
-  - `^mode :first`: returns first match or `void`
+- ``Selector.query(selector, target, ^mode `all|`first)`` → selection-mode (new)
+  - ``^mode `all``: returns an array (empty when no matches)
+  - ``^mode `first``: returns first match or `void`
 
 This cleanly separates “missing member” (`void`) from “matched nothing” (`[]`).
 

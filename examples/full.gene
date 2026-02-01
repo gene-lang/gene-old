@@ -13,10 +13,10 @@
 #   - Properties: {^name "Alice" ^age 30}
 #   - Children: [child1 child2]
 
-# Create a Gene value using the : (quote) prefix
+# Create a Gene value using the ` (quote) prefix
 # This prevents evaluation, preserving the structure as data
 (var p
-  :(Person ^name "Alice" ^age 30
+  `(Person ^name "Alice" ^age 30
     child1 child2 (Person ^name "Bob" ^age 25)))
 (println "Gene value:" p)
 (println "  type    =" p/.type)
@@ -24,7 +24,7 @@
 (println "  children=" p/.children)
 
 # More complex example - a quoted if expression
-(var expr :(if (x > 0) "positive" else "non-positive"))
+(var expr `(if (x > 0) "positive" else "non-positive"))
 (println "If expression:" expr)
 (println "  type    =" expr/.type)       # => if
 (println "  children=" expr/.children)   # => [(x > 0) "positive" ...]
@@ -257,9 +257,9 @@ catch *
 (println "Quadruple 3:" (quadruple 3))
 
 # ===== 11. SYMBOLS & KEYWORDS =====
-(var status :success)   # :success = (quote success)
-(var error :error)
-(println "Status == :success:" (status == :success))
+(var status `success)   # `success = (quote success)
+(var error `error)
+(println "Status == `success:" (status == `success))
 
 # ===== 12. MACROS & METAPROGRAMMING =====
 # Macro-like function with unevaluated arguments

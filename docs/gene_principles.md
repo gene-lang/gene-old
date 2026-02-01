@@ -38,7 +38,7 @@ Gene expressions serve multiple purposes:
 
 **Templates:**
 ```gene
-:(div
+`(div
   (h1 %title)
   (p %content))
 ```
@@ -49,7 +49,7 @@ Gene expressions serve multiple purposes:
   ^headers {^auth token}
   ^timeout 5000)
 
-(sql/select [:name :email]
+(sql/select [`name `email]
   ^from "users"
   ^where (> age 18))
 ```
@@ -76,7 +76,7 @@ g/0  # => 1
 g/1  # => 2
 
 # Quote and render
-(var tpl :(test %x))
+(var tpl `(test %x))
 (var x 42)
 ($render tpl)  # => (test 42)
 ```
@@ -84,13 +84,13 @@ g/1  # => 2
 **Planned:**
 ```gene
 # Method-based access
-((user ^name "Alice" ^age 30) .get :name)  # => "Alice"
+((user ^name "Alice" ^age 30) .get `name)  # => "Alice"
 ((user ^name "Alice" ^age 30) .type)       # => user
-((user ^name "Alice" ^age 30) .children)   # => [:name "Alice" :age 30]
+((user ^name "Alice" ^age 30) .children)   # => [`name "Alice" `age 30]
 
 # Transform
 ((user ^name "Alice" ^age 30)
-  .update :age 31)  # => (user ^name "Alice" ^age 31)
+  .update `age 31)  # => (user ^name "Alice" ^age 31)
 
 # Pattern matching
 (case data
@@ -121,8 +121,8 @@ Inspired by Ruby: every value responds to methods.
 ([1 2 3] .get 1)             # => 2
 
 # Maps
-({^a 1 ^b 2} .get :a)        # => 1
-({^a 1} .contains :a)        # => true
+({^a 1 ^b 2} .get `a)        # => 1
+({^a 1} .contains `a)        # => true
 
 # Gene expressions (index access)
 (var g (_ 1 2 3))
@@ -140,14 +140,14 @@ g/0                          # => 1 (element access)
 # More collection methods
 ([1 2 3] .map double)        # => [2 4 6]
 ([1 2 3] .filter odd?)       # => [1 3]
-({^a 1 ^b 2} .keys)          # => [:a :b]
+({^a 1 ^b 2} .keys)          # => [`a `b]
 
 # Number methods
 (42 .to_s)                   # => "42"
 (3.14 .round)                # => 3
 
 # Gene manipulation methods
-((user ^name "Alice") .get :name)   # => "Alice"
+((user ^name "Alice") .get `name)   # => "Alice"
 ((user ^name "Alice") .type)        # => user
 ```
 
@@ -209,7 +209,7 @@ Objects provide:
 (data
   .filter is-active;
   .map transform-user;
-  .sort-by :name;
+  .sort-by `name;
   .take 10)
 
 # ; is a shorthand for wrapping up the previous expression
@@ -327,7 +327,7 @@ Gene has a working macro system that enables meta-programming and code transform
 # Access caller's variables
 (var a 10)
 (fn get_a! []
-  ($caller_eval :a))
+  ($caller_eval `a))
 
 (get_a!)  # => 10
 ```
@@ -336,9 +336,14 @@ Gene has a working macro system that enables meta-programming and code transform
 
 Templates work with quote/unquote for code generation:
 
+Note:
+- Quote prefix is backtick (`` ` ``) and applies to the next form, e.g. ``(foo ...)``.
+- Leading-colon tokens are ordinary symbols (e.g. `:foo`).
+- Migration: ``:(...)`` → ``(...)``.
+
 ```gene
 # Quote (template)
-(var tpl :(+ 1 %x))
+(var tpl `(+ 1 %x))
 
 # Unquote and render
 (var x 2)
@@ -355,7 +360,7 @@ Templates work with quote/unquote for code generation:
 (fn when! [condition body...]
   ($caller_eval
     ($render
-      :(if %condition %body ...))))
+      `(if %condition %body ...))))
 
 # Usage
 (when! (> x 5)
@@ -401,9 +406,9 @@ Templates work with quote/unquote for code generation:
 ```gene
 # Generate repetitive code
 (fn repeat_n! [n expr]
-  (var result :(do))
+  (var result `(do))
   (for i in (range n)
-    (result = :(do %@result %expr)))
+    (result = `(do %@result %expr)))
   ($caller_eval result))
 
 # Usage
@@ -416,7 +421,7 @@ Templates work with quote/unquote for code generation:
 # Simple assertion macro
 (fn assert! [condition message]
   ($caller_eval
-    :(if (not %condition)
+    `(if (not %condition)
       (throw (str "Assertion failed: " %message)))))
 
 (assert! (> x 0) "x must be positive")
@@ -537,7 +542,7 @@ This example shows the vision - most features are not yet implemented:
 **1. Gene for structure:**
 ```gene
 (defroute GET "/users" [req]
-  (render :users users))
+  (render `users users))
 ```
 
 **2. Objects for organization:**
@@ -575,7 +580,7 @@ This example shows the vision - most features are not yet implemented:
 
 # Template with quote/unquote (works today)
 (var name "Alice")
-(var greeting :(println "Hello" %name))
+(var greeting `(println "Hello" %name))
 (var rendered ($render greeting))  # => (println "Hello " "Alice")
 
 ### Example: Data Processing (Full Vision - PLANNED)
@@ -589,20 +594,20 @@ This example shows the vision - most features are not yet implemented:
 # Transform with method chaining
 (var active-users
   (users
-    .filter (fn [u] (u .get :active));
+    .filter (fn [u] (u .get `active));
     .map (fn [u]
-      (u .update :name ((u .get :name) .to_upper)));
-    .sort-by (fn [u] (u .get :created_at))))
+      (u .update `name ((u .get `name) .to_upper)));
+    .sort-by (fn [u] (u .get `created_at))))
 
 # Generate HTML report with template
 (var report
-  :(html
+  `(html
     (head (title "User Report"))
     (body
       (h1 "Active Users")
       (ul
         %(active-users .map (block [user]
-          ($render :(li %(user .get :name)))))))))
+          ($render `(li %(user .get `name)))))))))
 
 # Render and save
 (File/write "report.html" ($render report))

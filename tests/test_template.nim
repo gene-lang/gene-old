@@ -5,9 +5,9 @@ import gene/types except Exception
 import ./helpers
 
 # How built-in templates work:
-# Any quoted value is a template: e.g. :(%a b)
+# Any quoted value is a template: e.g. `(%a b)
 # Interpret: (%a b)
-# Render: ($render :(%a b)) => (<value of a> b)
+# Render: ($render `(%a b)) => (<value of a> b)
 
 # TODO: Enable when expression evaluation in templates is implemented
 # test_vm """
@@ -19,7 +19,7 @@ import ./helpers
 # """, 3
 
 test_vm """
-  (var tpl :(%f %b))
+  (var tpl `(%f %b))
   (fn f [a] (a + 1))
   (var b 2)
   (var x ($render tpl)) # => (<function f> 2)
@@ -27,7 +27,7 @@ test_vm """
 """, 3
 
 test_vm """
-  (var tpl :(test %a 2))
+  (var tpl `(test %a 2))
   (var a 1)
   ($render tpl)
 """, proc(r: Value) =
@@ -54,14 +54,14 @@ test_vm """
 
 test_vm """
   (var i 1)
-  ($render :[
+  ($render `[
     %(var i 2)
   ])
   i
 """, 1
 
 test_vm """
-  ($render :[
+  ($render `[
     1
     %_(var i 2)
     2
@@ -104,7 +104,7 @@ test_vm """
 #   check r.ref.arr[0].ref.arr[1].ref.unquote == new_gene_symbol("i")
 
 test_vm """
-  (var tpl :[%a])
+  (var tpl `[%a])
   (var a 1)
   ($render tpl)
   (a = 2)
@@ -112,7 +112,7 @@ test_vm """
 """, @[2]
 
 test_vm """
-  (var tpl :{^a %a})
+  (var tpl `{^a %a})
   (var a 1)
   ($render tpl)
   (a = 2)
@@ -121,7 +121,7 @@ test_vm """
   check map_data(r)["a".to_key()] == 2
 
 test_vm """
-  (var tpl :(_ %a))
+  (var tpl `(_ %a))
   (var a 1)
   ($render tpl)
   (a = 2)

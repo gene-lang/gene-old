@@ -692,11 +692,11 @@
 (fn create_router []
   ($tap (new Router)
     (.map "/" HomeController)
-    # (.map ^^POST   "/todos" TodosController :create)
-    # (.map ^^PATCH  "/todos" TodosController :update)
-    # (.map ^^DELETE "/todos" TodosController :delete)
+    # (.map ^^POST   "/todos" TodosController `create)
+    # (.map ^^PATCH  "/todos" TodosController `update)
+    # (.map ^^DELETE "/todos" TodosController `delete)
     (.map          "/todos" TodosController)
-    (.map          "/todos/index.js" TodosController :index_js)
+    (.map          "/todos/index.js" TodosController `index_js)
   )
 )
 

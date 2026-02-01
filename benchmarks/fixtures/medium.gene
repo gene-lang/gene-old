@@ -226,9 +226,9 @@ catch *
 (println "Quadruple 3:" (quadruple 3))
 
 # ===== 11. SYMBOLS & KEYWORDS =====
-(var status :success)   # :success = (quote success)
-(var error :error)
-(println "Status == :success:" (status == :success))
+(var status `success)   # `success = (quote success)
+(var error `error)
+(println "Status == `success:" (status == `success))
 
 # ===== 12. MACROS & METAPROGRAMMING =====
 # Macro-like function with unevaluated arguments
@@ -555,9 +555,9 @@ catch *
 (println "Quadruple 3:" (quadruple 3))
 
 # ===== 11. SYMBOLS & KEYWORDS =====
-(var status :success)   # :success = (quote success)
-(var error :error)
-(println "Status == :success:" (status == :success))
+(var status `success)   # `success = (quote success)
+(var error `error)
+(println "Status == `success:" (status == `success))
 
 # ===== 12. MACROS & METAPROGRAMMING =====
 # Macro-like function with unevaluated arguments
@@ -884,9 +884,9 @@ catch *
 (println "Quadruple 3:" (quadruple 3))
 
 # ===== 11. SYMBOLS & KEYWORDS =====
-(var status :success)   # :success = (quote success)
-(var error :error)
-(println "Status == :success:" (status == :success))
+(var status `success)   # `success = (quote success)
+(var error `error)
+(println "Status == `success:" (status == `success))
 
 # ===== 12. MACROS & METAPROGRAMMING =====
 # Macro-like function with unevaluated arguments
@@ -1213,9 +1213,9 @@ catch *
 (println "Quadruple 3:" (quadruple 3))
 
 # ===== 11. SYMBOLS & KEYWORDS =====
-(var status :success)   # :success = (quote success)
-(var error :error)
-(println "Status == :success:" (status == :success))
+(var status `success)   # `success = (quote success)
+(var error `error)
+(println "Status == `success:" (status == `success))
 
 # ===== 12. MACROS & METAPROGRAMMING =====
 # Macro-like function with unevaluated arguments
@@ -1542,9 +1542,9 @@ catch *
 (println "Quadruple 3:" (quadruple 3))
 
 # ===== 11. SYMBOLS & KEYWORDS =====
-(var status :success)   # :success = (quote success)
-(var error :error)
-(println "Status == :success:" (status == :success))
+(var status `success)   # `success = (quote success)
+(var error `error)
+(println "Status == `success:" (status == `success))
 
 # ===== 12. MACROS & METAPROGRAMMING =====
 # Macro-like function with unevaluated arguments
@@ -1871,9 +1871,9 @@ catch *
 (println "Quadruple 3:" (quadruple 3))
 
 # ===== 11. SYMBOLS & KEYWORDS =====
-(var status :success)   # :success = (quote success)
-(var error :error)
-(println "Status == :success:" (status == :success))
+(var status `success)   # `success = (quote success)
+(var error `error)
+(println "Status == `success:" (status == `success))
 
 # ===== 12. MACROS & METAPROGRAMMING =====
 # Macro-like function with unevaluated arguments
@@ -2200,9 +2200,9 @@ catch *
 (println "Quadruple 3:" (quadruple 3))
 
 # ===== 11. SYMBOLS & KEYWORDS =====
-(var status :success)   # :success = (quote success)
-(var error :error)
-(println "Status == :success:" (status == :success))
+(var status `success)   # `success = (quote success)
+(var error `error)
+(println "Status == `success:" (status == `success))
 
 # ===== 12. MACROS & METAPROGRAMMING =====
 # Macro-like function with unevaluated arguments
@@ -2529,9 +2529,9 @@ catch *
 (println "Quadruple 3:" (quadruple 3))
 
 # ===== 11. SYMBOLS & KEYWORDS =====
-(var status :success)   # :success = (quote success)
-(var error :error)
-(println "Status == :success:" (status == :success))
+(var status `success)   # `success = (quote success)
+(var error `error)
+(println "Status == `success:" (status == `success))
 
 # ===== 12. MACROS & METAPROGRAMMING =====
 # Macro-like function with unevaluated arguments
@@ -2858,9 +2858,9 @@ catch *
 (println "Quadruple 3:" (quadruple 3))
 
 # ===== 11. SYMBOLS & KEYWORDS =====
-(var status :success)   # :success = (quote success)
-(var error :error)
-(println "Status == :success:" (status == :success))
+(var status `success)   # `success = (quote success)
+(var error `error)
+(println "Status == `success:" (status == `success))
 
 # ===== 12. MACROS & METAPROGRAMMING =====
 # Macro-like function with unevaluated arguments
@@ -3187,9 +3187,9 @@ catch *
 (println "Quadruple 3:" (quadruple 3))
 
 # ===== 11. SYMBOLS & KEYWORDS =====
-(var status :success)   # :success = (quote success)
-(var error :error)
-(println "Status == :success:" (status == :success))
+(var status `success)   # `success = (quote success)
+(var error `error)
+(println "Status == `success:" (status == `success))
 
 # ===== 12. MACROS & METAPROGRAMMING =====
 # Macro-like function with unevaluated arguments

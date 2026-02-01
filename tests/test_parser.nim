@@ -229,6 +229,10 @@ test_parser "{^^x ^!y ^^z}", proc(r: Value) =
   check map_data(r) == to_table({"x".to_key(): TRUE, "y".to_key(): NIL, "z".to_key(): TRUE})
 
 test_parser ":foo", proc(r: Value) =
+  check r.kind == VkSymbol
+  check r == to_symbol_value(":foo")
+
+test_parser "`foo", proc(r: Value) =
   check r.ref.kind == VkQuote
   check r.ref.quote == to_symbol_value("foo")
 
@@ -243,7 +247,7 @@ test_parser "%_foo", proc(r: Value) =
   check r.ref.unquote_discard == true
 
 # Additional tests for Gene expressions
-test_parser ":(1 + 2)", proc(r: Value) =
+test_parser "`(1 + 2)", proc(r: Value) =
   check r.ref.kind == VkQuote
   check r.ref.quote.kind == VkGene
   check r.ref.quote.gene.type == 1
@@ -256,7 +260,7 @@ test_parser "(_ 1 2)", proc(r: Value) =
   check r.gene.children[0] == 1
   check r.gene.children[1] == 2
 
-test_parser "(:a 1 2)", proc(r: Value) =
+test_parser "(`a 1 2)", proc(r: Value) =
   check r.kind == VkGene
   check r.gene.type.ref.kind == VkQuote
   check r.gene.type.ref.quote == to_symbol_value("a")

@@ -1210,7 +1210,7 @@ proc read_dispatch(self: var Parser): Value =
 proc init_macro_array() =
   macros['\''] = read_character  # ' for character literals like 'a' or '\n'
   macros['"'] = read_string2     # " for strings
-  macros[':'] = read_quoted
+  macros['`'] = read_quoted
   # macros['\\'] removed - no longer support \a syntax
   macros['%'] = read_unquoted
   macros['#'] = read_dispatch

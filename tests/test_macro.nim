@@ -21,7 +21,7 @@ test_vm """
 # Test that macro-like function arguments are not evaluated
 test_vm """
   (fn m! [a]
-    :macro_result
+    `macro_result
   )
   (m! (this_would_fail_if_evaluated))
 """, "macro_result".to_symbol_value()
@@ -44,14 +44,14 @@ test_vm """
 test_vm """
   (var a 1)
   (fn m! []
-    ($caller_eval :a)
+    ($caller_eval `a)
   )
   (m!)
 """, 1
 
 test_vm """
   (fn m! []
-    ($caller_eval :a)
+    ($caller_eval `a)
   )
   (fn f []
     (var a 1)

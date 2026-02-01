@@ -30,7 +30,7 @@
 (var k 0)
 (while (< k iterations)
   # Create gene, use it, let it be freed
-  (var g (:test k (* k 2)))  # Simple gene syntax
+  (var g (`test k (* k 2)))  # Simple gene syntax
   (count3 = (+ count3 k))
   (k = (+ k 1)))
 (println "Gene operations completed: " count3)

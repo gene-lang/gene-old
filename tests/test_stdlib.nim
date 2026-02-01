@@ -12,7 +12,7 @@ test_vm """
 """, ""
 
 test_vm """
-  (:a .to_s)
+  (`a .to_s)
 """, "a"
 
 test_vm """
@@ -28,7 +28,7 @@ test_vm """
 """, "{^a \"a\"}"
 
 test_vm """
-  ((:x ^a "a" "b") .to_s)
+  ((`x ^a "a" "b") .to_s)
 """, "(x ^a \"a\" \"b\")"
 
 test_vm """

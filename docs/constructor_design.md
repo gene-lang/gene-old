@@ -194,8 +194,8 @@ Potentially support multiple constructors with different signatures:
 Attributes to modify constructor behavior:
 ```gene
 (class Example
-  (ctor [args...] {:private true})  # Private constructor
-  (ctor! [args...] {:inline true})  # Inline macro constructor
+  (ctor [args...] {^private true})  # Private constructor
+  (ctor! [args...] {^inline true})  # Inline macro constructor
 )
 ```
 

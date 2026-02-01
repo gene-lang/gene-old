@@ -1,7 +1,7 @@
 # Working gene (S-expression) tests
 
 # Basic quoted gene
-(var g1 :(+ 1 2))
+(var g1 `(+ 1 2))
 (print "Quoted gene: " g1)
 
 # Gene with underscore
@@ -10,7 +10,7 @@
 (print "First element: " g2/0)
 
 # Gene with symbol type
-(var g3 (:add 10 20))
+(var g3 (`add 10 20))
 (print "Gene with symbol type: " g3)
 
 # Parse string to gene

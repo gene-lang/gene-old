@@ -5138,7 +5138,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         # Get the caller's context from the frame that has it
         let caller_frame = current_frame.caller_context
         
-        # The expression might be a quoted symbol like :a
+        # The expression might be a quoted symbol like `a
         # We need to evaluate it, not compile the quote itself
         var expr_to_eval = expr
         if expr.kind == VkQuote:

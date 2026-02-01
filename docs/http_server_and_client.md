@@ -16,7 +16,7 @@ Gene provides built-in HTTP client and server capabilities through the `genex/ht
 (println "Body:" response/body)
 
 # POST request with data
-(var data {:name "Gene" :version "1.0"})
+(var data {^name "Gene" ^version "1.0"})
 (var response (await (http_post "http://example.com/api" data)))
 ```
 
@@ -77,7 +77,7 @@ All HTTP requests return Futures that can be awaited:
 (respond 200 "Success")
 
 # With headers (planned)
-(respond 200 "OK" {:content-type "application/json"})
+(respond 200 "OK" {^content-type "application/json"})
 ```
 
 #### 3. Request Object
