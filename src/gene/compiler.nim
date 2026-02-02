@@ -124,6 +124,7 @@ proc compile_selector(self: Compiler, gene: ptr Gene)  # Forward declaration
 proc compile_at_selector(self: Compiler, gene: ptr Gene)  # Forward declaration
 proc compile_set(self: Compiler, gene: ptr Gene)  # Forward declaration
 proc compile_import(self: Compiler, gene: ptr Gene)  # Forward declaration
+proc compile_init*(input: Value): CompilationUnit  # Forward declaration
 
 proc compile(self: Compiler, input: seq[Value]) =
   for i, v in input:
@@ -1536,8 +1537,10 @@ proc compile_ns(self: Compiler, gene: ptr Gene) =
   # Handle namespace body if present
   if gene.children.len > 1:
     let body = new_stream_value(gene.children[1..^1])
-    self.emit(Instruction(kind: IkPushValue, arg0: body))
-    self.emit(Instruction(kind: IkCompileInit))
+    let compiled = compile_init(body)
+    let r = new_ref(VkCompiledUnit)
+    r.cu = compiled
+    self.emit(Instruction(kind: IkPushValue, arg0: r.to_ref_value()))
     self.emit(Instruction(kind: IkCallInit))
 
 proc compile_method_definition(self: Compiler, gene: ptr Gene) =
@@ -1661,8 +1664,10 @@ proc compile_class_with_container(self: Compiler, class_name: Value, parent_clas
   # Compile class body if present
   if gene.children.len > body_start:
     let body = new_stream_value(gene.children[body_start..^1])
-    self.emit(Instruction(kind: IkPushValue, arg0: body))
-    self.emit(Instruction(kind: IkCompileInit))
+    let compiled = compile_init(body)
+    let r = new_ref(VkCompiledUnit)
+    r.cu = compiled
+    self.emit(Instruction(kind: IkPushValue, arg0: r.to_ref_value()))
     self.emit(Instruction(kind: IkCallInit))
 
 proc compile_class(self: Compiler, gene: ptr Gene) =

@@ -148,6 +148,8 @@ proc write_value(stream: Stream, v: Value) =
     stream.write_string(v.ref.regex_replacement)
   of VkFunctionDef:
     writeFunctionDef(stream, v.ref.function_def)
+  of VkCompiledUnit:
+    writeCompilationUnitBlock(stream, v.ref.cu)
   else:
     not_allowed("GIR serialization not implemented for kind " & $v.kind)
 
@@ -182,6 +184,11 @@ proc read_value(stream: Stream): Value =
   of VkFunctionDef:
     let info = readFunctionDef(stream)
     result = info.to_value()
+  of VkCompiledUnit:
+    let compiled = readCompilationUnitBlock(stream)
+    let ref_value = new_ref(VkCompiledUnit)
+    ref_value.cu = compiled
+    result = ref_value.to_ref_value()
   else:
     not_allowed("GIR read not implemented for kind " & $kind)
 

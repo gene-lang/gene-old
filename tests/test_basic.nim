@@ -213,6 +213,18 @@ test_vm """
   n/m/a
 """, 1
 
+test_vm """
+  (ns n
+    (class C
+      (method m _
+        1
+      )
+    )
+  )
+  (var c (new n/C))
+  c/.m
+""", 1
+
 # Array element assignment and update
 test_vm """
   (var a [0])
