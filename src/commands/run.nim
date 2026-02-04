@@ -33,7 +33,7 @@ proc init*(manager: CommandManager) =
   manager.register(COMMANDS, handle)
   manager.add_help("run <file>: parse and execute <file>")
   manager.add_help("  --repl-on-error: drop into REPL on Gene exceptions")
-  manager.add_help("  --no-typecheck: disable static type checking")
+  manager.add_help("  --no-type-check: disable static type checking (alias: --no-typecheck)")
 
 let short_no_val = {'d'}
 let long_no_val = @[
@@ -46,6 +46,7 @@ let long_no_val = @[
   "no-gir-cache",
   "force-compile",
   "no-typecheck",
+  "no-type-check",
 ]
 proc parse_options(args: seq[string]): Options =
   result = Options(type_check: true)
@@ -88,7 +89,7 @@ proc parse_options(args: seq[string]): Options =
           result.no_gir_cache = true
         of "force-compile":
           result.force_compile = true
-        of "no-typecheck":
+        of "no-typecheck", "no-type-check":
           result.type_check = false
         else:
           echo "Unknown option: ", key

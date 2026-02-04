@@ -31,6 +31,7 @@ let long_no_val = @[
   "emit-debug",
   "eager",
   "no-typecheck",
+  "no-type-check",
 ]
 
 let help_text = """
@@ -47,7 +48,7 @@ Options:
   --force                 Rebuild even if cache is up-to-date
   --emit-debug            Include debug info in GIR files
   --eager                 Eagerly compile function bodies (default for GIR output)
-  --no-typecheck          Disable static type checking
+  --no-type-check         Disable static type checking (alias: --no-typecheck)
 
 Examples:
   gene compile file.gene                  # Compile to build/file.gir
@@ -95,7 +96,7 @@ proc parseArgs(args: seq[string]): CompileOptions =
         result.emit_debug = true
       of "eager":
         result.eager_functions = true
-      of "no-typecheck":
+      of "no-typecheck", "no-type-check":
         result.type_check = false
       else:
         stderr.writeLine("Error: Unknown option: " & key)

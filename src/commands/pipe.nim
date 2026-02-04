@@ -30,7 +30,7 @@ proc init*(manager: CommandManager) =
   manager.add_help("  --compile: show compilation details")
   manager.add_help("  --quote-str: output strings with quotes")
   manager.add_help("  --filter: treat code as predicate, output $line when true")
-  manager.add_help("  --no-typecheck: disable static type checking")
+  manager.add_help("  --no-type-check: disable static type checking (alias: --no-typecheck)")
 
 let short_no_val = {'d', 'h'}
 let long_no_val = @[
@@ -41,6 +41,7 @@ let long_no_val = @[
   "quote-str",
   "filter",
   "no-typecheck",
+  "no-type-check",
 ]
 
 proc parse_options(args: seq[string]): PipeOptions =
@@ -70,7 +71,7 @@ proc parse_options(args: seq[string]): PipeOptions =
         result.quote_str = true
       of "filter":
         result.filter = true
-      of "no-typecheck":
+      of "no-typecheck", "no-type-check":
         result.type_check = false
       else:
         echo "Unknown option: ", key
@@ -110,6 +111,7 @@ Options:
   --compile               Show compilation details
   --quote-str             Output strings with quotes (for Gene-parseable output)
   --filter                Treat code as predicate; output $line when true
+  --no-type-check         Disable static type checking (alias: --no-typecheck)
 
 Examples:
   # Output lines as-is

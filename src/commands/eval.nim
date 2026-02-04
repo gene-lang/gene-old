@@ -29,7 +29,7 @@ proc init*(manager: CommandManager) =
   manager.add_help("eval <code>: evaluate <code> as a gene expression")
   manager.add_help("  -d, --debug: enable debug output")
   manager.add_help("  --repl-on-error: drop into REPL on Gene exceptions")
-  manager.add_help("  --no-typecheck: disable static type checking")
+  manager.add_help("  --no-type-check: disable static type checking (alias: --no-typecheck)")
   manager.add_help("  --csv: print result as CSV")
   manager.add_help("  --gene: print result as gene expression")
   manager.add_help("  --line: evaluate as a single line")
@@ -44,6 +44,7 @@ let long_no_val = @[
   "trace-instruction",
   "compile",
   "no-typecheck",
+  "no-type-check",
 ]
 
 proc parse_options(args: seq[string]): Options =
@@ -76,7 +77,7 @@ proc parse_options(args: seq[string]): Options =
         result.trace_instruction = true
       of "compile":
         result.compile = true
-      of "no-typecheck":
+      of "no-typecheck", "no-type-check":
         result.type_check = false
       else:
         echo "Unknown option: ", key
