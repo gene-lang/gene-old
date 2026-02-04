@@ -704,6 +704,10 @@ type
     # Module helpers
     IkExport         # Export names from module scope into namespace
 
+    # VM builtins
+    IkVmDurationStart
+    IkVmDuration
+
   # Keep the size of Instruction to 2*8 = 16 bytes
   Instruction* = object
     kind*: InstructionKind

@@ -131,24 +131,46 @@ proc compile_export(self: Compiler, gene: ptr Gene)  # Forward declaration
 proc compile_init*(input: Value, local_defs = false): CompilationUnit  # Forward declaration
 proc predeclare_local_defs(self: Compiler, nodes: seq[Value])  # Forward declaration
 
-proc compile(self: Compiler, input: seq[Value]) =
+proc is_vmstmt_form(input: Value): bool =
+  input.kind == VkGene and
+    input.gene.`type`.kind == VkSymbol and
+    input.gene.`type`.str == "$vmstmt"
+
+proc compile_vmstmt(self: Compiler, gene: ptr Gene) =
+  if gene.props.len > 0:
+    not_allowed("$vmstmt does not accept properties")
+  if gene.children.len != 1:
+    not_allowed("$vmstmt expects exactly 1 argument")
+  let name_val = gene.children[0]
+  if name_val.kind != VkSymbol:
+    not_allowed("$vmstmt builtin name must be a symbol")
+  if name_val.str != "duration_start":
+    not_allowed("Unknown $vmstmt builtin: " & name_val.str)
+  self.emit(Instruction(kind: IkVmDurationStart))
+
+proc compile(self: Compiler, input: seq[Value], allow_vmstmt_last = false) =
   for i, v in input:
     # Set tail position for the last expression
     let old_tail = self.tail_position
-    if i == input.len - 1:
+    let is_last = i == input.len - 1
+    if is_last:
       # Last expression inherits current tail position
       discard
     else:
       # Non-last expressions are never in tail position
       self.tail_position = false
-    
-    self.compile(v)
-    
+
+    if is_vmstmt_form(v):
+      if is_last and not allow_vmstmt_last:
+        not_allowed("$vmstmt is statement-only")
+      self.compile_vmstmt(v.gene)
+    else:
+      self.compile(v)
+      if not is_last:
+        self.emit(Instruction(kind: IkPop))
+
     # Restore tail position
     self.tail_position = old_tail
-    
-    if i < input.len - 1:
-      self.emit(Instruction(kind: IkPop))
 
 proc compile_literal(self: Compiler, input: Value) =
   self.emit(Instruction(kind: IkPushValue, arg0: input))
@@ -409,7 +431,7 @@ proc compile_array(self: Compiler, input: Value) =
   # Collect all elements from call base into array
   self.emit(Instruction(kind: IkArrayEnd))
 
-proc compile_stream(self: Compiler, input: Value) =
+proc compile_stream(self: Compiler, input: Value, allow_vmstmt_last = false) =
   # For simple streams (used by if/elif/else branches), just compile the children directly
   # Don't emit StreamStart/StreamEnd as they're not needed for control flow
   let stream_values = input.ref.stream
@@ -422,16 +444,22 @@ proc compile_stream(self: Compiler, input: Value) =
   while i < stream_values.len:
     let child = stream_values[i]
     let old_tail = self.tail_position
-    if i == stream_values.len - 1:
+    let is_last = i == stream_values.len - 1
+    if is_last:
       # Last expression preserves tail position
       discard
     else:
       self.tail_position = false
 
-    self.compile(child)
+    if is_vmstmt_form(child):
+      if is_last and not allow_vmstmt_last:
+        not_allowed("$vmstmt is statement-only")
+      self.compile_vmstmt(child.gene)
+    else:
+      self.compile(child)
 
     self.tail_position = old_tail
-    if i < stream_values.len - 1:
+    if i < stream_values.len - 1 and not is_vmstmt_form(child):
       self.emit(Instruction(kind: IkPop))
 
     i += 1
@@ -1067,7 +1095,7 @@ proc compile_loop(self: Compiler, gene: ptr Gene) =
   self.loop_stack.add(LoopInfo(start_label: start_label, end_label: end_label, scope_depth: self.started_scope_depth))
   
   self.emit(Instruction(kind: IkLoopStart, label: start_label))
-  self.compile(gene.children)
+  self.compile(gene.children, true)
   self.emit(Instruction(kind: IkContinue, arg0: start_label.to_value()))
   self.emit(Instruction(kind: IkLoopEnd, label: end_label))
   
@@ -1094,9 +1122,11 @@ proc compile_while(self: Compiler, gene: ptr Gene) =
   # Compile body (remaining children)
   if gene.children.len > 1:
     # Use the seq compile method which handles popping correctly
-    self.compile(gene.children[1..^1])
+    let body = gene.children[1..^1]
+    self.compile(body, true)
     # Pop the final value from the loop body since we don't need it
-    self.emit(Instruction(kind: IkPop))
+    if body.len > 0 and not is_vmstmt_form(body[^1]):
+      self.emit(Instruction(kind: IkPop))
   
   # Jump back to condition
   self.emit(Instruction(kind: IkContinue, arg0: label.to_value()))
@@ -1136,8 +1166,12 @@ proc compile_repeat(self: Compiler, gene: ptr Gene) =
   if gene.children.len > 1:
     self.start_scope()
     for i in 1..<gene.children.len:
-      self.compile(gene.children[i])
-      self.emit(Instruction(kind: IkPop))
+      let child = gene.children[i]
+      if is_vmstmt_form(child):
+        self.compile_vmstmt(child.gene)
+      else:
+        self.compile(child)
+        self.emit(Instruction(kind: IkPop))
     self.end_scope()
 
   self.emit(Instruction(kind: IkRepeatDecCheck, arg0: start_label.to_value()))
@@ -1254,9 +1288,13 @@ proc compile_for(self: Compiler, gene: ptr Gene) =
   # Compile body (remaining children after 'in' and collection)
   if gene.children.len > 3:
     for i in 3..<gene.children.len:
-      self.compile(gene.children[i])
-      # Pop the result (we don't need it)
-      self.emit(Instruction(kind: IkPop))
+      let child = gene.children[i]
+      if is_vmstmt_form(child):
+        self.compile_vmstmt(child.gene)
+      else:
+        self.compile(child)
+        # Pop the result (we don't need it)
+        self.emit(Instruction(kind: IkPop))
   
   # End the iteration scope
   self.end_scope()
@@ -2636,6 +2674,18 @@ proc compile_method_call(self: Compiler, gene: ptr Gene) {.inline.} =
   self.emit(Instruction(kind: IkUnifiedMethodCallKw, arg0: method_value, arg1: packed))
   return
 
+proc compile_vm(self: Compiler, gene: ptr Gene) =
+  if gene.props.len > 0:
+    not_allowed("$vm does not accept properties")
+  if gene.children.len != 1:
+    not_allowed("$vm expects exactly 1 argument")
+  let name_val = gene.children[0]
+  if name_val.kind != VkSymbol:
+    not_allowed("$vm builtin name must be a symbol")
+  if name_val.str != "duration":
+    not_allowed("Unknown $vm builtin: " & name_val.str)
+  self.emit(Instruction(kind: IkVmDuration))
+
 proc compile_gene(self: Compiler, input: Value) =
   let gene = input.gene
   
@@ -2734,7 +2784,7 @@ proc compile_gene(self: Compiler, input: Value) =
     if first_child.kind == VkSymbol:
       if first_child.str in ["+", "-", "*", "/", "%", "**", "./", "<", "<=", ">", ">=", "==", "!="]:
         # Don't convert if the type is already an operator or special form
-        if `type`.kind != VkSymbol or `type`.str notin ["var", "if", "fn", "do", "loop", "while", "for", "ns", "class", "try", "throw", "import", "export", "$", ".", "->", "@"]:
+        if `type`.kind != VkSymbol or `type`.str notin ["var", "if", "fn", "do", "loop", "while", "for", "ns", "class", "try", "throw", "import", "export", "$", "$vm", "$vmstmt", ".", "->", "@"]:
           # Convert infix to prefix notation and compile
           # (6 / 2) becomes (/ 6 2)
           # (i + 1) becomes (+ i 1)
@@ -2755,7 +2805,7 @@ proc compile_gene(self: Compiler, input: Value) =
         return
     elif first_child.kind == VkComplexSymbol and first_child.ref.csymbol.len >= 2 and first_child.ref.csymbol[0] == "." and first_child.ref.csymbol[1] == "":
       # Don't convert if the type is already an operator or special form
-      if `type`.kind != VkSymbol or `type`.str notin ["var", "if", "fn", "do", "loop", "while", "for", "ns", "class", "try", "throw", "import", "export", "$", ".", "->"]:
+      if `type`.kind != VkSymbol or `type`.str notin ["var", "if", "fn", "do", "loop", "while", "for", "ns", "class", "try", "throw", "import", "export", "$", "$vm", "$vmstmt", ".", "->"]:
         # Convert infix to prefix notation and compile
         # (6 / 2) becomes (/ 6 2)
         # (i + 1) becomes (+ i 1)
@@ -3073,8 +3123,11 @@ proc compile_gene(self: Compiler, input: Value) =
       of "void":
         # Compile all arguments but return nil
         for child in gene.children:
-          self.compile(child)
-          self.emit(Instruction(kind: IkPop))
+          if is_vmstmt_form(child):
+            self.compile_vmstmt(child.gene)
+          else:
+            self.compile(child)
+            self.emit(Instruction(kind: IkPop))
         self.emit(Instruction(kind: IkPushNil))
         return
       of "method":
@@ -3142,6 +3195,11 @@ proc compile_gene(self: Compiler, input: Value) =
             of "$set":
               self.compile_set(gene)
               return
+            of "$vm":
+              self.compile_vm(gene)
+              return
+            of "$vmstmt":
+              not_allowed("$vmstmt is statement-only")
             of "$render":
               self.compile_render(gene)
               return
@@ -4043,7 +4101,10 @@ proc compile_init*(input: Value, local_defs = false): CompilationUnit =
       else:
         nodes = @[input]
       self.predeclare_local_defs(nodes)
-    self.compile(input)
+    if input.kind == VkStream:
+      self.compile_stream(input, true)
+    else:
+      self.compile(input)
   except CatchableError as e:
     var trace = self.last_error_trace
     if trace.is_nil and input.kind == VkGene:
@@ -4658,6 +4719,7 @@ proc parse_and_compile*(input: string, filename = "<input>", eager_functions = f
   self.start_scope()
   
   var is_first = true
+  var prev_pushed = false
   # Gradual typing: non-strict mode allows unknown types (treated as Any)
   let checker = if type_check: new_type_checker(strict = false) else: nil
 
@@ -4684,7 +4746,7 @@ proc parse_and_compile*(input: string, filename = "<input>", eager_functions = f
       self.started_scope_depth.inc()
     let normalized = normalize_module_nodes(expanded, run_init)
     for node in normalized:
-      if not is_first:
+      if not is_first and prev_pushed:
         self.emit(Instruction(kind: IkPop))
 
       self.last_error_trace = nil
@@ -4699,7 +4761,12 @@ proc parse_and_compile*(input: string, filename = "<input>", eager_functions = f
           let message = if location.len > 0: location & ": " & e.msg else: e.msg
           raise new_exception(types.Exception, message)
       try:
-        self.compile(node)
+        if is_vmstmt_form(node):
+          self.compile_vmstmt(node.gene)
+          prev_pushed = false
+        else:
+          self.compile(node)
+          prev_pushed = true
         is_first = false
       except CatchableError as e:
         var trace = self.last_error_trace
@@ -4715,7 +4782,7 @@ proc parse_and_compile*(input: string, filename = "<input>", eager_functions = f
         let node = parser.read()
         if node != PARSER_IGNORE:
           # Pop previous result before compiling next item (except for first)
-          if not is_first:
+          if not is_first and prev_pushed:
             self.emit(Instruction(kind: IkPop))
 
           self.last_error_trace = nil
@@ -4731,7 +4798,12 @@ proc parse_and_compile*(input: string, filename = "<input>", eager_functions = f
               raise new_exception(types.Exception, message)
           try:
             # Compile current item
-            self.compile(node)
+            if is_vmstmt_form(node):
+              self.compile_vmstmt(node.gene)
+              prev_pushed = false
+            else:
+              self.compile(node)
+              prev_pushed = true
             is_first = false
           except CatchableError as e:
             var trace = self.last_error_trace
@@ -4783,6 +4855,7 @@ proc parse_and_compile_repl*(input: string, filename = "<repl>", scope_tracker: 
   self.emit(Instruction(kind: IkStart))
 
   var is_first = true
+  var prev_pushed = false
   # Gradual typing: non-strict mode allows unknown types (treated as Any)
   let checker = if type_check: new_type_checker(strict = false) else: nil
 
@@ -4790,7 +4863,7 @@ proc parse_and_compile_repl*(input: string, filename = "<repl>", scope_tracker: 
     while true:
       let node = parser.read()
       if node != PARSER_IGNORE:
-        if not is_first:
+        if not is_first and prev_pushed:
           self.emit(Instruction(kind: IkPop))
 
         self.last_error_trace = nil
@@ -4805,7 +4878,12 @@ proc parse_and_compile_repl*(input: string, filename = "<repl>", scope_tracker: 
             let message = if location.len > 0: location & ": " & e.msg else: e.msg
             raise new_exception(types.Exception, message)
         try:
-          self.compile(node)
+          if is_vmstmt_form(node):
+            self.compile_vmstmt(node.gene)
+            prev_pushed = false
+          else:
+            self.compile(node)
+            prev_pushed = true
           is_first = false
         except CatchableError as e:
           var trace = self.last_error_trace
@@ -4847,6 +4925,7 @@ proc parse_and_compile*(stream: Stream, filename = "<input>", eager_functions = 
   self.start_scope()
 
   var is_first = true
+  var prev_pushed = false
   # Gradual typing: non-strict mode allows unknown types (treated as Any)
   let checker = if type_check: new_type_checker(strict = false) else: nil
 
@@ -4873,7 +4952,7 @@ proc parse_and_compile*(stream: Stream, filename = "<input>", eager_functions = 
       self.started_scope_depth.inc()
     let normalized = normalize_module_nodes(expanded, run_init)
     for node in normalized:
-      if not is_first:
+      if not is_first and prev_pushed:
         self.output.instructions.add(Instruction(kind: IkPop))
 
       self.last_error_trace = nil
@@ -4889,7 +4968,12 @@ proc parse_and_compile*(stream: Stream, filename = "<input>", eager_functions = 
           raise new_exception(types.Exception, message)
       try:
         # Compile current item
-        self.compile(node)
+        if is_vmstmt_form(node):
+          self.compile_vmstmt(node.gene)
+          prev_pushed = false
+        else:
+          self.compile(node)
+          prev_pushed = true
         is_first = false
       except CatchableError as e:
         var trace = self.last_error_trace
@@ -4905,7 +4989,7 @@ proc parse_and_compile*(stream: Stream, filename = "<input>", eager_functions = 
         let node = parser.read()
         if node != PARSER_IGNORE:
           # Pop previous result before compiling next item (except for first)
-          if not is_first:
+          if not is_first and prev_pushed:
             self.output.instructions.add(Instruction(kind: IkPop))
 
           self.last_error_trace = nil
@@ -4921,7 +5005,12 @@ proc parse_and_compile*(stream: Stream, filename = "<input>", eager_functions = 
               raise new_exception(types.Exception, message)
           try:
             # Compile current item
-            self.compile(node)
+            if is_vmstmt_form(node):
+              self.compile_vmstmt(node.gene)
+              prev_pushed = false
+            else:
+              self.compile(node)
+              prev_pushed = true
             is_first = false
           except CatchableError as e:
             var trace = self.last_error_trace

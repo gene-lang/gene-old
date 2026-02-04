@@ -7,8 +7,8 @@
 
 (var n 24)
 (println "Computing fib(" n ")...")
-$duration_start
+($vmstmt duration_start)
 (var result (fib n))
-(var elapsed_us $duration)
+(var elapsed_us ($vm duration))
 (println "fib(" n ") = " result)
 (println "Time: " elapsed_us "us")

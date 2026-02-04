@@ -5611,6 +5611,18 @@ proc exec*(self: ptr VirtualMachine): Value =
           self.frame.push(val)
         {.pop.}
 
+      of IkVmDurationStart:
+        # Record start time in microseconds (statement-only)
+        self.duration_start_us = epochTime() * 1_000_000
+
+      of IkVmDuration:
+        # Return elapsed microseconds since duration_start
+        if self.duration_start_us == 0.0:
+          not_allowed("duration_start is not set")
+        let now_us = epochTime() * 1_000_000
+        let elapsed = now_us - self.duration_start_us
+        self.frame.push(elapsed.to_value())
+
       of IkMatchGeneType:
         # Pattern matching: check if value matches Gene type
         # arg0 = type symbol to match (e.g., "Ok", "Err", "Some", "None")
