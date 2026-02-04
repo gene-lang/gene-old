@@ -4,6 +4,7 @@
   (method fib n
     (if (< n 2)
       n
+    else
       (+ (self .fib (- n 1)) (self .fib (- n 2)))
     )
   )
