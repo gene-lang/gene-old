@@ -161,7 +161,12 @@ proc unify(self: TypeChecker, a: TypeExpr, b: TypeExpr, context: string) =
   case ta.kind
   of TkNamed:
     if ta.name != tb.name:
-      raise new_exception(types.Exception, "Type error: expected " & ta.name & ", got " & tb.name & " in " & context)
+      # For user-defined class types, allow subtype relationships at compile-time
+      # (actual validation happens at runtime with inheritance check)
+      # Only fail for built-in type mismatches
+      if is_builtin_type_name(ta.name) and is_builtin_type_name(tb.name):
+        raise new_exception(types.Exception, "Type error: expected " & ta.name & ", got " & tb.name & " in " & context)
+      # For user-defined classes, defer to runtime type checking (gradual typing)
   of TkApplied:
     if ta.ctor != tb.ctor or ta.args.len != tb.args.len:
       raise new_exception(types.Exception, "Type error: expected " & type_to_string(ta) & ", got " & type_to_string(tb) & " in " & context)

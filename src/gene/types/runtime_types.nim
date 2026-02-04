@@ -102,6 +102,7 @@ proc is_compatible*(value: Value, expected_type: string): bool =
   ## - Exact type match
   ## - Any type (gradual typing)
   ## - Type hierarchy (e.g., Int is compatible with Numeric)
+  ## - Class inheritance (e.g., Dog is compatible with Animal)
   
   if expected_type == "Any":
     return true
@@ -112,15 +113,27 @@ proc is_compatible*(value: Value, expected_type: string): bool =
   if actual == expected_type:
     return true
   
-  # Type hierarchy checks
+  # Type hierarchy checks for primitives
   case expected_type
   of "Numeric":
     return actual in ["Int", "Float"]
   of "Collection":
     return actual in ["Array", "Map", "Set"]
   else:
-    # TODO: Add more type hierarchy rules as needed
-    return false
+    discard
+  
+  # Class inheritance check for instances
+  if value.kind == VkInstance:
+    let inst = cast[ptr InstanceObj](value.raw and PAYLOAD_MASK)
+    if inst != nil and inst.instance_class != nil:
+      # Walk up the class hierarchy
+      var current = inst.instance_class.parent
+      while current != nil:
+        if current.name == expected_type:
+          return true
+        current = current.parent
+  
+  return false
 
 proc validate_type*(value: Value, expected_type: string, param_name: string = "argument") =
   ## Validate that a value is compatible with an expected type

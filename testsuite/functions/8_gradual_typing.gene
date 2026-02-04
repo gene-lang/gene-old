@@ -1,0 +1,87 @@
+# Phase 3: Gradual Typing Tests
+# Test mixing typed and untyped functions, Any type handling, and migration paths
+
+# === Test 1: Untyped functions (no annotations) ===
+(fn untyped_add [x y]
+  (x + y))
+
+(assert ((untyped_add 1 2) == 3))
+(assert ((untyped_add 1.5 2.5) == 4.0))
+(println "Test 1 passed: Untyped function accepts any types")
+
+# === Test 2: Partially typed functions ===
+(fn partial_typed [x y: Int]
+  (x + y))
+
+(assert ((partial_typed 1 2) == 3))
+(assert ((partial_typed 1.5 2) == 3.5))  # x accepts any, y must be Int
+(println "Test 2 passed: Partially typed functions work")
+
+# === Test 3: Explicit Any type ===
+(fn explicit_any [x: Any y: Int]
+  [x y])
+
+(assert ((explicit_any "hello" 42) == ["hello" 42]))
+(assert ((explicit_any [1 2 3] 99) == [[1 2 3] 99]))
+(assert ((explicit_any nil 0) == [nil 0]))
+(println "Test 3 passed: Explicit Any accepts anything")
+
+# === Test 4: Return type annotations (documentation only for now) ===
+(fn typed_return [x: Int] -> Int
+  x)
+
+(assert ((typed_return 42) == 42))
+(println "Test 4 passed: Return type annotation works")
+
+# === Test 5: Gradual migration - calling typed from untyped ===
+(fn strict_add [x: Int y: Int] -> Int
+  (x + y))
+
+(fn wrapper [a b]
+  (strict_add a b))  # Untyped wrapper calls typed function
+
+(assert ((wrapper 1 2) == 3))
+(println "Test 5 passed: Untyped wrapper can call typed function")
+
+# === Test 6: Class instances with gradual typing ===
+(class Animal
+  ^fields {^name String}
+  (ctor [name]
+    (/name = name))
+  (method get_name _
+    /name))
+
+(class Dog < Animal
+  ^fields {^breed Any}
+  (ctor [name breed]
+    (/name = name)
+    (/breed = breed)))
+
+(fn greet_animal [animal: Animal]
+  (animal .get_name))
+
+(var dog (new Dog "Rex" "German Shepherd"))
+(assert ((greet_animal dog) == "Rex"))
+(println "Test 6 passed: Typed param accepts subclass instance")
+
+# === Test 7: Collections with Any elements ===
+(fn first_element [arr: Array]
+  arr/0)
+
+(assert ((first_element [1 2 3]) == 1))
+(assert ((first_element ["a" "b"]) == "a"))
+(assert ((first_element [[1] [2]]) == [1]))
+(println "Test 7 passed: Array type check works regardless of element types")
+
+# === Test 8: Generic-like behavior (type variables treated as Any) ===
+# Gene doesn't have true generics yet, but untyped params act like type variables
+(fn identity [x]
+  x)
+
+(assert ((identity 42) == 42))
+(assert ((identity "hello") == "hello"))
+(assert ((identity [1 2 3]) == [1 2 3]))
+(println "Test 8 passed: Identity function works with any type")
+
+(println "")
+(println "=== Phase 3 gradual typing tests completed ===")
