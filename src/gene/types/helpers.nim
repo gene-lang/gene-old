@@ -32,6 +32,7 @@ proc new_vm_ptr*(): ptr VirtualMachine =
   result[].profile_data = initTable[string, FunctionProfile]()
   result[].profile_stack = @[]
   result[].thread_local_ns = nil
+  result[].duration_start_us = 0.0
 
 proc free_vm_ptr*(vm: ptr VirtualMachine) =
   ## Release a VM instance allocated by new_vm_ptr.
@@ -107,9 +108,16 @@ proc init_app_and_vm*() =
   proc time_now(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
     return epochTime().to_value()
 
+  proc time_now_us(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
+    return (epochTime() * 1_000_000).to_value()
+
   var time_now_fn = new_ref(VkNativeFn)
   time_now_fn.native_fn = time_now
   time_ns["now".to_key()] = time_now_fn.to_ref_value()
+
+  var time_now_us_fn = new_ref(VkNativeFn)
+  time_now_us_fn.native_fn = time_now_us
+  time_ns["now_us".to_key()] = time_now_us_fn.to_ref_value()
   App.app.global_ns.ref.ns["time".to_key()] = time_ns.to_value()
   # Also add to gene namespace for gene/time/now access
   App.app.gene_ns.ref.ns["time".to_key()] = time_ns.to_value()

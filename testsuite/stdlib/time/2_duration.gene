@@ -1,0 +1,32 @@
+# Duration special variables and microsecond time
+# Expected: Duration missing ok
+# Expected: Duration start ok
+# Expected: Duration ok
+# Expected: Now us ok
+
+(try
+  $duration
+catch *
+  (println "Duration missing ok")
+)
+
+(var start $duration_start)
+(if (> start 0)
+  (println "Duration start ok")
+else
+  (println "Duration start bad")
+)
+
+(var elapsed $duration)
+(if (>= elapsed 0)
+  (println "Duration ok")
+else
+  (println "Duration bad")
+)
+
+(var now_us (time/now_us))
+(if (> now_us 0)
+  (println "Now us ok")
+else
+  (println "Now us bad")
+)

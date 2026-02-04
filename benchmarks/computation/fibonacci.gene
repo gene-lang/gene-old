@@ -7,9 +7,8 @@
 
 (var n 24)
 (println "Computing fib(" n ")...")
-# Note: time/now is not yet implemented, so timing is disabled
-# (var start (time/now))
+$duration_start
 (var result (fib n))
-# (var elapsed (- (time/now) start))
+(var elapsed_us $duration)
 (println "fib(" n ") = " result)
-# (println "Time: " elapsed "ms")
+(println "Time: " elapsed_us "us")

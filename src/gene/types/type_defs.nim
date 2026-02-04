@@ -814,6 +814,7 @@ type
     profiling*: bool
     profile_data*: Table[string, FunctionProfile]
     profile_stack*: seq[tuple[name: string, start_time: float64]]
+    duration_start_us*: float64
     # Instruction profiling
     instruction_profiling*: bool
     instruction_profile*: array[InstructionKind, InstructionProfile]

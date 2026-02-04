@@ -2509,6 +2509,16 @@ proc exec*(self: ptr VirtualMachine): Value =
                 let member = if self.current_exception != NIL: self.current_exception else: self.repl_exception
                 retain(member)
                 self.frame.push(member)
+              elif key == "duration_start".to_key() and (target == App.app.gene_ns or target == App.app.global_ns):
+                let now_us = epochTime() * 1_000_000
+                self.duration_start_us = now_us
+                self.frame.push(now_us.to_value())
+              elif key == "duration".to_key() and (target == App.app.gene_ns or target == App.app.global_ns):
+                if self.duration_start_us == 0.0:
+                  not_allowed("duration_start is not set")
+                let now_us = epochTime() * 1_000_000
+                let elapsed = now_us - self.duration_start_us
+                self.frame.push(elapsed.to_value())
               elif target.ref.ns.has_key(key):
                 let member = target.ref.ns[key]
                 retain(member)
