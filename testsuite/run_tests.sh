@@ -151,6 +151,7 @@ else
     run_category "Maps" "maps"
     run_category "Strings" "strings"
     run_category "Functions" "functions"
+    run_category "Types" "types"
     run_category "Scopes" "scopes"
     run_category "Callable Instances" "callable_instances"
     run_category "OOP" "oop"

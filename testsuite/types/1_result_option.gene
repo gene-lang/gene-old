@@ -1,0 +1,76 @@
+# Result and Option ADT tests
+
+(type (Result T E) ((Ok T) | (Err E)))
+(type (Option T) ((Some T) | None))
+
+(var r1 (Ok 5))
+(var r2 (Err "bad"))
+(var o1 (Some "hello"))
+(var o2 None)
+
+(println "r1 = " r1)
+# Expected: r1 = (Ok 5)
+
+(println "r2 = " r2)
+# Expected: r2 = (Err "bad")
+
+(println "o1 = " o1)
+# Expected: o1 = (Some "hello")
+
+(println "o2 = " o2)
+# Expected: o2 = (None)
+
+(fn add_one [x: Int] -> (Result Int String)
+  (Ok (x + 1)))
+
+(println "add_one = " (add_one 4))
+# Expected: add_one = (Ok 5)
+
+(fn as_option [x: Int] -> (Option Int)
+  (Some x))
+
+(println "as_option = " (as_option 7))
+# Expected: as_option = (Some 7)
+
+(println "case_ok = " (case r1
+  when (Ok v) (v + 10)
+  when (Err e) 0))
+# Expected: case_ok = 15
+
+(println "case_err = " (case r2
+  when (Ok v) v
+  when (Err e) e))
+# Expected: case_err = bad
+
+(println "case_some = " (case o1
+  when (Some x) x
+  when None "none"))
+# Expected: case_some = hello
+
+(println "case_none = " (case o2
+  when (Some x) x
+  when None "none"))
+# Expected: case_none = none
+
+(fn unwrap_result [r: (Result Int String)] -> (Result Int String)
+  (var v (r ?))
+  (Ok (v + 1)))
+
+(println "unwrap_ok = " (unwrap_result (Ok 4)))
+# Expected: unwrap_ok = (Ok 5)
+
+(println "unwrap_err = " (unwrap_result (Err "boom")))
+# Expected: unwrap_err = (Err "boom")
+
+(fn unwrap_option [o: (Option Int)] -> (Option Int)
+  (var v (o ?))
+  (Some (v * 2)))
+
+(println "unwrap_some = " (unwrap_option (Some 7)))
+# Expected: unwrap_some = (Some 14)
+
+(println "unwrap_none = " (unwrap_option None))
+# Expected: unwrap_none = (None)
+
+(println "Result/Option ADT tests completed")
+# Expected: Result/Option ADT tests completed

@@ -49,12 +49,23 @@ type
     methods*: Table[string, TypeExpr]
     ctor_type*: TypeExpr
 
+  AdtVariant = object
+    name*: string
+    field_count*: int
+    param_index*: int  # -1 when no param binding
+
+  AdtDef = ref object
+    name*: string
+    params*: seq[string]
+    variants*: Table[string, AdtVariant]
+
   TypeChecker* = ref object
     strict*: bool
     next_var_id*: int
     subs*: Table[int, TypeExpr]
     scopes*: seq[Table[string, TypeExpr]]
     types*: Table[string, TypeExpr]
+    adts*: Table[string, AdtDef]
     classes*: Table[string, ClassInfo]
     current_return*: TypeExpr
     current_class*: string
@@ -89,6 +100,8 @@ proc key_to_string(key: Key): string {.inline.} =
   except CatchableError:
     result = "<keyword>"
 
+proc register_builtin_adts(self: TypeChecker)
+
 proc new_type_checker*(strict: bool = true): TypeChecker =
   result = TypeChecker(
     strict: strict,
@@ -96,11 +109,35 @@ proc new_type_checker*(strict: bool = true): TypeChecker =
     subs: initTable[int, TypeExpr](),
     scopes: @[initTable[string, TypeExpr]()],
     types: initTable[string, TypeExpr](),
+    adts: initTable[string, AdtDef](),
     classes: initTable[string, ClassInfo](),
     current_return: ANY_TYPE,
     current_class: "",
     init_self_stack: @[]
   )
+  result.register_builtin_adts()
+
+proc add_adt(self: TypeChecker, name: string, params: seq[string], variants: seq[AdtVariant]) =
+  var def = AdtDef(
+    name: name,
+    params: params,
+    variants: initTable[string, AdtVariant]()
+  )
+  for variant in variants:
+    def.variants[variant.name] = variant
+  self.adts[name] = def
+  if not self.types.hasKey(name):
+    self.types[name] = TypeExpr(kind: TkNamed, name: name)
+
+proc register_builtin_adts(self: TypeChecker) =
+  self.add_adt("Result", @["T", "E"], @[
+    AdtVariant(name: "Ok", field_count: 1, param_index: 0),
+    AdtVariant(name: "Err", field_count: 1, param_index: 1)
+  ])
+  self.add_adt("Option", @["T"], @[
+    AdtVariant(name: "Some", field_count: 1, param_index: 0),
+    AdtVariant(name: "None", field_count: 0, param_index: -1)
+  ])
 
 proc fresh_var(self: TypeChecker): TypeExpr =
   let id = self.next_var_id
@@ -340,6 +377,64 @@ proc is_union_gene(gene: ptr Gene): bool =
       return true
   return false
 
+proc union_members(v: Value): seq[Value] =
+  if v.kind == VkGene and v.gene != nil and is_union_gene(v.gene):
+    let gene = v.gene
+    if gene.`type`.kind == VkSymbol and gene.`type`.str == "|":
+      return gene.children
+    result.add(gene.`type`)
+    var i = 0
+    while i < gene.children.len:
+      let child = gene.children[i]
+      if child.kind == VkSymbol and child.str == "|":
+        if i + 1 < gene.children.len:
+          result.add(gene.children[i + 1])
+        i += 2
+      else:
+        i += 1
+    return result
+  result = @[v]
+
+proc try_register_adt(self: TypeChecker, gene: ptr Gene): bool =
+  if gene.children.len < 2:
+    return false
+  let sig = gene.children[0]
+  if sig.kind != VkGene or sig.gene == nil:
+    return false
+  let sig_gene = sig.gene
+  if sig_gene.`type`.kind != VkSymbol:
+    return false
+  let name = sig_gene.`type`.str
+  var params: seq[string] = @[]
+  for child in sig_gene.children:
+    if child.kind != VkSymbol:
+      return false
+    params.add(child.str)
+
+  let body = gene.children[1]
+  let members = union_members(body)
+  var variants: seq[AdtVariant] = @[]
+  for member in members:
+    if member.kind == VkSymbol:
+      variants.add(AdtVariant(name: member.str, field_count: 0, param_index: -1))
+      continue
+    if member.kind == VkGene and member.gene != nil and member.gene.`type`.kind == VkSymbol:
+      let var_name = member.gene.`type`.str
+      let field_count = member.gene.children.len
+      var param_index = -1
+      if field_count == 1 and member.gene.children[0].kind == VkSymbol:
+        let param_name = member.gene.children[0].str
+        for i, param in params:
+          if param == param_name:
+            param_index = i
+            break
+      variants.add(AdtVariant(name: var_name, field_count: field_count, param_index: param_index))
+
+  if variants.len == 0:
+    return false
+  self.add_adt(name, params, variants)
+  return true
+
 proc parse_type_expr(self: TypeChecker, v: Value): TypeExpr
 
 proc parse_fn_params(self: TypeChecker, v: Value): seq[ParamType] =
@@ -477,13 +572,55 @@ proc parse_param_annotations(self: TypeChecker, args: Value): (seq[(string, stri
       i += 1
   return (params, is_variadic, prop_splats)
 
+proc find_adt_variant(self: TypeChecker, ctor: string): tuple[adt: AdtDef, variant: AdtVariant, found: bool] =
+  for _, def in self.adts:
+    if def.variants.hasKey(ctor):
+      return (def, def.variants[ctor], true)
+  return (nil, AdtVariant(), false)
+
+proc adt_binding_type(self: TypeChecker, scrutinee_type: TypeExpr, ctor: string): TypeExpr =
+  let rt = self.resolve(scrutinee_type)
+  if rt.kind != TkApplied:
+    return ANY_TYPE
+  if not self.adts.hasKey(rt.ctor):
+    return ANY_TYPE
+  let adt = self.adts[rt.ctor]
+  if not adt.variants.hasKey(ctor):
+    return ANY_TYPE
+  let variant = adt.variants[ctor]
+  if variant.param_index >= 0 and variant.param_index < rt.args.len:
+    return rt.args[variant.param_index]
+  return ANY_TYPE
+
+proc check_expr(self: TypeChecker, v: Value): TypeExpr
+
+proc check_adt_ctor(self: TypeChecker, gene: ptr Gene): TypeExpr =
+  if gene == nil or gene.`type`.kind != VkSymbol:
+    return nil
+  let ctor = gene.`type`.str
+  let (adt, variant, found) = self.find_adt_variant(ctor)
+  if not found:
+    return nil
+
+  var args: seq[TypeExpr] = @[]
+  if adt.params.len > 0:
+    args = newSeq[TypeExpr](adt.params.len)
+    for i in 0..<adt.params.len:
+      args[i] = ANY_TYPE
+
+  if variant.param_index >= 0 and gene.children.len > 0 and variant.param_index < args.len:
+    let inner_type = self.check_expr(gene.children[0])
+    args[variant.param_index] = inner_type
+
+  if adt.params.len > 0:
+    return TypeExpr(kind: TkApplied, ctor: adt.name, args: args)
+  return TypeExpr(kind: TkNamed, name: adt.name)
+
 proc resolve_self(self: TypeChecker, t: TypeExpr): TypeExpr =
   let rt = self.resolve(t)
   if rt.kind == TkNamed and rt.name == "Self" and self.current_class.len > 0:
     return TypeExpr(kind: TkNamed, name: self.current_class)
   return rt
-
-proc check_expr(self: TypeChecker, v: Value): TypeExpr
 
 proc check_call(self: TypeChecker, callee_type: TypeExpr, args: seq[Value], props: Table[Key, Value], context: string): TypeExpr =
   let ct = self.resolve(callee_type)
@@ -687,24 +824,13 @@ proc check_match(self: TypeChecker, gene: ptr Gene): TypeExpr =
       let pat_gene = pattern.gene
       if pat_gene.`type`.kind == VkSymbol:
         let ctor = pat_gene.`type`.str
-        # Handle Result/Option patterns
-        if ctor == "Ok" or ctor == "Some":
+        let (_, variant, found) = self.find_adt_variant(ctor)
+        if found and variant.field_count > 0:
           if pat_gene.children.len > 0 and pat_gene.children[0].kind == VkSymbol:
             let bound_name = pat_gene.children[0].str
-            # For Ok[T], the bound variable has type T
-            let rt = self.resolve(scrutinee_type)
-            if rt.kind == TkApplied and rt.args.len > 0:
-              self.define(bound_name, rt.args[0])
-            else:
-              self.define(bound_name, ANY_TYPE)
-        elif ctor == "Err":
-          if pat_gene.children.len > 0 and pat_gene.children[0].kind == VkSymbol:
-            let bound_name = pat_gene.children[0].str
-            let rt = self.resolve(scrutinee_type)
-            if rt.kind == TkApplied and rt.args.len > 1:
-              self.define(bound_name, rt.args[1])
-            else:
-              self.define(bound_name, ANY_TYPE)
+            if bound_name != "_":
+              let bound_type = self.adt_binding_type(scrutinee_type, ctor)
+              self.define(bound_name, bound_type)
     elif pattern.kind == VkSymbol:
       # Wildcard or variable binding
       let name = pattern.str
@@ -763,26 +889,13 @@ proc check_case(self: TypeChecker, gene: ptr Gene): TypeExpr =
         let pat_gene = when_value.gene
         if pat_gene.`type`.kind == VkSymbol:
           let ctor = pat_gene.`type`.str
-          # Handle Result/Option patterns
-          if ctor == "Ok" or ctor == "Some":
+          let (_, variant, found) = self.find_adt_variant(ctor)
+          if found and variant.field_count > 0:
             if pat_gene.children.len > 0 and pat_gene.children[0].kind == VkSymbol:
               let bound_name = pat_gene.children[0].str
               if bound_name != "_":
-                # For Ok[T], the bound variable has type T
-                let rt = self.resolve(scrutinee_type)
-                if rt.kind == TkApplied and rt.args.len > 0:
-                  self.define(bound_name, rt.args[0])
-                else:
-                  self.define(bound_name, ANY_TYPE)
-          elif ctor == "Err":
-            if pat_gene.children.len > 0 and pat_gene.children[0].kind == VkSymbol:
-              let bound_name = pat_gene.children[0].str
-              if bound_name != "_":
-                let rt = self.resolve(scrutinee_type)
-                if rt.kind == TkApplied and rt.args.len > 1:
-                  self.define(bound_name, rt.args[1])
-                else:
-                  self.define(bound_name, ANY_TYPE)
+                let bound_type = self.adt_binding_type(scrutinee_type, ctor)
+                self.define(bound_name, bound_type)
 
       let body_type = self.check_expr(when_body)
       self.pop_scope()
@@ -1404,6 +1517,8 @@ proc check_expr(self: TypeChecker, v: Value): TypeExpr =
           let alias_name = gene.children[0].str
           let alias_type = self.parse_type_expr(gene.children[1])
           self.types[alias_name] = alias_type
+        elif gene.children.len >= 2 and gene.children[0].kind == VkGene:
+          discard self.try_register_adt(gene)
         return ANY_TYPE
       of "match":
         return self.check_match(gene)
@@ -1424,27 +1539,11 @@ proc check_expr(self: TypeChecker, v: Value): TypeExpr =
         return ANY_TYPE
       of "try":
         return self.check_try(gene)
-      of "Ok":
-        # Ok constructor: (Ok value) -> Result[T, E]
-        if gene.children.len > 0:
-          let inner_type = self.check_expr(gene.children[0])
-          return TypeExpr(kind: TkApplied, ctor: "Result", args: @[inner_type, ANY_TYPE])
-        return TypeExpr(kind: TkApplied, ctor: "Result", args: @[ANY_TYPE, ANY_TYPE])
-      of "Err":
-        # Err constructor: (Err value) -> Result[T, E]
-        if gene.children.len > 0:
-          let inner_type = self.check_expr(gene.children[0])
-          return TypeExpr(kind: TkApplied, ctor: "Result", args: @[ANY_TYPE, inner_type])
-        return TypeExpr(kind: TkApplied, ctor: "Result", args: @[ANY_TYPE, ANY_TYPE])
-      of "Some":
-        # Some constructor: (Some value) -> Option[T]
-        if gene.children.len > 0:
-          let inner_type = self.check_expr(gene.children[0])
-          return TypeExpr(kind: TkApplied, ctor: "Option", args: @[inner_type])
-        return TypeExpr(kind: TkApplied, ctor: "Option", args: @[ANY_TYPE])
-      of "None":
-        # None constructor -> Option[T]
-        return TypeExpr(kind: TkApplied, ctor: "Option", args: @[ANY_TYPE])
+      of "Ok", "Err", "Some", "None":
+        let ctor_type = self.check_adt_ctor(gene)
+        if ctor_type != nil:
+          return ctor_type
+        return ANY_TYPE
       of "?":
         # ? operator for Result/Option propagation
         return self.check_question_op(gene)
