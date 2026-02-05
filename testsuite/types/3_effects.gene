@@ -1,0 +1,18 @@
+# Effect annotations in function signatures
+
+(type EffectFn (Fn [Int] Int ! [Db]))
+
+(fn db_add [x: Int] -> Int ! [Db]
+  (x + 1))
+
+(fn pure_add [x: Int] -> Int
+  (x + 1))
+
+(fn apply_effect [f: EffectFn x: Int] -> Int ! [Db]
+  (f x))
+
+(println "pure=" (apply_effect pure_add 1))
+# Expected: pure=2
+
+(println "db=" (apply_effect db_add 1))
+# Expected: db=2
