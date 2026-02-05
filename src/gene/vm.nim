@@ -5,6 +5,7 @@ import times, os
 import asyncdispatch  # For event loop polling in async support
 
 import ./types
+from ./types/runtime_types import validate_type
 import ./compiler
 from ./parser import read, read_all
 import ./vm/args
@@ -28,6 +29,13 @@ template is_function_like(kind: FrameKind): bool =
 
 template same_value_identity(a: Value, b: Value): bool =
   cast[uint64](a) == cast[uint64](b)
+
+proc expected_type_for(tracker: ScopeTracker, index: int): string {.inline.} =
+  if tracker == nil:
+    return ""
+  if index < 0 or index >= tracker.type_expectations.len:
+    return ""
+  tracker.type_expectations[index]
 
 proc native_args_supported(f: Function, args: seq[Value]): bool =
   const nativeArgLimit =
@@ -1875,6 +1883,9 @@ proc exec*(self: ptr VirtualMachine): Value =
         let value = self.frame.pop()  # Pop the value from the stack
         if self.frame.scope.isNil:
           not_allowed("IkVar: scope is nil")
+        let expected = expected_type_for(self.frame.scope.tracker, index)
+        if expected.len > 0 and value != NIL:
+          validate_type(value, expected, "variable")
         # Ensure the scope has enough space for the index
         while self.frame.scope.members.len <= index:
           self.frame.scope.members.add(NIL)
@@ -1891,6 +1902,9 @@ proc exec*(self: ptr VirtualMachine): Value =
         {.push checks: off}
         let index = inst.arg1.int
         let value = inst.arg0
+        let expected = expected_type_for(self.frame.scope.tracker, index)
+        if expected.len > 0 and value != NIL:
+          validate_type(value, expected, "variable")
         # Ensure the scope has enough space for the index
         while self.frame.scope.members.len <= index:
           self.frame.scope.members.add(NIL)
@@ -1941,6 +1955,9 @@ proc exec*(self: ptr VirtualMachine): Value =
         let index = inst.arg0.int64.int
         if index >= self.frame.scope.members.len:
           raise new_exception(types.Exception, fmt"IkVarAssign: index {index} >= scope.members.len {self.frame.scope.members.len}")
+        let expected = expected_type_for(self.frame.scope.tracker, index)
+        if expected.len > 0 and value != NIL:
+          validate_type(value, expected, "variable")
         self.frame.scope.members[index] = value
         {.pop.}
 
@@ -1956,6 +1973,9 @@ proc exec*(self: ptr VirtualMachine): Value =
         if scope == nil:
           raise new_exception(types.Exception, "IkVarAssignInherited: scope is nil")
         let index = inst.arg0.int64.int
+        let expected = expected_type_for(scope.tracker, index)
+        if expected.len > 0 and value != NIL:
+          validate_type(value, expected, "variable")
         while scope.members.len <= index:
           scope.members.add(NIL)
         {.push checks: off}

@@ -4,7 +4,7 @@ import ./types
 
 const
   GIR_MAGIC = "GENE"
-  GIR_VERSION* = 3'u32
+  GIR_VERSION* = 4'u32
   COMPILER_VERSION = "0.1.0"
   VALUE_ABI_VERSION* = 2'u32  # Version 2: Value is object wrapper with GC
   
@@ -65,6 +65,10 @@ proc writeScopeTrackerSnapshot(stream: Stream, snapshot: ScopeTrackerSnapshot) =
     stream.write(cast[int64](pair[0]))
     stream.write(pair[1])
 
+  stream.write(snapshot.type_expectations.len.uint32)
+  for expected in snapshot.type_expectations:
+    stream.write_string(expected)
+
   writeScopeTrackerSnapshot(stream, snapshot.parent)
 
 proc readScopeTrackerSnapshot(stream: Stream): ScopeTrackerSnapshot =
@@ -83,6 +87,12 @@ proc readScopeTrackerSnapshot(stream: Stream): ScopeTrackerSnapshot =
     let key = cast[Key](stream.readInt64())
     let value = stream.readInt16()
     result.mappings.add((key, value))
+
+  let type_len = stream.readUint32()
+  if type_len > 0:
+    result.type_expectations = @[]
+    for _ in 0..<type_len:
+      result.type_expectations.add(stream.read_string())
 
   result.parent = readScopeTrackerSnapshot(stream)
 

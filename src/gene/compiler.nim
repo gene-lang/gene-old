@@ -14,6 +14,24 @@ proc container_key(): Key {.inline.} =
 proc local_def_key(): Key {.inline.} =
   "local_def".to_key()
 
+proc binding_type_from_props(gene: ptr Gene): string =
+  if gene == nil:
+    return ""
+  let key = TC_BINDING_TYPE_KEY.to_key()
+  if gene.props.has_key(key):
+    let val = gene.props[key]
+    if val.kind in {VkString, VkSymbol}:
+      return val.str
+    return type_expr_to_string(val)
+  return ""
+
+proc set_expected_type(tracker: ScopeTracker, index: int16, expected_type: string) {.inline.} =
+  if tracker == nil or expected_type.len == 0:
+    return
+  while tracker.type_expectations.len <= index.int:
+    tracker.type_expectations.add("")
+  tracker.type_expectations[index.int] = expected_type
+
 proc build_container_value(parts: seq[string]): Value =
   if parts.len == 0:
     return NIL
@@ -745,11 +763,14 @@ proc compile_var(self: Compiler, gene: ptr Gene) =
     not_allowed("var requires a name")
   apply_container_to_child(gene, 0)
   let container_expr = gene.props.getOrDefault(container_key(), NIL)
+  var explicit_type = ""
   # Strip optional type annotation: (var x: Type value)
   if gene.children.len >= 2:
     let name_val = gene.children[0]
     if name_val.kind == VkSymbol and name_val.str.ends_with(":"):
       let base_name = name_val.str[0..^2].to_symbol_value()
+      if gene.children.len > 1:
+        explicit_type = type_expr_to_string(gene.children[1])
       gene.children[0] = base_name
       gene.children.delete(1) # Remove the type expression
 
@@ -862,6 +883,10 @@ proc compile_var(self: Compiler, gene: ptr Gene) =
     index = old_next_index
     new_binding = true
 
+  var binding_type = binding_type_from_props(gene)
+  if binding_type.len == 0:
+    binding_type = explicit_type
+
   # Avoid resolving the new binding (and any new scope) inside its own initializer.
   if gene.children.len > 1:
     # For shadowing (new_binding when has_mapping): allocate new index but don't add mapping yet
@@ -898,12 +923,14 @@ proc compile_var(self: Compiler, gene: ptr Gene) =
         self.scope_tracker.mappings[key] = index
         self.scope_tracker.next_index = old_next_index + 1
     self.add_scope_start()
+    set_expected_type(self.scope_tracker, index, binding_type)
     self.emit(Instruction(kind: IkVar, arg0: index.to_value()))
   else:
     if new_binding:
       self.scope_tracker.mappings[key] = index
       self.scope_tracker.next_index = old_next_index + 1
     self.add_scope_start()
+    set_expected_type(self.scope_tracker, index, binding_type)
     self.emit(Instruction(kind: IkVarValue, arg0: NIL, arg1: index))
 
   if not new_binding:
@@ -1618,6 +1645,7 @@ proc compile_fn(self: Compiler, input: Value, define_binding = true) =
     mark_local_fn(input)
 
   let tracker_copy = copy_scope_tracker(self.scope_tracker)
+  let binding_type = if input.kind == VkGene and input.gene != nil: binding_type_from_props(input.gene) else: ""
 
   var compiled_body: CompilationUnit = nil
   if self.eager_functions:
@@ -1631,6 +1659,7 @@ proc compile_fn(self: Compiler, input: Value, define_binding = true) =
 
   if local_binding:
     self.add_scope_start()
+    set_expected_type(self.scope_tracker, local_index, binding_type)
     self.emit(Instruction(kind: IkVar, arg0: local_index.to_value()))
     if not local_new_binding:
       self.scope_tracker.next_index = local_old_next
@@ -1707,6 +1736,12 @@ proc compile_method_definition(self: Compiler, gene: ptr Gene) =
   # The method is similar to (fn name [args] body...) but bound to the class
   var fn_value = new_gene_value()
   fn_value.gene.type = "fn".to_symbol_value()
+  let param_key = TC_PARAM_TYPES_KEY.to_key()
+  let return_key = TC_RETURN_TYPE_KEY.to_key()
+  if gene.props.has_key(param_key):
+    fn_value.gene.props[param_key] = gene.props[param_key]
+  if gene.props.has_key(return_key):
+    fn_value.gene.props[return_key] = gene.props[return_key]
   
   # Add the method name
   fn_value.gene.children.add(gene.children[0])
@@ -1766,6 +1801,12 @@ proc compile_constructor_definition(self: Compiler, gene: ptr Gene) =
   # The constructor is similar to (fn new [args] body...) but bound to the class
   var fn_value = new_gene_value()
   fn_value.gene.type = "fn".to_symbol_value()
+  let param_key = TC_PARAM_TYPES_KEY.to_key()
+  let return_key = TC_RETURN_TYPE_KEY.to_key()
+  if gene.props.has_key(param_key):
+    fn_value.gene.props[param_key] = gene.props[param_key]
+  if gene.props.has_key(return_key):
+    fn_value.gene.props[return_key] = gene.props[return_key]
   fn_value.gene.children.add(gene.type.str.to_symbol_value())
   
   # Handle args - always normalize to an array

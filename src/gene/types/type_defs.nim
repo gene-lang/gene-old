@@ -1,6 +1,11 @@
 # Forward declarations for new types
 import tables, sets, asyncdispatch, dynlib
 
+const
+  TC_BINDING_TYPE_KEY* = "__tc_binding_type"
+  TC_PARAM_TYPES_KEY* = "__tc_param_types"
+  TC_RETURN_TYPE_KEY* = "__tc_return_type"
+
 type
   Value* {.bycopy.} = object
     ## NaN-boxed value with automatic reference counting
@@ -210,12 +215,14 @@ type
     next_index*: int16      # If next_index is 0, the scope is empty
     mappings*: Table[Key, int16]
     scope_started*: bool    # Track if we've added a ScopeStart instruction
+    type_expectations*: seq[string]
 
   ScopeTrackerSnapshot* = ref object
     next_index*: int16
     parent_index_max*: int16
     scope_started*: bool
     mappings*: seq[(Key, int16)]
+    type_expectations*: seq[string]
     parent*: ScopeTrackerSnapshot
 
   FunctionDefInfo* = ref object

@@ -193,6 +193,46 @@ proc unify(self: TypeChecker, a: TypeExpr, b: TypeExpr, context: string) =
       raise new_exception(types.Exception, "Type error: recursive type in " & context)
     self.subs[tb.id] = ta
     return
+  if ta.kind == TkUnion or tb.kind == TkUnion:
+    if ta.kind == TkUnion and tb.kind == TkUnion:
+      # Union to union: each member of tb must be in ta
+      for mb in tb.members:
+        var found = false
+        for ma in ta.members:
+          try:
+            self.unify(ma, mb, context)
+            found = true
+            break
+          except CatchableError:
+            discard
+        if not found:
+          raise new_exception(types.Exception, "Type error: expected one of " & type_to_string(ta) & ", got " & type_to_string(tb) & " in " & context)
+      return
+    if ta.kind == TkUnion:
+      # Non-union to union: tb must match at least one member
+      var ok = false
+      for m in ta.members:
+        try:
+          self.unify(m, tb, context)
+          ok = true
+          break
+        except CatchableError:
+          discard
+      if not ok:
+        raise new_exception(types.Exception, "Type error: expected one of " & type_to_string(ta) & ", got " & type_to_string(tb) & " in " & context)
+      return
+    # ta is non-union, tb is union: ta must match at least one member
+    var ok = false
+    for m in tb.members:
+      try:
+        self.unify(ta, m, context)
+        ok = true
+        break
+      except CatchableError:
+        discard
+    if not ok:
+      raise new_exception(types.Exception, "Type error: expected one of " & type_to_string(tb) & ", got " & type_to_string(ta) & " in " & context)
+    return
   if ta.kind != tb.kind:
     raise new_exception(types.Exception, "Type error: expected " & type_to_string(ta) & ", got " & type_to_string(tb) & " in " & context)
   case ta.kind
@@ -210,32 +250,7 @@ proc unify(self: TypeChecker, a: TypeExpr, b: TypeExpr, context: string) =
     for i in 0..<ta.args.len:
       self.unify(ta.args[i], tb.args[i], context)
   of TkUnion:
-    # Union type unification
-    if tb.kind == TkUnion:
-      # Union to union: each member of tb must be in ta
-      for mb in tb.members:
-        var found = false
-        for ma in ta.members:
-          try:
-            self.unify(ma, mb, context)
-            found = true
-            break
-          except CatchableError:
-            discard
-        if not found:
-          raise new_exception(types.Exception, "Type error: expected one of " & type_to_string(ta) & ", got " & type_to_string(tb) & " in " & context)
-    else:
-      # Non-union to union: tb must match at least one member
-      var ok = false
-      for m in ta.members:
-        try:
-          self.unify(m, tb, context)
-          ok = true
-          break
-        except CatchableError:
-          discard
-      if not ok:
-        raise new_exception(types.Exception, "Type error: expected one of " & type_to_string(ta) & ", got " & type_to_string(tb) & " in " & context)
+    discard
   of TkFn:
     if ta.params.len != tb.params.len:
       raise new_exception(types.Exception, "Type error: function arity mismatch in " & context)
@@ -274,6 +289,31 @@ proc type_to_string(t: TypeExpr): string =
     return "(Fn [" & params.join(" ") & "] " & type_to_string(rt.ret) & ")"
   of TkVar:
     return "T" & $rt.id
+
+proc record_binding_type(self: TypeChecker, gene: ptr Gene, t: TypeExpr) =
+  if gene == nil:
+    return
+  let resolved = self.resolve(t)
+  if resolved == nil or resolved.kind in {TkAny, TkVar}:
+    return
+  gene.props[TC_BINDING_TYPE_KEY.to_key()] = type_to_string(resolved).to_value()
+
+proc record_param_types(self: TypeChecker, gene: ptr Gene, params: seq[(string, string, TypeExpr)], return_type: TypeExpr) =
+  if gene == nil:
+    return
+  var param_map = new_map_value()
+  for (var_name, _, typ) in params:
+    if var_name.len == 0 or var_name == "_" or typ == nil:
+      continue
+    let resolved = self.resolve(typ)
+    if resolved == nil or resolved.kind in {TkAny, TkVar}:
+      continue
+    map_data(param_map)[var_name.to_key()] = type_to_string(resolved).to_value()
+  if map_data(param_map).len > 0:
+    gene.props[TC_PARAM_TYPES_KEY.to_key()] = param_map
+  let resolved_return = self.resolve(return_type)
+  if resolved_return != nil and resolved_return.kind notin {TkAny, TkVar}:
+    gene.props[TC_RETURN_TYPE_KEY.to_key()] = type_to_string(resolved_return).to_value()
 
 proc push_scope(self: TypeChecker) =
   self.scopes.add(initTable[string, TypeExpr]())
@@ -758,12 +798,15 @@ proc check_var(self: TypeChecker, gene: ptr Gene): TypeExpr =
     if annotated != nil:
       self.unify(annotated, value_type, "var " & name)
       self.define(name, annotated)
+      self.record_binding_type(gene, annotated)
       return annotated
     else:
       self.define(name, value_type)
+      self.record_binding_type(gene, value_type)
       return value_type
   if annotated != nil:
     self.define(name, annotated)
+    self.record_binding_type(gene, annotated)
     return annotated
   self.define(name, ANY_TYPE)
   return ANY_TYPE
@@ -1137,8 +1180,10 @@ proc check_fn(self: TypeChecker, gene: ptr Gene): TypeExpr =
 
   # Build function type and define in OUTER scope first
   let fn_type = TypeExpr(kind: TkFn, params: fn_params, ret: return_type, variadic: is_variadic, kw_splat: prop_splats.len > 0)
+  self.record_param_types(gene, params, return_type)
   if name.len > 0 and name != "<unnamed>":
     self.define(name, fn_type)
+    self.record_binding_type(gene, fn_type)
 
   # Now push scope for function body and define parameters
   self.push_scope()
@@ -1226,6 +1271,7 @@ proc check_ctor(self: TypeChecker, gene: ptr Gene, class_name: string, cls: Clas
     fn_params.add(ParamType(label: label, typ: t))
     if var_name.len > 0 and var_name != "_":
       self.define(var_name, t)
+  self.record_param_types(gene, params, return_type)
   for prop_name in prop_splats:
     self.define(prop_name, TypeExpr(kind: TkApplied, ctor: "Map", args: @[ANY_TYPE, ANY_TYPE]))
 
@@ -1272,6 +1318,7 @@ proc check_method(self: TypeChecker, gene: ptr Gene, class_name: string, cls: Cl
     fn_params.add(ParamType(label: label, typ: t))
     if var_name.len > 0 and var_name != "_":
       self.define(var_name, t)
+  self.record_param_types(gene, params, return_type)
   for prop_name in prop_splats:
     self.define(prop_name, TypeExpr(kind: TkApplied, ctor: "Map", args: @[ANY_TYPE, ANY_TYPE]))
 

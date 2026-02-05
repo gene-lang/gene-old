@@ -1479,6 +1479,7 @@ proc copy_scope_tracker*(source: ScopeTracker): ScopeTracker =
   result.next_index = source.next_index
   result.parent_index_max = source.parent_index_max
   result.parent = source.parent
+  result.type_expectations = source.type_expectations
   # Copy the mappings table
   for key, value in source.mappings:
     result.mappings[key] = value
@@ -1496,6 +1497,7 @@ proc snapshot_scope_tracker*(tracker: ScopeTracker): ScopeTrackerSnapshot =
     parent_index_max: tracker.parent_index_max,
     scope_started: tracker.scope_started,
     mappings: @[],
+    type_expectations: tracker.type_expectations,
     parent: snapshot_scope_tracker(tracker.parent)
   )
 
@@ -1510,6 +1512,7 @@ proc materialize_scope_tracker*(snapshot: ScopeTrackerSnapshot): ScopeTracker =
     next_index: snapshot.next_index,
     parent_index_max: snapshot.parent_index_max,
     scope_started: snapshot.scope_started,
+    type_expectations: snapshot.type_expectations,
     parent: materialize_scope_tracker(snapshot.parent)
   )
 
@@ -1753,6 +1756,79 @@ proc new_arg_matcher*(value: Value): RootMatcher =
   result.parse(value)
   result.check_hint()
 
+proc is_union_gene(gene: ptr Gene): bool =
+  if gene == nil:
+    return false
+  if gene.`type`.kind == VkSymbol and gene.`type`.str == "|":
+    return true
+  for child in gene.children:
+    if child.kind == VkSymbol and child.str == "|":
+      return true
+  return false
+
+proc union_members(v: Value): seq[Value] =
+  if v.kind == VkGene and v.gene != nil and is_union_gene(v.gene):
+    let gene = v.gene
+    if gene.`type`.kind == VkSymbol and gene.`type`.str == "|":
+      return gene.children
+    result.add(gene.`type`)
+    var i = 0
+    while i < gene.children.len:
+      let child = gene.children[i]
+      if child.kind == VkSymbol and child.str == "|":
+        if i + 1 < gene.children.len:
+          result.add(gene.children[i + 1])
+        i += 2
+      else:
+        i += 1
+    return result
+  result = @[v]
+
+proc type_expr_to_string*(v: Value): string =
+  case v.kind
+  of VkSymbol:
+    return v.str
+  of VkString:
+    return v.str
+  of VkGene:
+    let gene = v.gene
+    if gene == nil:
+      return "Any"
+    if gene.`type`.kind == VkSymbol and gene.`type`.str == "Fn":
+      var params: seq[string] = @[]
+      if gene.children.len > 0 and gene.children[0].kind == VkArray:
+        let items = array_data(gene.children[0])
+        var i = 0
+        while i < items.len:
+          let item = items[i]
+          if item.kind == VkSymbol and item.str.startsWith("^"):
+            let label = item.str[1..^1]
+            if i + 1 < items.len:
+              params.add("^" & label & " " & type_expr_to_string(items[i + 1]))
+              i += 2
+            else:
+              params.add("^" & label & " Any")
+              i += 1
+          else:
+            params.add(type_expr_to_string(item))
+            i += 1
+      let ret =
+        if gene.children.len > 1: type_expr_to_string(gene.children[1]) else: "Any"
+      return "(Fn [" & params.join(" ") & "] " & ret & ")"
+    if is_union_gene(gene):
+      var parts: seq[string] = @[]
+      for member in union_members(v):
+        parts.add(type_expr_to_string(member))
+      return "(" & parts.join(" | ") & ")"
+    if gene.`type`.kind == VkSymbol:
+      var parts: seq[string] = @[gene.`type`.str]
+      for child in gene.children:
+        parts.add(type_expr_to_string(child))
+      return "(" & parts.join(" ") & ")"
+    return "Any"
+  else:
+    return "Any"
+
 #################### Function ####################
 
 proc new_fn*(name: string, matcher: RootMatcher, body: sink seq[Value]): Function =
@@ -1770,6 +1846,8 @@ proc to_function*(node: Value): Function {.gcsafe.} =
   if node.gene == nil:
     raise new_exception(type_defs.Exception, "Gene pointer is nil")
 
+  var return_type_override = ""
+
   # Extract type annotations as name -> type_name mapping, and strip them from args
   proc strip_type_annotations(args: Value, type_map: var Table[string, string]): Value =
     if args.kind != VkArray:
@@ -1785,8 +1863,8 @@ proc to_function*(node: Value): Function {.gcsafe.} =
         i.inc
         if i < src.len:
           let type_val = src[i]
-          if type_val.kind == VkSymbol:
-            type_map[base] = type_val.str
+          if not type_map.hasKey(base):
+            type_map[base] = type_expr_to_string(type_val)
           i.inc # Skip type expression
         continue
       elif item.kind == VkArray:
@@ -1813,12 +1891,37 @@ proc to_function*(node: Value): Function {.gcsafe.} =
     if matcher.has_type_annotations:
       matcher.hint_mode = MhDefault
 
+  proc load_type_annotations_from_props(node: ptr Gene, type_map: var Table[string, string], return_type: var string) =
+    if node == nil:
+      return
+    let param_key = TC_PARAM_TYPES_KEY.to_key()
+    if node.props.has_key(param_key):
+      let map_val = node.props[param_key]
+      if map_val.kind == VkMap:
+        for k, v in map_data(map_val):
+          try:
+            let name = cast[Value](k).str
+            if v.kind in {VkString, VkSymbol}:
+              type_map[name] = v.str
+            else:
+              type_map[name] = type_expr_to_string(v)
+          except CatchableError:
+            discard
+    let return_key = TC_RETURN_TYPE_KEY.to_key()
+    if node.props.has_key(return_key):
+      let val = node.props[return_key]
+      if val.kind in {VkString, VkSymbol}:
+        return_type = val.str
+      else:
+        return_type = type_expr_to_string(val)
+
   var name: string
   let matcher = new_arg_matcher()
   var body_start: int
   var is_generator = false
   var is_macro_like = false
   var type_map = initTable[string, string]()
+  load_type_annotations_from_props(node.gene, type_map, return_type_override)
 
   if node.gene.children.len == 0:
     raise new_exception(type_defs.Exception, "Invalid function definition: expected name or argument list")
@@ -1872,9 +1975,10 @@ proc to_function*(node: Value): Function {.gcsafe.} =
       if body_start + 1 >= node.gene.children.len:
         raise new_exception(type_defs.Exception, "Invalid function definition: missing return type after ->")
       let ret_type = node.gene.children[body_start + 1]
-      if ret_type.kind == VkSymbol:
-        matcher.return_type_name = ret_type.str
+      matcher.return_type_name = type_expr_to_string(ret_type)
       body_start += 2
+  if return_type_override.len > 0:
+    matcher.return_type_name = return_type_override
 
   var body: seq[Value] = @[]
   for i in body_start..<node.gene.children.len:
