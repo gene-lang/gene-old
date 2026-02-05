@@ -18,6 +18,10 @@ type
     X16, X17, X18, X19, X20, X21, X22, X23,
     X24, X25, X26, X27, X28, X29, X30, SP
 
+  ## SIMD/FP D-registers for double-precision float
+  DReg* = enum
+    D0 = 0, D1, D2, D3, D4, D5, D6, D7
+
   FixupKind = enum
     FkB
     FkBl
@@ -211,6 +215,106 @@ proc emitAddSpImm*(buf: CodeBuffer, imm: int32) =
   let instr = 0x9100_0000'u32 or (imm12 shl 10) or (31'u32 shl 5) or 31'u32
   buf.emitU32(instr)
 
+# ==================== FP (Double) Instructions ====================
+
+proc emitFLdr*(buf: CodeBuffer, dreg: DReg, offset: int32) =
+  ## ldr Dd, [sp, #offset]  (FP double load, unsigned offset scaled by 8)
+  if offset mod 8 != 0:
+    raise newException(ValueError, "ARM64 FP LDR offset must be multiple of 8")
+  let imm12 = uint32(offset div 8) and 0xFFF
+  let instr = 0xFD400000'u32 or (imm12 shl 10) or (31'u32 shl 5) or uint32(ord(dreg) and 0x1F)
+  buf.emitU32(instr)
+
+proc emitFStr*(buf: CodeBuffer, dreg: DReg, offset: int32) =
+  ## str Dd, [sp, #offset]  (FP double store, unsigned offset scaled by 8)
+  if offset mod 8 != 0:
+    raise newException(ValueError, "ARM64 FP STR offset must be multiple of 8")
+  let imm12 = uint32(offset div 8) and 0xFFF
+  let instr = 0xFD000000'u32 or (imm12 shl 10) or (31'u32 shl 5) or uint32(ord(dreg) and 0x1F)
+  buf.emitU32(instr)
+
+proc emitFadd*(buf: CodeBuffer, dst, src1, src2: DReg) =
+  ## fadd Dd, Dn, Dm
+  let instr = 0x1E602800'u32 or
+    (uint32(ord(src2) and 0x1F) shl 16) or
+    (uint32(ord(src1) and 0x1F) shl 5) or
+    uint32(ord(dst) and 0x1F)
+  buf.emitU32(instr)
+
+proc emitFsub*(buf: CodeBuffer, dst, src1, src2: DReg) =
+  ## fsub Dd, Dn, Dm
+  let instr = 0x1E603800'u32 or
+    (uint32(ord(src2) and 0x1F) shl 16) or
+    (uint32(ord(src1) and 0x1F) shl 5) or
+    uint32(ord(dst) and 0x1F)
+  buf.emitU32(instr)
+
+proc emitFmul*(buf: CodeBuffer, dst, src1, src2: DReg) =
+  ## fmul Dd, Dn, Dm
+  let instr = 0x1E600800'u32 or
+    (uint32(ord(src2) and 0x1F) shl 16) or
+    (uint32(ord(src1) and 0x1F) shl 5) or
+    uint32(ord(dst) and 0x1F)
+  buf.emitU32(instr)
+
+proc emitFdiv*(buf: CodeBuffer, dst, src1, src2: DReg) =
+  ## fdiv Dd, Dn, Dm
+  let instr = 0x1E601800'u32 or
+    (uint32(ord(src2) and 0x1F) shl 16) or
+    (uint32(ord(src1) and 0x1F) shl 5) or
+    uint32(ord(dst) and 0x1F)
+  buf.emitU32(instr)
+
+proc emitFneg*(buf: CodeBuffer, dst, src: DReg) =
+  ## fneg Dd, Dn
+  let instr = 0x1E614000'u32 or
+    (uint32(ord(src) and 0x1F) shl 5) or
+    uint32(ord(dst) and 0x1F)
+  buf.emitU32(instr)
+
+proc emitFcmp*(buf: CodeBuffer, left, right: DReg) =
+  ## fcmp Dn, Dm  (sets NZCV flags for float comparison)
+  let instr = 0x1E602000'u32 or
+    (uint32(ord(right) and 0x1F) shl 16) or
+    (uint32(ord(left) and 0x1F) shl 5)
+  buf.emitU32(instr)
+
+proc emitFmovToGpr*(buf: CodeBuffer, dst: Arm64Reg, src: DReg) =
+  ## fmov Xd, Dn  (bitcast float64 -> int64)
+  let instr = 0x9E660000'u32 or
+    (uint32(ord(src) and 0x1F) shl 5) or
+    uint32(ord(dst) and 0x1F)
+  buf.emitU32(instr)
+
+proc emitFmovFromGpr*(buf: CodeBuffer, dst: DReg, src: Arm64Reg) =
+  ## fmov Dd, Xn  (bitcast int64 -> float64)
+  let instr = 0x9E670000'u32 or
+    (uint32(ord(src) and 0x1F) shl 5) or
+    uint32(ord(dst) and 0x1F)
+  buf.emitU32(instr)
+
+# Float comparison condition codes for CSET after FCMP
+# (different from integer cmp for LT/LE to handle NaN correctly)
+proc emitCsetFloatLe*(buf: CodeBuffer, dst: Arm64Reg) =
+  buf.emitCsetCond(dst, 0x9)  # LS: C=0 || Z=1 (NaN-safe <=)
+
+proc emitCsetFloatLt*(buf: CodeBuffer, dst: Arm64Reg) =
+  buf.emitCsetCond(dst, 0x4)  # MI: N=1 (NaN-safe <)
+
+proc emitCsetFloatGe*(buf: CodeBuffer, dst: Arm64Reg) =
+  buf.emitCsetCond(dst, 0xA)  # GE: N==V (NaN-safe >=)
+
+proc emitCsetFloatGt*(buf: CodeBuffer, dst: Arm64Reg) =
+  buf.emitCsetCond(dst, 0xC)  # GT: Z=0 && N==V (NaN-safe >)
+
+proc emitCsetFloatEq*(buf: CodeBuffer, dst: Arm64Reg) =
+  buf.emitCsetCond(dst, 0x0)  # EQ: Z=1
+
+proc emitCsetFloatNe*(buf: CodeBuffer, dst: Arm64Reg) =
+  buf.emitCsetCond(dst, 0x1)  # NE: Z=0
+
+# ==================== Integer Load/Store ====================
+
 proc emitStrReg*(buf: CodeBuffer, reg: Arm64Reg, offset: int32) =
   if offset mod 8 != 0:
     raise newException(ValueError, "ARM64 STR offset must be multiple of 8")
@@ -247,6 +351,14 @@ proc loadReg*(ctx: CodegenContext, dst: Arm64Reg, hirReg: HirReg) =
 
 proc storeReg*(ctx: CodegenContext, hirReg: HirReg, src: Arm64Reg) =
   ctx.buf.emitStrReg(src, ctx.regOffset(hirReg))
+
+proc loadRegF64*(ctx: CodegenContext, dst: DReg, hirReg: HirReg) =
+  ## Load HIR register from stack into FP D-register
+  ctx.buf.emitFLdr(dst, ctx.regOffset(hirReg))
+
+proc storeRegF64*(ctx: CodegenContext, hirReg: HirReg, src: DReg) =
+  ## Store FP D-register to HIR register on stack
+  ctx.buf.emitFStr(src, ctx.regOffset(hirReg))
 
 proc genOp*(ctx: CodegenContext, op: HirOp)
 
@@ -325,6 +437,83 @@ proc genNeI64*(ctx: CodegenContext, op: HirOp) =
   ctx.buf.emitCsetNe(X0)
   ctx.storeReg(op.dest, X0)
 
+proc genConstF64*(ctx: CodegenContext, op: HirOp) =
+  ## Load float64 constant: movimm64 → GPR, fmov GPR → D-reg, store
+  ctx.buf.emitMovImm64(X0, cast[int64](op.constF64))
+  ctx.buf.emitFmovFromGpr(D0, X0)
+  ctx.storeRegF64(op.dest, D0)
+
+proc genAddF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(D0, op.binLeft)
+  ctx.loadRegF64(D1, op.binRight)
+  ctx.buf.emitFadd(D0, D0, D1)
+  ctx.storeRegF64(op.dest, D0)
+
+proc genSubF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(D0, op.binLeft)
+  ctx.loadRegF64(D1, op.binRight)
+  ctx.buf.emitFsub(D0, D0, D1)
+  ctx.storeRegF64(op.dest, D0)
+
+proc genMulF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(D0, op.binLeft)
+  ctx.loadRegF64(D1, op.binRight)
+  ctx.buf.emitFmul(D0, D0, D1)
+  ctx.storeRegF64(op.dest, D0)
+
+proc genDivF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(D0, op.binLeft)
+  ctx.loadRegF64(D1, op.binRight)
+  ctx.buf.emitFdiv(D0, D0, D1)
+  ctx.storeRegF64(op.dest, D0)
+
+proc genNegF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(D0, op.unaryArg)
+  ctx.buf.emitFneg(D0, D0)
+  ctx.storeRegF64(op.dest, D0)
+
+proc genLeF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(D0, op.binLeft)
+  ctx.loadRegF64(D1, op.binRight)
+  ctx.buf.emitFcmp(D0, D1)
+  ctx.buf.emitCsetFloatLe(X0)
+  ctx.storeReg(op.dest, X0)
+
+proc genLtF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(D0, op.binLeft)
+  ctx.loadRegF64(D1, op.binRight)
+  ctx.buf.emitFcmp(D0, D1)
+  ctx.buf.emitCsetFloatLt(X0)
+  ctx.storeReg(op.dest, X0)
+
+proc genGeF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(D0, op.binLeft)
+  ctx.loadRegF64(D1, op.binRight)
+  ctx.buf.emitFcmp(D0, D1)
+  ctx.buf.emitCsetFloatGe(X0)
+  ctx.storeReg(op.dest, X0)
+
+proc genGtF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(D0, op.binLeft)
+  ctx.loadRegF64(D1, op.binRight)
+  ctx.buf.emitFcmp(D0, D1)
+  ctx.buf.emitCsetFloatGt(X0)
+  ctx.storeReg(op.dest, X0)
+
+proc genEqF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(D0, op.binLeft)
+  ctx.loadRegF64(D1, op.binRight)
+  ctx.buf.emitFcmp(D0, D1)
+  ctx.buf.emitCsetFloatEq(X0)
+  ctx.storeReg(op.dest, X0)
+
+proc genNeF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(D0, op.binLeft)
+  ctx.loadRegF64(D1, op.binRight)
+  ctx.buf.emitFcmp(D0, D1)
+  ctx.buf.emitCsetFloatNe(X0)
+  ctx.storeReg(op.dest, X0)
+
 proc genBr*(ctx: CodegenContext, op: HirOp) =
   ctx.loadReg(X0, op.brCond)
   ctx.buf.emitCbz(X0, op.brElse)
@@ -334,7 +523,12 @@ proc genJump*(ctx: CodegenContext, op: HirOp) =
   ctx.buf.emitB(op.jumpTarget)
 
 proc genRet*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(X0, op.retValue)
+  if ctx.fn.returnType == HtF64:
+    # Load float, bitcast to int64 for uniform ABI return
+    ctx.loadRegF64(D0, op.retValue)
+    ctx.buf.emitFmovToGpr(X0, D0)
+  else:
+    ctx.loadReg(X0, op.retValue)
   if ctx.stackSize > 0:
     ctx.buf.emitAddSpImm(ctx.stackSize)
   ctx.buf.emitU32(INSN_LDP_FP_LR)
@@ -356,17 +550,29 @@ proc genCall*(ctx: CodegenContext, op: HirOp) =
 proc genOp*(ctx: CodegenContext, op: HirOp) =
   case op.kind
   of HokConstI64: ctx.genConstI64(op)
+  of HokConstF64: ctx.genConstF64(op)
   of HokAddI64: ctx.genAddI64(op)
   of HokSubI64: ctx.genSubI64(op)
   of HokMulI64: ctx.genMulI64(op)
   of HokDivI64: ctx.genDivI64(op)
   of HokNegI64: ctx.genNegI64(op)
+  of HokAddF64: ctx.genAddF64(op)
+  of HokSubF64: ctx.genSubF64(op)
+  of HokMulF64: ctx.genMulF64(op)
+  of HokDivF64: ctx.genDivF64(op)
+  of HokNegF64: ctx.genNegF64(op)
   of HokLeI64: ctx.genLeI64(op)
   of HokLtI64: ctx.genLtI64(op)
   of HokGeI64: ctx.genGeI64(op)
   of HokGtI64: ctx.genGtI64(op)
   of HokEqI64: ctx.genEqI64(op)
   of HokNeI64: ctx.genNeI64(op)
+  of HokLeF64: ctx.genLeF64(op)
+  of HokLtF64: ctx.genLtF64(op)
+  of HokGeF64: ctx.genGeF64(op)
+  of HokGtF64: ctx.genGtF64(op)
+  of HokEqF64: ctx.genEqF64(op)
+  of HokNeF64: ctx.genNeF64(op)
   of HokBr: ctx.genBr(op)
   of HokJump: ctx.genJump(op)
   of HokRet: ctx.genRet(op)
@@ -381,10 +587,16 @@ proc genPrologue*(ctx: CodegenContext) =
     ctx.buf.emitSubSpImm(ctx.stackSize)
 
   # Store parameters to stack slots
+  # All args arrive as int64 (uniform ABI). F64 params are bitcast in prologue.
   const argRegs = [X0, X1, X2, X3, X4, X5, X6, X7]
   let count = min(ctx.fn.params.len, argRegs.len)
   for i in 0..<count:
-    ctx.buf.emitStrReg(argRegs[i], int32(i) * 8)
+    if ctx.fn.params[i].typ == HtF64:
+      # Bitcast int64 → float64 and store as double
+      ctx.buf.emitFmovFromGpr(D0, argRegs[i])
+      ctx.buf.emitFStr(D0, int32(i) * 8)
+    else:
+      ctx.buf.emitStrReg(argRegs[i], int32(i) * 8)
 
 proc genBlock*(ctx: CodegenContext, blk: HirBlock) =
   ctx.buf.markLabel(blk.id)

@@ -1861,12 +1861,15 @@ proc to_function*(node: Value): Function {.gcsafe.} =
       raise new_exception(type_defs.Exception, "Invalid function definition: expected name or argument list")
 
   matcher.check_hint()
-  # Skip optional return type annotation: (-> Type)
+  # Parse optional return type annotation: (-> Type)
   if body_start < node.gene.children.len:
     let maybe_arrow = node.gene.children[body_start]
     if maybe_arrow.kind == VkSymbol and maybe_arrow.str == "->":
       if body_start + 1 >= node.gene.children.len:
         raise new_exception(type_defs.Exception, "Invalid function definition: missing return type after ->")
+      let ret_type = node.gene.children[body_start + 1]
+      if ret_type.kind == VkSymbol:
+        matcher.return_type_name = ret_type.str
       body_start += 2
 
   var body: seq[Value] = @[]

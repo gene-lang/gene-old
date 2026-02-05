@@ -1,0 +1,52 @@
+# Native float compilation tests
+# Tests that float-typed functions compile and execute natively with --native-code
+
+# Basic float arithmetic
+(fn add_f [a: Float b: Float] -> Float
+  (a + b))
+(println "add_f(1.5, 2.5) = " (add_f 1.5 2.5))
+# Expected: add_f(1.5, 2.5) = 4.0
+
+(fn sub_f [a: Float b: Float] -> Float
+  (a - b))
+(println "sub_f(10.0, 3.5) = " (sub_f 10.0 3.5))
+# Expected: sub_f(10.0, 3.5) = 6.5
+
+(fn mul_f [a: Float b: Float] -> Float
+  (a * b))
+(println "mul_f(3.0, 4.5) = " (mul_f 3.0 4.5))
+# Expected: mul_f(3.0, 4.5) = 13.5
+
+(fn div_f [a: Float b: Float] -> Float
+  (a / b))
+(println "div_f(10.0, 4.0) = " (div_f 10.0 4.0))
+# Expected: div_f(10.0, 4.0) = 2.5
+
+# Float comparison with branching
+(fn max_f [a: Float b: Float] -> Float
+  (if (a >= b) a else b))
+(println "max_f(3.5, 7.2) = " (max_f 3.5 7.2))
+# Expected: max_f(3.5, 7.2) = 7.2
+
+(fn min_f [a: Float b: Float] -> Float
+  (if (a <= b) a else b))
+(println "min_f(3.5, 7.2) = " (min_f 3.5 7.2))
+# Expected: min_f(3.5, 7.2) = 3.5
+
+# Float with inferred return type (no -> annotation)
+(fn double_it [x: Float]
+  (x * 2.0))
+(println "double_it(4.25) = " (double_it 4.25))
+# Expected: double_it(4.25) = 8.5
+
+# Recursive float function
+(fn float_sum [n: Float] -> Float
+  (if (n <= 0.0)
+    0.0
+  else
+    (n + (float_sum (n - 1.0)))))
+(println "float_sum(5.0) = " (float_sum 5.0))
+# Expected: float_sum(5.0) = 15.0
+
+(println "All native float tests passed")
+# Expected: All native float tests passed

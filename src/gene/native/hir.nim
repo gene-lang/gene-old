@@ -59,13 +59,21 @@ type
     HokDivF64       ## %r = div.f64 %a, %b
     HokNegF64       ## %r = neg.f64 %a
 
-    # Comparisons (produce HtBool)
+    # Integer comparisons (produce HtBool)
     HokLeI64        ## %r = le.i64 %a, %b  (a <= b)
     HokLtI64        ## %r = lt.i64 %a, %b  (a < b)
     HokGeI64        ## %r = ge.i64 %a, %b  (a >= b)
     HokGtI64        ## %r = gt.i64 %a, %b  (a > b)
     HokEqI64        ## %r = eq.i64 %a, %b  (a == b)
     HokNeI64        ## %r = ne.i64 %a, %b  (a != b)
+
+    # Float comparisons (produce HtBool)
+    HokLeF64        ## %r = le.f64 %a, %b  (a <= b)
+    HokLtF64        ## %r = lt.f64 %a, %b  (a < b)
+    HokGeF64        ## %r = ge.f64 %a, %b  (a >= b)
+    HokGtF64        ## %r = gt.f64 %a, %b  (a > b)
+    HokEqF64        ## %r = eq.f64 %a, %b  (a == b)
+    HokNeF64        ## %r = ne.f64 %a, %b  (a != b)
 
     # Control flow
     HokBr           ## br %cond, then_block, else_block
@@ -107,7 +115,8 @@ type
       unaryArg*: HirReg
     of HokAddI64, HokSubI64, HokMulI64, HokDivI64,
        HokAddF64, HokSubF64, HokMulF64, HokDivF64,
-       HokLeI64, HokLtI64, HokGeI64, HokGtI64, HokEqI64, HokNeI64:
+       HokLeI64, HokLtI64, HokGeI64, HokGtI64, HokEqI64, HokNeI64,
+       HokLeF64, HokLtF64, HokGeF64, HokGtF64, HokEqF64, HokNeF64:
       binLeft*: HirReg
       binRight*: HirReg
     of HokBr:
@@ -276,6 +285,56 @@ proc emitNeI64*(b: HirBuilder, left, right: HirReg): HirReg =
   result = b.allocReg()
   b.emit(HirOp(kind: HokNeI64, dest: result, destType: HtBool, binLeft: left, binRight: right))
 
+# Float builder helpers
+
+proc emitConstF64*(b: HirBuilder, value: float64): HirReg =
+  result = b.allocReg()
+  b.emit(HirOp(kind: HokConstF64, dest: result, destType: HtF64, constF64: value))
+
+proc emitAddF64*(b: HirBuilder, left, right: HirReg): HirReg =
+  result = b.allocReg()
+  b.emit(HirOp(kind: HokAddF64, dest: result, destType: HtF64, binLeft: left, binRight: right))
+
+proc emitSubF64*(b: HirBuilder, left, right: HirReg): HirReg =
+  result = b.allocReg()
+  b.emit(HirOp(kind: HokSubF64, dest: result, destType: HtF64, binLeft: left, binRight: right))
+
+proc emitMulF64*(b: HirBuilder, left, right: HirReg): HirReg =
+  result = b.allocReg()
+  b.emit(HirOp(kind: HokMulF64, dest: result, destType: HtF64, binLeft: left, binRight: right))
+
+proc emitDivF64*(b: HirBuilder, left, right: HirReg): HirReg =
+  result = b.allocReg()
+  b.emit(HirOp(kind: HokDivF64, dest: result, destType: HtF64, binLeft: left, binRight: right))
+
+proc emitNegF64*(b: HirBuilder, value: HirReg): HirReg =
+  result = b.allocReg()
+  b.emit(HirOp(kind: HokNegF64, dest: result, destType: HtF64, unaryArg: value))
+
+proc emitLeF64*(b: HirBuilder, left, right: HirReg): HirReg =
+  result = b.allocReg()
+  b.emit(HirOp(kind: HokLeF64, dest: result, destType: HtBool, binLeft: left, binRight: right))
+
+proc emitLtF64*(b: HirBuilder, left, right: HirReg): HirReg =
+  result = b.allocReg()
+  b.emit(HirOp(kind: HokLtF64, dest: result, destType: HtBool, binLeft: left, binRight: right))
+
+proc emitGeF64*(b: HirBuilder, left, right: HirReg): HirReg =
+  result = b.allocReg()
+  b.emit(HirOp(kind: HokGeF64, dest: result, destType: HtBool, binLeft: left, binRight: right))
+
+proc emitGtF64*(b: HirBuilder, left, right: HirReg): HirReg =
+  result = b.allocReg()
+  b.emit(HirOp(kind: HokGtF64, dest: result, destType: HtBool, binLeft: left, binRight: right))
+
+proc emitEqF64*(b: HirBuilder, left, right: HirReg): HirReg =
+  result = b.allocReg()
+  b.emit(HirOp(kind: HokEqF64, dest: result, destType: HtBool, binLeft: left, binRight: right))
+
+proc emitNeF64*(b: HirBuilder, left, right: HirReg): HirReg =
+  result = b.allocReg()
+  b.emit(HirOp(kind: HokNeF64, dest: result, destType: HtBool, binLeft: left, binRight: right))
+
 proc emitBr*(b: HirBuilder, cond: HirReg, thenBlock, elseBlock: HirBlockId) =
   b.emit(HirOp(kind: HokBr, dest: newHirReg(-1), destType: HtVoid,
                brCond: cond, brThen: thenBlock, brElse: elseBlock))
@@ -348,6 +407,18 @@ proc `$`*(op: HirOp): string =
     result = fmt"{op.dest} = eq.i64 {op.binLeft}, {op.binRight}"
   of HokNeI64:
     result = fmt"{op.dest} = ne.i64 {op.binLeft}, {op.binRight}"
+  of HokLeF64:
+    result = fmt"{op.dest} = le.f64 {op.binLeft}, {op.binRight}"
+  of HokLtF64:
+    result = fmt"{op.dest} = lt.f64 {op.binLeft}, {op.binRight}"
+  of HokGeF64:
+    result = fmt"{op.dest} = ge.f64 {op.binLeft}, {op.binRight}"
+  of HokGtF64:
+    result = fmt"{op.dest} = gt.f64 {op.binLeft}, {op.binRight}"
+  of HokEqF64:
+    result = fmt"{op.dest} = eq.f64 {op.binLeft}, {op.binRight}"
+  of HokNeF64:
+    result = fmt"{op.dest} = ne.f64 {op.binLeft}, {op.binRight}"
   of HokBr:
     result = fmt"br {op.brCond}, {op.brThen}, {op.brElse}"
   of HokJump:

@@ -46,9 +46,13 @@ proc native_args_supported(f: Function, args: seq[Value]): bool =
     return false
   for i, param in f.matcher.children:
     let type_name = param.type_name.toLowerAscii()
-    if type_name notin ["int", "int64", "i64"]:
-      return false
-    if args[i].kind != VkInt:
+    if type_name in ["int", "int64", "i64"]:
+      if args[i].kind != VkInt:
+        return false
+    elif type_name in ["float", "float64", "f64"]:
+      if args[i].kind != VkFloat:
+        return false
+    else:
       return false
   true
 
@@ -70,6 +74,16 @@ proc try_native_call(self: ptr VirtualMachine, f: Function, args: seq[Value], ou
       return false
     f.native_entry = compiled.entry
     f.native_ready = true
+    # Determine if return value is float (from HIR inference or explicit annotation)
+    f.native_return_float = compiled.returnFloat
+
+  # Convert args to int64 (uniform ABI: floats are bitcast to int64)
+  proc arg_to_i64(v: Value): int64 {.inline.} =
+    if v.kind == VkFloat:
+      cast[int64](v.to_float())
+    else:
+      v.to_int()
+
   type
     NativeFn0 = proc(): int64 {.cdecl.}
     NativeFn1 = proc(a0: int64): int64 {.cdecl.}
@@ -80,39 +94,45 @@ proc try_native_call(self: ptr VirtualMachine, f: Function, args: seq[Value], ou
     NativeFn6 = proc(a0, a1, a2, a3, a4, a5: int64): int64 {.cdecl.}
     NativeFn7 = proc(a0, a1, a2, a3, a4, a5, a6: int64): int64 {.cdecl.}
     NativeFn8 = proc(a0, a1, a2, a3, a4, a5, a6, a7: int64): int64 {.cdecl.}
+  var result_i64: int64
   case args.len
   of 0:
-    out_value = cast[NativeFn0](f.native_entry)().to_value()
+    result_i64 = cast[NativeFn0](f.native_entry)()
   of 1:
-    out_value = cast[NativeFn1](f.native_entry)(args[0].to_int()).to_value()
+    result_i64 = cast[NativeFn1](f.native_entry)(args[0].arg_to_i64())
   of 2:
-    out_value = cast[NativeFn2](f.native_entry)(args[0].to_int(), args[1].to_int()).to_value()
+    result_i64 = cast[NativeFn2](f.native_entry)(args[0].arg_to_i64(), args[1].arg_to_i64())
   of 3:
-    out_value = cast[NativeFn3](f.native_entry)(args[0].to_int(), args[1].to_int(), args[2].to_int()).to_value()
+    result_i64 = cast[NativeFn3](f.native_entry)(args[0].arg_to_i64(), args[1].arg_to_i64(), args[2].arg_to_i64())
   of 4:
-    out_value = cast[NativeFn4](f.native_entry)(
-      args[0].to_int(), args[1].to_int(), args[2].to_int(), args[3].to_int()
-    ).to_value()
+    result_i64 = cast[NativeFn4](f.native_entry)(
+      args[0].arg_to_i64(), args[1].arg_to_i64(), args[2].arg_to_i64(), args[3].arg_to_i64()
+    )
   of 5:
-    out_value = cast[NativeFn5](f.native_entry)(
-      args[0].to_int(), args[1].to_int(), args[2].to_int(), args[3].to_int(), args[4].to_int()
-    ).to_value()
+    result_i64 = cast[NativeFn5](f.native_entry)(
+      args[0].arg_to_i64(), args[1].arg_to_i64(), args[2].arg_to_i64(), args[3].arg_to_i64(), args[4].arg_to_i64()
+    )
   of 6:
-    out_value = cast[NativeFn6](f.native_entry)(
-      args[0].to_int(), args[1].to_int(), args[2].to_int(), args[3].to_int(), args[4].to_int(), args[5].to_int()
-    ).to_value()
+    result_i64 = cast[NativeFn6](f.native_entry)(
+      args[0].arg_to_i64(), args[1].arg_to_i64(), args[2].arg_to_i64(), args[3].arg_to_i64(), args[4].arg_to_i64(), args[5].arg_to_i64()
+    )
   of 7:
-    out_value = cast[NativeFn7](f.native_entry)(
-      args[0].to_int(), args[1].to_int(), args[2].to_int(), args[3].to_int(),
-      args[4].to_int(), args[5].to_int(), args[6].to_int()
-    ).to_value()
+    result_i64 = cast[NativeFn7](f.native_entry)(
+      args[0].arg_to_i64(), args[1].arg_to_i64(), args[2].arg_to_i64(), args[3].arg_to_i64(),
+      args[4].arg_to_i64(), args[5].arg_to_i64(), args[6].arg_to_i64()
+    )
   of 8:
-    out_value = cast[NativeFn8](f.native_entry)(
-      args[0].to_int(), args[1].to_int(), args[2].to_int(), args[3].to_int(),
-      args[4].to_int(), args[5].to_int(), args[6].to_int(), args[7].to_int()
-    ).to_value()
+    result_i64 = cast[NativeFn8](f.native_entry)(
+      args[0].arg_to_i64(), args[1].arg_to_i64(), args[2].arg_to_i64(), args[3].arg_to_i64(),
+      args[4].arg_to_i64(), args[5].arg_to_i64(), args[6].arg_to_i64(), args[7].arg_to_i64()
+    )
   else:
     return false
+  # Unbox result: if return type is float, bitcast int64 back to float64
+  if f.native_return_float:
+    out_value = cast[float64](result_i64).to_value()
+  else:
+    out_value = result_i64.to_value()
   true
 
 proc skip_wildcard_import_key(key: Key): bool {.inline.} =

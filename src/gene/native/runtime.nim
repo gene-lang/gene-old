@@ -18,6 +18,7 @@ type
     entry*: pointer
     code*: seq[byte]
     message*: string
+    returnFloat*: bool  # True if native function returns float64 (bitcast as int64)
 
 when defined(posix):
   import std/posix
@@ -31,6 +32,8 @@ proc validate_hir(fn: HirFunction): bool =
       case op.kind
       of HokConstI64, HokAddI64, HokSubI64, HokMulI64, HokDivI64, HokNegI64,
          HokLeI64, HokLtI64, HokGeI64, HokGtI64, HokEqI64, HokNeI64,
+         HokConstF64, HokAddF64, HokSubF64, HokMulF64, HokDivF64, HokNegF64,
+         HokLeF64, HokLtF64, HokGeF64, HokGtF64, HokEqF64, HokNeF64,
          HokBr, HokJump, HokRet, HokCall:
         if op.kind == HokCall and op.callTarget != fn.name:
           return false
@@ -90,5 +93,6 @@ proc compile_to_native*(cu: CompilationUnit, fn_name: string): NativeCompileResu
     result.ok = true
     result.entry = entry
     result.code = code
+    result.returnFloat = hir.returnType == HtF64
   except CatchableError as e:
     result.message = "Native codegen failed: " & e.msg

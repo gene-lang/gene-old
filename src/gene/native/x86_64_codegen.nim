@@ -24,6 +24,10 @@ type
     RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI,
     R8, R9, R10, R11, R12, R13, R14, R15
 
+  ## SSE registers for floating point
+  XmmReg* = enum
+    XMM0 = 0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7
+
   ## Code buffer for emitting bytes
   CodeBuffer* = ref object
     code*: seq[byte]
@@ -311,6 +315,103 @@ proc emitAddRspImm*(buf: CodeBuffer, imm: int32) =
   buf.emit(0xC4)  # ModR/M for /0, RSP
   buf.emitI32(imm)
 
+# ==================== SSE2 Float Instructions ====================
+
+proc xmmCode(r: XmmReg): byte {.inline.} =
+  byte(ord(r) and 0x07)
+
+proc emitMovsdLoad*(buf: CodeBuffer, dst: XmmReg, base: X86Reg, offset: int32) =
+  ## movsd xmm, [base + offset]  (F2 0F 10 /r)
+  buf.emit(0xF2)
+  let rex = rexForReg(X86Reg(ord(dst)), base)
+  if rex != 0 or needsRex(base):
+    buf.emit(REX_W or rex)
+  buf.emit(0x0F)
+  buf.emit(0x10)
+  if offset == 0 and base != RBP and base != R13:
+    buf.emit(modRM(0b00, X86Reg(ord(dst)), base))
+  elif offset >= -128 and offset <= 127:
+    buf.emit(modRM(0b01, X86Reg(ord(dst)), base))
+    buf.emit(byte(offset and 0xFF))
+  else:
+    buf.emit(modRM(0b10, X86Reg(ord(dst)), base))
+    buf.emitI32(offset)
+
+proc emitMovsdStore*(buf: CodeBuffer, base: X86Reg, offset: int32, src: XmmReg) =
+  ## movsd [base + offset], xmm  (F2 0F 11 /r)
+  buf.emit(0xF2)
+  let rex = rexForReg(X86Reg(ord(src)), base)
+  if rex != 0 or needsRex(base):
+    buf.emit(REX_W or rex)
+  buf.emit(0x0F)
+  buf.emit(0x11)
+  if offset == 0 and base != RBP and base != R13:
+    buf.emit(modRM(0b00, X86Reg(ord(src)), base))
+  elif offset >= -128 and offset <= 127:
+    buf.emit(modRM(0b01, X86Reg(ord(src)), base))
+    buf.emit(byte(offset and 0xFF))
+  else:
+    buf.emit(modRM(0b10, X86Reg(ord(src)), base))
+    buf.emitI32(offset)
+
+proc emitAddsd*(buf: CodeBuffer, dst, src: XmmReg) =
+  ## addsd dst, src  (F2 0F 58 /r)
+  buf.emit(0xF2)
+  buf.emit(0x0F)
+  buf.emit(0x58)
+  buf.emit(modRM(0b11, X86Reg(ord(dst)), X86Reg(ord(src))))
+
+proc emitSubsd*(buf: CodeBuffer, dst, src: XmmReg) =
+  ## subsd dst, src  (F2 0F 5C /r)
+  buf.emit(0xF2)
+  buf.emit(0x0F)
+  buf.emit(0x5C)
+  buf.emit(modRM(0b11, X86Reg(ord(dst)), X86Reg(ord(src))))
+
+proc emitMulsd*(buf: CodeBuffer, dst, src: XmmReg) =
+  ## mulsd dst, src  (F2 0F 59 /r)
+  buf.emit(0xF2)
+  buf.emit(0x0F)
+  buf.emit(0x59)
+  buf.emit(modRM(0b11, X86Reg(ord(dst)), X86Reg(ord(src))))
+
+proc emitDivsd*(buf: CodeBuffer, dst, src: XmmReg) =
+  ## divsd dst, src  (F2 0F 5E /r)
+  buf.emit(0xF2)
+  buf.emit(0x0F)
+  buf.emit(0x5E)
+  buf.emit(modRM(0b11, X86Reg(ord(dst)), X86Reg(ord(src))))
+
+proc emitUcomisd*(buf: CodeBuffer, left, right: XmmReg) =
+  ## ucomisd left, right  (66 0F 2E /r) - sets EFLAGS for float comparison
+  buf.emit(0x66)
+  buf.emit(0x0F)
+  buf.emit(0x2E)
+  buf.emit(modRM(0b11, X86Reg(ord(left)), X86Reg(ord(right))))
+
+proc emitMovqGprToXmm*(buf: CodeBuffer, dst: XmmReg, src: X86Reg) =
+  ## movq xmm, gpr  (66 REX.W 0F 6E /r) - bitcast int64 -> float64
+  buf.emit(0x66)
+  buf.emit(REX_W or rexForReg(X86Reg(ord(dst)), src))
+  buf.emit(0x0F)
+  buf.emit(0x6E)
+  buf.emit(modRM(0b11, X86Reg(ord(dst)), src))
+
+proc emitMovqXmmToGpr*(buf: CodeBuffer, dst: X86Reg, src: XmmReg) =
+  ## movq gpr, xmm  (66 REX.W 0F 7E /r) - bitcast float64 -> int64
+  buf.emit(0x66)
+  buf.emit(REX_W or rexForReg(X86Reg(ord(src)), dst))
+  buf.emit(0x0F)
+  buf.emit(0x7E)
+  buf.emit(modRM(0b11, X86Reg(ord(src)), dst))
+
+proc emitXorpd*(buf: CodeBuffer, dst, src: XmmReg) =
+  ## xorpd dst, src  (66 0F 57 /r) - for zeroing or sign-flip
+  buf.emit(0x66)
+  buf.emit(0x0F)
+  buf.emit(0x57)
+  buf.emit(modRM(0b11, X86Reg(ord(dst)), X86Reg(ord(src))))
+
 # ==================== Codegen Context ====================
 
 proc newCodegenContext*(fn: HirFunction): CodegenContext =
@@ -442,11 +543,107 @@ proc genJump*(ctx: CodegenContext, op: HirOp) =
   ctx.buf.emitJmp(op.jumpTarget)
 
 proc genRet*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(RAX, op.retValue)
+  if ctx.fn.returnType == HtF64:
+    # Load float, bitcast to int64 for uniform ABI return
+    ctx.loadRegF64(XMM0, op.retValue)
+    ctx.buf.emitMovqXmmToGpr(RAX, XMM0)
+  else:
+    ctx.loadReg(RAX, op.retValue)
   # Epilogue
   ctx.buf.emitMovRegReg(RSP, RBP)
   ctx.buf.emitPop(RBP)
   ctx.buf.emitRet()
+
+proc loadRegF64*(ctx: CodegenContext, dst: XmmReg, hirReg: HirReg) =
+  ctx.buf.emitMovsdLoad(dst, RBP, ctx.regOffset(hirReg))
+
+proc storeRegF64*(ctx: CodegenContext, hirReg: HirReg, src: XmmReg) =
+  ctx.buf.emitMovsdStore(RBP, ctx.regOffset(hirReg), src)
+
+proc genConstF64*(ctx: CodegenContext, op: HirOp) =
+  # Load float constant via integer register bitcast
+  ctx.buf.emitMovRegImm64(RAX, cast[int64](op.constF64))
+  ctx.buf.emitMovqGprToXmm(XMM0, RAX)
+  ctx.storeRegF64(op.dest, XMM0)
+
+proc genAddF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(XMM0, op.binLeft)
+  ctx.loadRegF64(XMM1, op.binRight)
+  ctx.buf.emitAddsd(XMM0, XMM1)
+  ctx.storeRegF64(op.dest, XMM0)
+
+proc genSubF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(XMM0, op.binLeft)
+  ctx.loadRegF64(XMM1, op.binRight)
+  ctx.buf.emitSubsd(XMM0, XMM1)
+  ctx.storeRegF64(op.dest, XMM0)
+
+proc genMulF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(XMM0, op.binLeft)
+  ctx.loadRegF64(XMM1, op.binRight)
+  ctx.buf.emitMulsd(XMM0, XMM1)
+  ctx.storeRegF64(op.dest, XMM0)
+
+proc genDivF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(XMM0, op.binLeft)
+  ctx.loadRegF64(XMM1, op.binRight)
+  ctx.buf.emitDivsd(XMM0, XMM1)
+  ctx.storeRegF64(op.dest, XMM0)
+
+proc genNegF64*(ctx: CodegenContext, op: HirOp) =
+  # neg via subtraction from zero: 0.0 - value
+  ctx.buf.emitXorpd(XMM0, XMM0)  # XMM0 = 0.0
+  ctx.loadRegF64(XMM1, op.unaryArg)
+  ctx.buf.emitSubsd(XMM0, XMM1)
+  ctx.storeRegF64(op.dest, XMM0)
+
+proc genLeF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(XMM0, op.binLeft)
+  ctx.loadRegF64(XMM1, op.binRight)
+  ctx.buf.emitUcomisd(XMM1, XMM0)  # Compare right, left → CF set if left <= right
+  ctx.buf.emitSetCC(RAX, 0x93)     # setae al (above or equal = CF=0)
+  ctx.buf.emitMovzxRegByte(RAX)
+  ctx.storeReg(op.dest, RAX)
+
+proc genLtF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(XMM0, op.binLeft)
+  ctx.loadRegF64(XMM1, op.binRight)
+  ctx.buf.emitUcomisd(XMM1, XMM0)  # Compare right, left → CF set if left < right
+  ctx.buf.emitSetCC(RAX, 0x97)     # seta al (above = CF=0 and ZF=0)
+  ctx.buf.emitMovzxRegByte(RAX)
+  ctx.storeReg(op.dest, RAX)
+
+proc genGeF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(XMM0, op.binLeft)
+  ctx.loadRegF64(XMM1, op.binRight)
+  ctx.buf.emitUcomisd(XMM0, XMM1)  # Compare left, right
+  ctx.buf.emitSetCC(RAX, 0x93)     # setae al
+  ctx.buf.emitMovzxRegByte(RAX)
+  ctx.storeReg(op.dest, RAX)
+
+proc genGtF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(XMM0, op.binLeft)
+  ctx.loadRegF64(XMM1, op.binRight)
+  ctx.buf.emitUcomisd(XMM0, XMM1)  # Compare left, right
+  ctx.buf.emitSetCC(RAX, 0x97)     # seta al
+  ctx.buf.emitMovzxRegByte(RAX)
+  ctx.storeReg(op.dest, RAX)
+
+proc genEqF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(XMM0, op.binLeft)
+  ctx.loadRegF64(XMM1, op.binRight)
+  ctx.buf.emitUcomisd(XMM0, XMM1)
+  ctx.buf.emitSetEQ(RAX)
+  ctx.buf.emitMovzxRegByte(RAX)
+  ctx.storeReg(op.dest, RAX)
+
+proc genNeF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(XMM0, op.binLeft)
+  ctx.loadRegF64(XMM1, op.binRight)
+  ctx.buf.emitUcomisd(XMM0, XMM1)
+  ctx.buf.emitSetNE(RAX)
+  ctx.buf.emitMovzxRegByte(RAX)
+  ctx.storeReg(op.dest, RAX)
 
 proc genCall*(ctx: CodegenContext, op: HirOp) =
   # Load arguments into System V ABI registers
@@ -471,17 +668,29 @@ proc genCall*(ctx: CodegenContext, op: HirOp) =
 proc genOp*(ctx: CodegenContext, op: HirOp) =
   case op.kind
   of HokConstI64: ctx.genConstI64(op)
+  of HokConstF64: ctx.genConstF64(op)
   of HokAddI64: ctx.genAddI64(op)
   of HokSubI64: ctx.genSubI64(op)
   of HokMulI64: ctx.genMulI64(op)
   of HokDivI64: ctx.genDivI64(op)
   of HokNegI64: ctx.genNegI64(op)
+  of HokAddF64: ctx.genAddF64(op)
+  of HokSubF64: ctx.genSubF64(op)
+  of HokMulF64: ctx.genMulF64(op)
+  of HokDivF64: ctx.genDivF64(op)
+  of HokNegF64: ctx.genNegF64(op)
   of HokLeI64: ctx.genLeI64(op)
   of HokLtI64: ctx.genLtI64(op)
   of HokGeI64: ctx.genGeI64(op)
   of HokGtI64: ctx.genGtI64(op)
   of HokEqI64: ctx.genEqI64(op)
   of HokNeI64: ctx.genNeI64(op)
+  of HokLeF64: ctx.genLeF64(op)
+  of HokLtF64: ctx.genLtF64(op)
+  of HokGeF64: ctx.genGeF64(op)
+  of HokGtF64: ctx.genGtF64(op)
+  of HokEqF64: ctx.genEqF64(op)
+  of HokNeF64: ctx.genNeF64(op)
   of HokBr: ctx.genBr(op)
   of HokJump: ctx.genJump(op)
   of HokRet: ctx.genRet(op)
@@ -493,15 +702,21 @@ proc genOp*(ctx: CodegenContext, op: HirOp) =
 
 proc genPrologue*(ctx: CodegenContext) =
   ## Generate function prologue
+  ## All args arrive in integer registers (uniform int64 ABI).
+  ## F64 params are bitcast from int64 in the prologue.
   ctx.buf.emitPush(RBP)
   ctx.buf.emitMovRegReg(RBP, RSP)
   ctx.buf.emitSubRspImm(ctx.stackSize)
 
-  # Store parameters (System V ABI) to HIR register slots
   const argRegs = [RDI, RSI, RDX, RCX, R8, R9]
   let count = min(ctx.fn.params.len, argRegs.len)
   for i in 0..<count:
-    ctx.buf.emitMovMemReg(RBP, ctx.regOffset(newHirReg(i.int32)), argRegs[i])
+    if ctx.fn.params[i].typ == HtF64:
+      # Bitcast int64 → float64 and store as double
+      ctx.buf.emitMovqGprToXmm(XMM0, argRegs[i])
+      ctx.buf.emitMovsdStore(RBP, ctx.regOffset(newHirReg(i.int32)), XMM0)
+    else:
+      ctx.buf.emitMovMemReg(RBP, ctx.regOffset(newHirReg(i.int32)), argRegs[i])
 
 proc genBlock*(ctx: CodegenContext, blk: HirBlock) =
   ctx.buf.markLabel(blk.id)

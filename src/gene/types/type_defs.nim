@@ -401,6 +401,7 @@ type
     native_entry*: pointer  # JIT entry point (NativeFnPtr)
     native_ready*: bool
     native_failed*: bool
+    native_return_float*: bool  # True if native return value should be interpreted as float64
     # ret*: Expr
 
   Block* = ref object
@@ -424,6 +425,7 @@ type
     hint_mode*: MatchingHintMode
     children*: seq[Matcher]
     has_type_annotations*: bool  # True if any child has a type annotation
+    return_type_name*: string  # Return type annotation from -> (e.g. "Int", "Float")
 
   MatchingHintMode* {.size: sizeof(int16) .} = enum
     MhDefault
