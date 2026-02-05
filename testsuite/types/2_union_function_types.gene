@@ -1,0 +1,29 @@
+# Union types and function type compatibility
+
+(type UserId (Int | String))
+
+(var uid: UserId 99)
+(println "uid=" uid)
+# Expected: uid=99
+
+(uid = "abc")
+(println "uid=" uid)
+# Expected: uid=abc
+
+(fn show_user [id: UserId]
+  (println "user_id=" id))
+
+(show_user 42)
+# Expected: user_id=42
+
+(show_user "alice")
+# Expected: user_id=alice
+
+(fn add [a: Int b: Int] -> Int
+  (a + b))
+
+(fn apply_two [f: (Fn [Int Int] Int) x: Int y: Int]
+  (f x y))
+
+(println "add=" (apply_two add 2 3))
+# Expected: add=5
