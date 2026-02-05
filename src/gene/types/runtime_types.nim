@@ -29,6 +29,7 @@ type
     of RtFn:
       params: seq[RtType]
       ret: RtType
+      effects: seq[string]
 
 var rt_type_cache_initialized {.threadvar.}: bool
 var rt_type_cache {.threadvar.}: Table[string, RtType]
@@ -82,10 +83,30 @@ proc parse_type_atom(s: string, i: var int): RtType =
           else:
             params.add(parse_type_expr(s, i))
         let ret_type = parse_type_expr(s, i)
+        var effects: seq[string] = @[]
+        skip_ws(s, i)
+        if i < s.len and s[i] == '!':
+          i.inc
+          skip_ws(s, i)
+          if i < s.len and s[i] == '[':
+            i.inc
+            while i < s.len:
+              skip_ws(s, i)
+              if i < s.len and s[i] == ']':
+                i.inc
+                break
+              let eff = parse_symbol(s, i)
+              if eff.len > 0:
+                effects.add(eff)
+              else:
+                break
+          else:
+            # Invalid effect list; treat as Any
+            effects = @[]
         skip_ws(s, i)
         if i < s.len and s[i] == ')':
           i.inc
-        return RtType(kind: RtFn, params: params, ret: ret_type)
+        return RtType(kind: RtFn, params: params, ret: ret_type, effects: effects)
       elif sym.len > 0:
         var parts: seq[RtType] = @[RtType(kind: RtNamed, name: sym)]
         var union_mode = false
@@ -296,6 +317,21 @@ proc is_named_compatible(value: Value, expected_type: string): bool =
         current = current.parent
   return false
 
+proc effects_compatible(expected: seq[string], actual: seq[string]): bool =
+  if expected.len == 0:
+    return actual.len == 0
+  if actual.len == 0:
+    return true
+  for eff in actual:
+    var found = false
+    for allowed in expected:
+      if allowed == eff:
+        found = true
+        break
+    if not found:
+      return false
+  return true
+
 proc type_expr_compatible(actual: RtType, expected: RtType): bool =
   if actual == nil or expected == nil:
     return true
@@ -325,7 +361,11 @@ proc type_expr_compatible(actual: RtType, expected: RtType): bool =
     for i in 0..<actual.params.len:
       if not type_expr_compatible(actual.params[i], expected.params[i]):
         return false
-    return type_expr_compatible(actual.ret, expected.ret)
+    if not type_expr_compatible(actual.ret, expected.ret):
+      return false
+    if not effects_compatible(expected.effects, actual.effects):
+      return false
+    return true
   return false
 
 proc function_value_compatible(value: Value, expected: RtType): bool =

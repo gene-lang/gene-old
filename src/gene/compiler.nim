@@ -1738,10 +1738,13 @@ proc compile_method_definition(self: Compiler, gene: ptr Gene) =
   fn_value.gene.type = "fn".to_symbol_value()
   let param_key = TC_PARAM_TYPES_KEY.to_key()
   let return_key = TC_RETURN_TYPE_KEY.to_key()
+  let effects_key = TC_EFFECTS_KEY.to_key()
   if gene.props.has_key(param_key):
     fn_value.gene.props[param_key] = gene.props[param_key]
   if gene.props.has_key(return_key):
     fn_value.gene.props[return_key] = gene.props[return_key]
+  if gene.props.has_key(effects_key):
+    fn_value.gene.props[effects_key] = gene.props[effects_key]
   
   # Add the method name
   fn_value.gene.children.add(gene.children[0])
@@ -1803,10 +1806,13 @@ proc compile_constructor_definition(self: Compiler, gene: ptr Gene) =
   fn_value.gene.type = "fn".to_symbol_value()
   let param_key = TC_PARAM_TYPES_KEY.to_key()
   let return_key = TC_RETURN_TYPE_KEY.to_key()
+  let effects_key = TC_EFFECTS_KEY.to_key()
   if gene.props.has_key(param_key):
     fn_value.gene.props[param_key] = gene.props[param_key]
   if gene.props.has_key(return_key):
     fn_value.gene.props[return_key] = gene.props[return_key]
+  if gene.props.has_key(effects_key):
+    fn_value.gene.props[effects_key] = gene.props[effects_key]
   fn_value.gene.children.add(gene.type.str.to_symbol_value())
   
   # Handle args - always normalize to an array

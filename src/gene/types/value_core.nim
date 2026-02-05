@@ -1814,7 +1814,17 @@ proc type_expr_to_string*(v: Value): string =
             i += 1
       let ret =
         if gene.children.len > 1: type_expr_to_string(gene.children[1]) else: "Any"
-      return "(Fn [" & params.join(" ") & "] " & ret & ")"
+      var effects: seq[string] = @[]
+      if gene.children.len > 2:
+        let maybe_bang = gene.children[2]
+        if maybe_bang.kind == VkSymbol and maybe_bang.str == "!" and gene.children.len > 3:
+          let effect_list = gene.children[3]
+          if effect_list.kind == VkArray:
+            for eff in array_data(effect_list):
+              effects.add(type_expr_to_string(eff))
+      let effect_suffix =
+        if effects.len > 0: " ! [" & effects.join(" ") & "]" else: ""
+      return "(Fn [" & params.join(" ") & "] " & ret & effect_suffix & ")"
     if is_union_gene(gene):
       var parts: seq[string] = @[]
       for member in union_members(v):

@@ -39,6 +39,7 @@ type
       ret*: TypeExpr
       variadic*: bool
       kw_splat*: bool
+      effects*: seq[string]
     of TkVar:
       id*: int
 
@@ -70,6 +71,7 @@ type
     current_return*: TypeExpr
     current_class*: string
     init_self_stack*: seq[TypeExpr]
+    effect_stack*: seq[seq[string]]
 
 let ANY_TYPE = TypeExpr(kind: TkAny)
 
@@ -100,6 +102,41 @@ proc key_to_string(key: Key): string {.inline.} =
   except CatchableError:
     result = "<keyword>"
 
+proc effects_to_string(effects: seq[string]): string =
+  if effects.len == 0:
+    return "[]"
+  "[" & effects.join(" ") & "]"
+
+proc effects_compatible(expected: seq[string], actual: seq[string]): bool =
+  if expected.len == 0:
+    return actual.len == 0
+  if actual.len == 0:
+    return true
+  for eff in actual:
+    var found = false
+    for allowed in expected:
+      if allowed == eff:
+        found = true
+        break
+    if not found:
+      return false
+  return true
+
+proc ensure_effects_allowed(self: TypeChecker, required: seq[string], context: string) =
+  if required.len == 0:
+    return
+  if self.effect_stack.len == 0:
+    return
+  let allowed = self.effect_stack[^1]
+  for eff in required:
+    var ok = false
+    for allow in allowed:
+      if allow == eff:
+        ok = true
+        break
+    if not ok:
+      raise new_exception(types.Exception, "Effect error: " & eff & " not allowed in " & context)
+
 proc register_builtin_adts(self: TypeChecker)
 
 proc new_type_checker*(strict: bool = true): TypeChecker =
@@ -113,7 +150,8 @@ proc new_type_checker*(strict: bool = true): TypeChecker =
     classes: initTable[string, ClassInfo](),
     current_return: ANY_TYPE,
     current_class: "",
-    init_self_stack: @[]
+    init_self_stack: @[],
+    effect_stack: @[]
   )
   result.register_builtin_adts()
 
@@ -257,6 +295,8 @@ proc unify(self: TypeChecker, a: TypeExpr, b: TypeExpr, context: string) =
     for i in 0..<ta.params.len:
       self.unify(ta.params[i].typ, tb.params[i].typ, context)
     self.unify(ta.ret, tb.ret, context)
+    if not effects_compatible(ta.effects, tb.effects):
+      raise new_exception(types.Exception, "Type error: effect mismatch (expected " & effects_to_string(ta.effects) & ", got " & effects_to_string(tb.effects) & ") in " & context)
   of TkAny, TkVar:
     discard
 
@@ -286,7 +326,10 @@ proc type_to_string(t: TypeExpr): string =
         params.add("^" & p.label & " " & type_to_string(p.typ))
       else:
         params.add(type_to_string(p.typ))
-    return "(Fn [" & params.join(" ") & "] " & type_to_string(rt.ret) & ")"
+    var effects = ""
+    if rt.effects.len > 0:
+      effects = " ! [" & rt.effects.join(" ") & "]"
+    return "(Fn [" & params.join(" ") & "] " & type_to_string(rt.ret) & effects & ")"
   of TkVar:
     return "T" & $rt.id
 
@@ -314,6 +357,16 @@ proc record_param_types(self: TypeChecker, gene: ptr Gene, params: seq[(string, 
   let resolved_return = self.resolve(return_type)
   if resolved_return != nil and resolved_return.kind notin {TkAny, TkVar}:
     gene.props[TC_RETURN_TYPE_KEY.to_key()] = type_to_string(resolved_return).to_value()
+
+proc record_effects(self: TypeChecker, gene: ptr Gene, effects: seq[string]) =
+  if gene == nil:
+    return
+  if effects.len == 0:
+    return
+  var arr = new_array_value()
+  for eff in effects:
+    array_data(arr).add(eff.to_symbol_value())
+  gene.props[TC_EFFECTS_KEY.to_key()] = arr
 
 proc push_scope(self: TypeChecker) =
   self.scopes.add(initTable[string, TypeExpr]())
@@ -496,6 +549,21 @@ proc parse_fn_params(self: TypeChecker, v: Value): seq[ParamType] =
       result.add(ParamType(label: "", typ: t))
       i += 1
 
+proc parse_effect_list(self: TypeChecker, v: Value): seq[string] =
+  if v.kind != VkArray:
+    raise new_exception(types.Exception, "Invalid effect list: expected array")
+  var seen = initTable[string, bool]()
+  for item in array_data(v):
+    if item.kind in {VkSymbol, VkString}:
+      let name = item.str
+      if name.len == 0:
+        continue
+      if not seen.hasKey(name):
+        seen[name] = true
+        result.add(name)
+    else:
+      raise new_exception(types.Exception, "Invalid effect name: " & $item.kind)
+
 proc parse_union(self: TypeChecker, gene: ptr Gene): TypeExpr =
   var parts: seq[TypeExpr] = @[]
   if gene.`type`.kind == VkSymbol and gene.`type`.str == "|":
@@ -539,7 +607,18 @@ proc parse_type_expr(self: TypeChecker, v: Value): TypeExpr =
         raise new_exception(types.Exception, "Invalid Fn type: expected params and return")
       let params = self.parse_fn_params(gene.children[0])
       let ret = self.parse_type_expr(gene.children[1])
-      return TypeExpr(kind: TkFn, params: params, ret: ret, variadic: false, kw_splat: false)
+      var effects: seq[string] = @[]
+      if gene.children.len > 2:
+        let maybe_bang = gene.children[2]
+        if maybe_bang.kind == VkSymbol and maybe_bang.str == "!":
+          if gene.children.len < 4:
+            raise new_exception(types.Exception, "Invalid Fn type: missing effects after !")
+          effects = self.parse_effect_list(gene.children[3])
+          if gene.children.len > 4:
+            raise new_exception(types.Exception, "Invalid Fn type: unexpected extra elements")
+        else:
+          raise new_exception(types.Exception, "Invalid Fn type: unexpected element " & $maybe_bang.kind)
+      return TypeExpr(kind: TkFn, params: params, ret: ret, variadic: false, kw_splat: false, effects: effects)
     if is_union_gene(gene):
       return self.parse_union(gene)
     # Generic constructor: (Array T)
@@ -685,6 +764,7 @@ proc check_call(self: TypeChecker, callee_type: TypeExpr, args: seq[Value], prop
     return ANY_TYPE
   if ct.kind != TkFn:
     raise new_exception(types.Exception, "Type error: calling non-function in " & context)
+  self.ensure_effects_allowed(ct.effects, context)
   # Split params into positional and keyword-only
   var pos_params: seq[ParamType] = @[]
   var kw_params = initTable[string, ParamType]()
@@ -742,7 +822,7 @@ proc check_method_call(self: TypeChecker, recv_type: TypeExpr, method_name: stri
     var params = fn_t.params
     if params.len > 0:
       params = params[1..^1]
-    let fake = TypeExpr(kind: TkFn, params: params, ret: fn_t.ret, variadic: fn_t.variadic, kw_splat: fn_t.kw_splat)
+    let fake = TypeExpr(kind: TkFn, params: params, ret: fn_t.ret, variadic: fn_t.variadic, kw_splat: fn_t.kw_splat, effects: fn_t.effects)
     return self.check_call(fake, args, props, context)
   return ANY_TYPE
 
@@ -776,7 +856,7 @@ proc check_super_call(self: TypeChecker, gene: ptr Gene): TypeExpr =
   var params = fn_t.params
   if params.len > 0:
     params = params[1..^1]
-  let fake = TypeExpr(kind: TkFn, params: params, ret: fn_t.ret, variadic: fn_t.variadic, kw_splat: fn_t.kw_splat)
+  let fake = TypeExpr(kind: TkFn, params: params, ret: fn_t.ret, variadic: fn_t.variadic, kw_splat: fn_t.kw_splat, effects: fn_t.effects)
   return self.check_call(fake, args, gene.props, "super " & member_name)
 
 proc check_var(self: TypeChecker, gene: ptr Gene): TypeExpr =
@@ -1166,6 +1246,16 @@ proc check_fn(self: TypeChecker, gene: ptr Gene): TypeExpr =
       return_type = self.parse_type_expr(gene.children[body_start + 1])
       body_start += 2
 
+  # Handle optional effects: (! [Effect ...])
+  var effects: seq[string] = @[]
+  if body_start < gene.children.len:
+    let maybe_bang = gene.children[body_start]
+    if maybe_bang.kind == VkSymbol and maybe_bang.str == "!":
+      if body_start + 1 >= gene.children.len:
+        raise new_exception(types.Exception, "Missing effects list after !")
+      effects = self.parse_effect_list(gene.children[body_start + 1])
+      body_start += 2
+
   let (params, is_variadic, prop_splats) = self.parse_param_annotations(args_val)
   var has_self_param = false
   for (var_name, _, _) in params:
@@ -1179,8 +1269,9 @@ proc check_fn(self: TypeChecker, gene: ptr Gene): TypeExpr =
     fn_params.add(ParamType(label: label, typ: t))
 
   # Build function type and define in OUTER scope first
-  let fn_type = TypeExpr(kind: TkFn, params: fn_params, ret: return_type, variadic: is_variadic, kw_splat: prop_splats.len > 0)
+  let fn_type = TypeExpr(kind: TkFn, params: fn_params, ret: return_type, variadic: is_variadic, kw_splat: prop_splats.len > 0, effects: effects)
   self.record_param_types(gene, params, return_type)
+  self.record_effects(gene, effects)
   if name.len > 0 and name != "<unnamed>":
     self.define(name, fn_type)
     self.record_binding_type(gene, fn_type)
@@ -1203,6 +1294,9 @@ proc check_fn(self: TypeChecker, gene: ptr Gene): TypeExpr =
 
   let saved_return = self.current_return
   self.current_return = return_type
+  self.effect_stack.add(effects)
+  defer:
+    discard self.effect_stack.pop()
   var last: TypeExpr = TypeExpr(kind: TkNamed, name: "Nil")
   for i in body_start..<gene.children.len:
     last = self.check_expr(gene.children[i])
@@ -1240,6 +1334,10 @@ proc check_block(self: TypeChecker, gene: ptr Gene): TypeExpr =
     self.define(prop_name, TypeExpr(kind: TkApplied, ctor: "Map", args: @[ANY_TYPE, ANY_TYPE]))
 
   # Type-check body
+  let effects: seq[string] = @[]
+  self.effect_stack.add(effects)
+  defer:
+    discard self.effect_stack.pop()
   var last: TypeExpr = TypeExpr(kind: TkNamed, name: "Nil")
   for i in body_start..<gene.children.len:
     last = self.check_expr(gene.children[i])
@@ -1247,7 +1345,7 @@ proc check_block(self: TypeChecker, gene: ptr Gene): TypeExpr =
   self.pop_scope()
 
   # Block returns a function type
-  return TypeExpr(kind: TkFn, params: fn_params, ret: last, variadic: is_variadic, kw_splat: prop_splats.len > 0)
+  return TypeExpr(kind: TkFn, params: fn_params, ret: last, variadic: is_variadic, kw_splat: prop_splats.len > 0, effects: effects)
 
 proc check_ctor(self: TypeChecker, gene: ptr Gene, class_name: string, cls: ClassInfo): TypeExpr =
   if gene.children.len == 0:
@@ -1263,6 +1361,16 @@ proc check_ctor(self: TypeChecker, gene: ptr Gene, class_name: string, cls: Clas
       return_type = self.parse_type_expr(gene.children[body_start + 1])
       body_start += 2
 
+  # Optional effects for constructors
+  var effects: seq[string] = @[]
+  if body_start < gene.children.len:
+    let maybe_bang = gene.children[body_start]
+    if maybe_bang.kind == VkSymbol and maybe_bang.str == "!":
+      if body_start + 1 >= gene.children.len:
+        raise new_exception(types.Exception, "Missing effects list after !")
+      effects = self.parse_effect_list(gene.children[body_start + 1])
+      body_start += 2
+
   let (params, is_variadic, prop_splats) = self.parse_param_annotations(args_val)
   var fn_params: seq[ParamType] = @[]
   self.push_scope()
@@ -1272,16 +1380,20 @@ proc check_ctor(self: TypeChecker, gene: ptr Gene, class_name: string, cls: Clas
     if var_name.len > 0 and var_name != "_":
       self.define(var_name, t)
   self.record_param_types(gene, params, return_type)
+  self.record_effects(gene, effects)
   for prop_name in prop_splats:
     self.define(prop_name, TypeExpr(kind: TkApplied, ctor: "Map", args: @[ANY_TYPE, ANY_TYPE]))
 
-  let fn_type = TypeExpr(kind: TkFn, params: fn_params, ret: return_type, variadic: is_variadic, kw_splat: prop_splats.len > 0)
+  let fn_type = TypeExpr(kind: TkFn, params: fn_params, ret: return_type, variadic: is_variadic, kw_splat: prop_splats.len > 0, effects: effects)
   cls.ctor_type = fn_type
 
   let saved_return = self.current_return
   let saved_class = self.current_class
   self.current_return = return_type
   self.current_class = class_name
+  self.effect_stack.add(effects)
+  defer:
+    discard self.effect_stack.pop()
   for i in body_start..<gene.children.len:
     discard self.check_expr(gene.children[i])
   self.current_return = saved_return
@@ -1307,6 +1419,16 @@ proc check_method(self: TypeChecker, gene: ptr Gene, class_name: string, cls: Cl
       return_type = self.parse_type_expr(gene.children[body_start + 1])
       body_start += 2
 
+  # Optional effects for methods
+  var effects: seq[string] = @[]
+  if body_start < gene.children.len:
+    let maybe_bang = gene.children[body_start]
+    if maybe_bang.kind == VkSymbol and maybe_bang.str == "!":
+      if body_start + 1 >= gene.children.len:
+        raise new_exception(types.Exception, "Missing effects list after !")
+      effects = self.parse_effect_list(gene.children[body_start + 1])
+      body_start += 2
+
   let (params, is_variadic, prop_splats) = self.parse_param_annotations(args_val)
   var fn_params: seq[ParamType] = @[]
   # Implicit self param
@@ -1319,16 +1441,20 @@ proc check_method(self: TypeChecker, gene: ptr Gene, class_name: string, cls: Cl
     if var_name.len > 0 and var_name != "_":
       self.define(var_name, t)
   self.record_param_types(gene, params, return_type)
+  self.record_effects(gene, effects)
   for prop_name in prop_splats:
     self.define(prop_name, TypeExpr(kind: TkApplied, ctor: "Map", args: @[ANY_TYPE, ANY_TYPE]))
 
-  let fn_type = TypeExpr(kind: TkFn, params: fn_params, ret: return_type, variadic: is_variadic, kw_splat: prop_splats.len > 0)
+  let fn_type = TypeExpr(kind: TkFn, params: fn_params, ret: return_type, variadic: is_variadic, kw_splat: prop_splats.len > 0, effects: effects)
   cls.methods[method_name] = fn_type
 
   let saved_return = self.current_return
   let saved_class = self.current_class
   self.current_return = return_type
   self.current_class = class_name
+  self.effect_stack.add(effects)
+  defer:
+    discard self.effect_stack.pop()
   for i in body_start..<gene.children.len:
     discard self.check_expr(gene.children[i])
   self.current_return = saved_return

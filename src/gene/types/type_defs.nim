@@ -5,6 +5,7 @@ const
   TC_BINDING_TYPE_KEY* = "__tc_binding_type"
   TC_PARAM_TYPES_KEY* = "__tc_param_types"
   TC_RETURN_TYPE_KEY* = "__tc_return_type"
+  TC_EFFECTS_KEY* = "__tc_effects"
 
 type
   Value* {.bycopy.} = object
