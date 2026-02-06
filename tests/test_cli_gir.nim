@@ -109,3 +109,30 @@ suite "GIR CLI":
     let nodes = parser.read_all(code)
     for node in nodes:
       checker.type_check_node(node)
+
+  test "gir preserves type descriptor table":
+    let code = "(var x 1) x"
+    let compiled = compiler.parse_and_compile(code, "<descriptor-test>")
+    compiled.type_descriptors = @[
+      TypeDesc(kind: TdkNamed, name: "Int"),
+      TypeDesc(kind: TdkNamed, name: "String"),
+      TypeDesc(kind: TdkUnion, members: @[0'i32, 1'i32]),
+      TypeDesc(kind: TdkFn, params: @[0'i32], ret: 1'i32, effects: @["io/read"])
+    ]
+
+    let gir_path = "build/tests/type_descriptor_roundtrip.gir"
+    createDir(parentDir(gir_path))
+    gir.save_gir(compiled, gir_path)
+    let loaded = gir.load_gir(gir_path)
+
+    check loaded.type_descriptors.len == 4
+    check loaded.type_descriptors[0].kind == TdkNamed
+    check loaded.type_descriptors[0].name == "Int"
+    check loaded.type_descriptors[2].kind == TdkUnion
+    check loaded.type_descriptors[2].members == @[0'i32, 1'i32]
+    check loaded.type_descriptors[3].kind == TdkFn
+    check loaded.type_descriptors[3].params == @[0'i32]
+    check loaded.type_descriptors[3].ret == 1'i32
+    check loaded.type_descriptors[3].effects == @["io/read"]
+
+    removeFile(gir_path)

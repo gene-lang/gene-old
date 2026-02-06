@@ -1480,6 +1480,7 @@ proc copy_scope_tracker*(source: ScopeTracker): ScopeTracker =
   result.parent_index_max = source.parent_index_max
   result.parent = source.parent
   result.type_expectations = source.type_expectations
+  result.type_expectation_ids = source.type_expectation_ids
   # Copy the mappings table
   for key, value in source.mappings:
     result.mappings[key] = value
@@ -1498,6 +1499,7 @@ proc snapshot_scope_tracker*(tracker: ScopeTracker): ScopeTrackerSnapshot =
     scope_started: tracker.scope_started,
     mappings: @[],
     type_expectations: tracker.type_expectations,
+    type_expectation_ids: tracker.type_expectation_ids,
     parent: snapshot_scope_tracker(tracker.parent)
   )
 
@@ -1513,6 +1515,7 @@ proc materialize_scope_tracker*(snapshot: ScopeTrackerSnapshot): ScopeTracker =
     parent_index_max: snapshot.parent_index_max,
     scope_started: snapshot.scope_started,
     type_expectations: snapshot.type_expectations,
+    type_expectation_ids: snapshot.type_expectation_ids,
     parent: materialize_scope_tracker(snapshot.parent)
   )
 
@@ -1547,11 +1550,13 @@ proc to_function_def_info*(value: Value): FunctionDefInfo =
 proc new_match_matcher*(): RootMatcher =
   result = RootMatcher(
     mode: MatchExpression,
+    return_type_id: NO_TYPE_ID,
   )
 
 proc new_arg_matcher*(): RootMatcher =
   result = RootMatcher(
     mode: MatchArguments,
+    return_type_id: NO_TYPE_ID,
   )
 
 proc new_matcher*(root: RootMatcher, kind: MatcherKind): Matcher =
@@ -1559,6 +1564,7 @@ proc new_matcher*(root: RootMatcher, kind: MatcherKind): Matcher =
     root: root,
     kind: kind,
     default_value: PLACEHOLDER, # PLACEHOLDER marks "no default" (distinct from explicit nil)
+    type_id: NO_TYPE_ID,
   )
 
 proc is_empty*(self: RootMatcher): bool =

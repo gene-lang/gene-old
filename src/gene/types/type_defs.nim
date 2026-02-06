@@ -6,6 +6,7 @@ const
   TC_PARAM_TYPES_KEY* = "__tc_param_types"
   TC_RETURN_TYPE_KEY* = "__tc_return_type"
   TC_EFFECTS_KEY* = "__tc_effects"
+  NO_TYPE_ID* = -1'i32
 
 type
   Value* {.bycopy.} = object
@@ -210,6 +211,34 @@ type
 
   Key* = distinct int64
 
+  TypeId* = int32
+
+  TypeDescKind* {.size: sizeof(int8).} = enum
+    TdkAny
+    TdkNamed
+    TdkApplied
+    TdkUnion
+    TdkFn
+    TdkVar
+
+  TypeDesc* = object
+    case kind*: TypeDescKind
+    of TdkAny:
+      discard
+    of TdkNamed:
+      name*: string
+    of TdkApplied:
+      ctor*: string
+      args*: seq[TypeId]
+    of TdkUnion:
+      members*: seq[TypeId]
+    of TdkFn:
+      params*: seq[TypeId]
+      ret*: TypeId
+      effects*: seq[string]
+    of TdkVar:
+      var_id*: int32
+
   ScopeTracker* = ref object
     parent*: ScopeTracker   # If parent is nil, the scope is the top level scope.
     parent_index_max*: int16
@@ -217,6 +246,7 @@ type
     mappings*: Table[Key, int16]
     scope_started*: bool    # Track if we've added a ScopeStart instruction
     type_expectations*: seq[string]
+    type_expectation_ids*: seq[TypeId]
 
   ScopeTrackerSnapshot* = ref object
     next_index*: int16
@@ -224,6 +254,7 @@ type
     scope_started*: bool
     mappings*: seq[(Key, int16)]
     type_expectations*: seq[string]
+    type_expectation_ids*: seq[TypeId]
     parent*: ScopeTrackerSnapshot
 
   FunctionDefInfo* = ref object
@@ -449,6 +480,7 @@ type
     children*: seq[Matcher]
     has_type_annotations*: bool  # True if any child has a type annotation
     return_type_name*: string  # Return type annotation from -> (e.g. "Int", "Float")
+    return_type_id*: TypeId
 
   MatchingHintMode* {.size: sizeof(int16) .} = enum
     MhDefault
@@ -478,6 +510,7 @@ type
     min_left*: int # Minimum number of args following this
     children*: seq[Matcher]
     type_name*: string  # Runtime type annotation (e.g. "Int", "String", "Any")
+    type_id*: TypeId
     # required*: bool # computed property: true if splat is false and default value is not given
 
   # MatchedFieldKind* = enum
@@ -779,6 +812,7 @@ type
     module_exports*: seq[string]
     module_imports*: seq[string]
     module_types*: seq[ModuleTypeNode]
+    type_descriptors*: seq[TypeDesc]
 
   # Used by the compiler to keep track of scopes and variables
   #

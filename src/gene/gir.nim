@@ -4,7 +4,7 @@ import ./types
 
 const
   GIR_MAGIC = "GENE"
-  GIR_VERSION* = 8'u32
+  GIR_VERSION* = 9'u32
   COMPILER_VERSION = "0.1.2"
   VALUE_ABI_VERSION* = 2'u32  # Version 2: Value is object wrapper with GC
   
@@ -39,6 +39,7 @@ type
     module_exports*: seq[string]
     module_imports*: seq[string]
     module_types*: seq[ModuleTypeNode]
+    type_descriptors*: seq[TypeDesc]
 
 # Serialization helpers
 proc write_string(stream: Stream, s: string) =
@@ -70,6 +71,10 @@ proc writeScopeTrackerSnapshot(stream: Stream, snapshot: ScopeTrackerSnapshot) =
   for expected in snapshot.type_expectations:
     stream.write_string(expected)
 
+  stream.write(snapshot.type_expectation_ids.len.uint32)
+  for type_id in snapshot.type_expectation_ids:
+    stream.write(type_id.int32)
+
   writeScopeTrackerSnapshot(stream, snapshot.parent)
 
 proc readScopeTrackerSnapshot(stream: Stream): ScopeTrackerSnapshot =
@@ -94,6 +99,12 @@ proc readScopeTrackerSnapshot(stream: Stream): ScopeTrackerSnapshot =
     result.type_expectations = @[]
     for _ in 0..<type_len:
       result.type_expectations.add(stream.read_string())
+
+  let type_id_len = stream.readUint32()
+  if type_id_len > 0:
+    result.type_expectation_ids = @[]
+    for _ in 0..<type_id_len:
+      result.type_expectation_ids.add(stream.readInt32())
 
   result.parent = readScopeTrackerSnapshot(stream)
 
@@ -137,6 +148,80 @@ proc readModuleTypeTree(stream: Stream): seq[ModuleTypeNode] =
     let node = readModuleTypeNode(stream)
     if node != nil:
       result.add(node)
+
+proc writeTypeDesc(stream: Stream, desc: TypeDesc) =
+  stream.write(desc.kind.uint8)
+  case desc.kind
+  of TdkAny:
+    discard
+  of TdkNamed:
+    stream.write_string(desc.name)
+  of TdkApplied:
+    stream.write_string(desc.ctor)
+    stream.write(desc.args.len.uint32)
+    for arg in desc.args:
+      stream.write(arg.int32)
+  of TdkUnion:
+    stream.write(desc.members.len.uint32)
+    for member in desc.members:
+      stream.write(member.int32)
+  of TdkFn:
+    stream.write(desc.params.len.uint32)
+    for param in desc.params:
+      stream.write(param.int32)
+    stream.write(desc.ret.int32)
+    stream.write(desc.effects.len.uint32)
+    for effect in desc.effects:
+      stream.write_string(effect)
+  of TdkVar:
+    stream.write(desc.var_id)
+
+proc readTypeDesc(stream: Stream): TypeDesc =
+  let kind = cast[TypeDescKind](stream.readUint8())
+  case kind
+  of TdkAny:
+    result = TypeDesc(kind: TdkAny)
+  of TdkNamed:
+    result = TypeDesc(kind: TdkNamed, name: stream.read_string())
+  of TdkApplied:
+    let ctor = stream.read_string()
+    let arg_count = stream.readUint32()
+    var args: seq[TypeId] = @[]
+    for _ in 0..<arg_count:
+      args.add(stream.readInt32())
+    result = TypeDesc(kind: TdkApplied, ctor: ctor, args: args)
+  of TdkUnion:
+    let member_count = stream.readUint32()
+    var members: seq[TypeId] = @[]
+    for _ in 0..<member_count:
+      members.add(stream.readInt32())
+    result = TypeDesc(kind: TdkUnion, members: members)
+  of TdkFn:
+    let param_count = stream.readUint32()
+    var params: seq[TypeId] = @[]
+    for _ in 0..<param_count:
+      params.add(stream.readInt32())
+    let ret = stream.readInt32()
+    let effect_count = stream.readUint32()
+    var effects: seq[string] = @[]
+    for _ in 0..<effect_count:
+      effects.add(stream.read_string())
+    result = TypeDesc(kind: TdkFn, params: params, ret: ret, effects: effects)
+  of TdkVar:
+    result = TypeDesc(kind: TdkVar, var_id: stream.readInt32())
+
+proc writeTypeDescTable(stream: Stream, descs: seq[TypeDesc]) =
+  stream.write(descs.len.uint32)
+  for desc in descs:
+    writeTypeDesc(stream, desc)
+
+proc readTypeDescTable(stream: Stream): seq[TypeDesc] =
+  let count = stream.readUint32()
+  if count == 0:
+    return @[]
+  result = @[]
+  for _ in 0..<count:
+    result.add(readTypeDesc(stream))
 
 proc writeCompilationUnitBlock(stream: Stream, cu: CompilationUnit)
 
@@ -349,6 +434,7 @@ proc writeCompilationUnitBlock(stream: Stream, cu: CompilationUnit) =
     stream.write_string(name)
 
   writeModuleTypeTree(stream, cu.module_types)
+  writeTypeDescTable(stream, cu.type_descriptors)
 
 proc readCompilationUnitBlock(stream: Stream): CompilationUnit =
   let kind = cast[CompilationUnitKind](stream.readInt8())
@@ -419,6 +505,7 @@ proc readCompilationUnitBlock(stream: Stream): CompilationUnit =
       result.module_imports.add(stream.read_string())
 
   result.module_types = readModuleTypeTree(stream)
+  result.type_descriptors = readTypeDescTable(stream)
 
 proc write_instruction(stream: Stream, inst: Instruction) =
   stream.write(inst.kind.uint16)
@@ -540,6 +627,7 @@ proc save_gir*(cu: CompilationUnit, path: string, source_path: string = "", debu
     stream.write_string(name)
 
   writeModuleTypeTree(stream, cu.module_types)
+  writeTypeDescTable(stream, cu.type_descriptors)
 
 proc load_gir_file*(path: string): GirFile =
   ## Load a GIR file and return its structured contents
@@ -627,6 +715,7 @@ proc load_gir_file*(path: string): GirFile =
       module_imports.add(stream.read_string())
 
   let module_types = readModuleTypeTree(stream)
+  let type_descriptors = readTypeDescTable(stream)
 
   result.header = header
   result.constants = constants
@@ -645,6 +734,7 @@ proc load_gir_file*(path: string): GirFile =
   result.module_exports = module_exports
   result.module_imports = module_imports
   result.module_types = module_types
+  result.type_descriptors = type_descriptors
 
 proc load_gir*(path: string): CompilationUnit =
   ## Load a compilation unit from a GIR file
@@ -660,6 +750,7 @@ proc load_gir*(path: string): CompilationUnit =
   result.module_exports = gir_file.module_exports
   result.module_imports = gir_file.module_imports
   result.module_types = gir_file.module_types
+  result.type_descriptors = gir_file.type_descriptors
 
   if gir_file.trace_nodes.len > 0:
     var node_refs: seq[SourceTrace] = @[]
