@@ -71,3 +71,35 @@ suite "Static type checking":
     )
     ((new Child 1) .call_super)
   """
+
+  test_vm """
+    (var x: (Int | String) 1)
+    (if (x .is Int)
+      (do
+        (var y x)
+        (y = 2)
+        y)
+    else
+      0)
+  """, 2
+
+  test_vm_error """
+    (var x: (Int | String) 1)
+    (if (x .is Int)
+      (do
+        (var y x)
+        (y = "oops")
+        y)
+    else
+      0)
+  """
+
+  test_vm_error """
+    (var x: (Int | String) 1)
+    (if (x .is Int)
+      1
+    else
+      (do
+        (var y x)
+        (y + 1)))
+  """

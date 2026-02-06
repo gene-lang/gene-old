@@ -1119,15 +1119,114 @@ proc check_var(self: TypeChecker, gene: ptr Gene): TypeExpr =
   self.define(name, ANY_TYPE)
   return ANY_TYPE
 
+proc extract_type_guard(self: TypeChecker, cond: Value): tuple[name: string, guarded_type: TypeExpr, found: bool] =
+  ## Detect simple type guard patterns like: (x .is Int)
+  if cond.kind != VkGene or cond.gene == nil:
+    return ("", nil, false)
+  let gene = cond.gene
+  if gene.children.len < 2:
+    return ("", nil, false)
+  let method_sym = gene.children[0]
+  if method_sym.kind != VkSymbol or method_sym.str != ".is":
+    return ("", nil, false)
+  let recv = gene.`type`
+  if recv.kind != VkSymbol:
+    return ("", nil, false)
+  let name = recv.str
+  if name.len == 0 or name == "_":
+    return ("", nil, false)
+  let narrowed = self.parse_type_expr(gene.children[1])
+  return (name, narrowed, true)
+
+proc subtract_narrowed_type(self: TypeChecker, original: TypeExpr, removed: TypeExpr): TypeExpr =
+  ## Compute a conservative else-branch type after removing a narrowed member.
+  ## If subtraction is unclear, keep the original type (gradual-safe fallback).
+  let ro = self.resolve(original)
+  let rr = self.resolve(removed)
+  if ro == nil or rr == nil:
+    return original
+
+  let removed_key = type_to_string(rr)
+  if ro.kind == TkUnion:
+    var keep: seq[TypeExpr] = @[]
+    for member in ro.members:
+      let rm = self.resolve(member)
+      if rm == nil:
+        keep.add(member)
+      elif type_to_string(rm) != removed_key:
+        keep.add(rm)
+    if keep.len == 0:
+      return ANY_TYPE
+    if keep.len == 1:
+      return keep[0]
+    return TypeExpr(kind: TkUnion, members: keep)
+
+  if type_to_string(ro) == removed_key:
+    return ANY_TYPE
+
+  return ro
+
 proc check_if(self: TypeChecker, gene: ptr Gene): TypeExpr =
   if gene.children.len < 2:
     return ANY_TYPE
-  let cond_type = self.check_expr(gene.children[0])
+
+  let cond = gene.children[0]
+  var then_items: seq[Value] = @[]
+  var else_items: seq[Value] = @[]
+  var in_else = false
+
+  for i in 1..<gene.children.len:
+    let item = gene.children[i]
+    if item.kind == VkSymbol:
+      let kw = item.str
+      if kw == "then":
+        continue
+      if kw == "else":
+        in_else = true
+        continue
+    if in_else:
+      else_items.add(item)
+    else:
+      then_items.add(item)
+
+  proc branch_expr(items: seq[Value]): Value =
+    if items.len == 0:
+      return NIL
+    if items.len == 1:
+      return items[0]
+    let g = new_gene("do".to_symbol_value())
+    for item in items:
+      g.children.add(item)
+    return g.to_gene_value()
+
+  if then_items.len == 0:
+    then_items.add(NIL)
+
+  let then_expr = branch_expr(then_items)
+  let has_else = else_items.len > 0
+  let else_expr = if has_else: branch_expr(else_items) else: NIL
+
+  let cond_type = self.check_expr(cond)
   if cond_type.kind != TkAny:
     self.unify(TypeExpr(kind: TkNamed, name: "Bool"), cond_type, "if condition")
-  let then_type = self.check_expr(gene.children[1])
-  if gene.children.len > 2:
-    let else_type = self.check_expr(gene.children[2])
+
+  let guard = self.extract_type_guard(cond)
+  let has_guard = guard.found
+
+  self.push_scope()
+  if has_guard:
+    self.define(guard.name, guard.guarded_type)
+  let then_type = self.check_expr(then_expr)
+  self.pop_scope()
+
+  if has_else:
+    self.push_scope()
+    if has_guard:
+      let current = self.lookup(guard.name)
+      if current != nil:
+        self.define(guard.name, self.subtract_narrowed_type(current, guard.guarded_type))
+    let else_type = self.check_expr(else_expr)
+    self.pop_scope()
     try:
       self.unify(then_type, else_type, "if")
       return then_type
