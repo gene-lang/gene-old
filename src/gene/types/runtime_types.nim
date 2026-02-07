@@ -39,6 +39,56 @@ proc ensure_rt_type_cache() =
     rt_type_cache = initTable[string, RtType]()
     rt_type_cache_initialized = true
 
+proc new_runtime_type_object*(type_id: TypeId, descriptor: TypeDesc): RtTypeObj =
+  RtTypeObj(
+    type_id: type_id,
+    descriptor: descriptor,
+    constructor: NIL,
+    initializer: NIL,
+    methods: initTable[Key, Value](),
+    method_hooks: initTable[Key, RtImplLoader]()
+  )
+
+proc attach_constructor_hook*(rt: RtTypeObj, hook: RtImplLoader) =
+  if rt == nil:
+    return
+  rt.constructor_hook = hook
+
+proc attach_initializer_hook*(rt: RtTypeObj, hook: RtImplLoader) =
+  if rt == nil:
+    return
+  rt.initializer_hook = hook
+
+proc attach_method_hook*(rt: RtTypeObj, method_key: Key, hook: RtImplLoader) =
+  if rt == nil:
+    return
+  rt.method_hooks[method_key] = hook
+
+proc resolve_constructor*(rt: RtTypeObj): Value =
+  if rt == nil:
+    return NIL
+  if rt.constructor == NIL and rt.constructor_hook != nil:
+    rt.constructor = rt.constructor_hook()
+  rt.constructor
+
+proc resolve_initializer*(rt: RtTypeObj): Value =
+  if rt == nil:
+    return NIL
+  if rt.initializer == NIL and rt.initializer_hook != nil:
+    rt.initializer = rt.initializer_hook()
+  rt.initializer
+
+proc resolve_method*(rt: RtTypeObj, method_key: Key): Value =
+  if rt == nil:
+    return NIL
+  if rt.methods.hasKey(method_key):
+    return rt.methods[method_key]
+  if rt.method_hooks.hasKey(method_key):
+    let resolved = rt.method_hooks[method_key]()
+    rt.methods[method_key] = resolved
+    return resolved
+  NIL
+
 proc is_delim(c: char): bool {.inline.} =
   c.isSpaceAscii or c in {'(', ')', '[', ']', '|'}
 

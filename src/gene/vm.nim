@@ -5,7 +5,15 @@ import times, os
 import asyncdispatch  # For event loop polling in async support
 
 import ./types
-from ./types/runtime_types import validate_type
+from ./types/runtime_types import
+  validate_type,
+  new_runtime_type_object,
+  attach_constructor_hook,
+  attach_initializer_hook,
+  attach_method_hook,
+  resolve_constructor,
+  resolve_initializer,
+  resolve_method
 import ./compiler
 from ./parser import read, read_all
 import ./vm/args
@@ -43,6 +51,23 @@ proc expected_type_id_for(tracker: ScopeTracker, index: int): TypeId {.inline.} 
   if index < 0 or index >= tracker.type_expectation_ids.len:
     return NO_TYPE_ID
   tracker.type_expectation_ids[index]
+
+proc find_named_type_descriptor(cu: CompilationUnit, name: string): tuple[type_id: TypeId, desc: TypeDesc, found: bool] =
+  if cu == nil:
+    return (NO_TYPE_ID, TypeDesc(kind: TdkNamed, name: name), false)
+  for i, desc in cu.type_descriptors:
+    if desc.kind == TdkNamed and desc.name == name:
+      return (i.int32, desc, true)
+  (NO_TYPE_ID, TypeDesc(kind: TdkNamed, name: name), false)
+
+proc ensure_class_runtime_type(self: ptr VirtualMachine, class: Class): RtTypeObj =
+  if class == nil:
+    return nil
+  if class.runtime_type != nil:
+    return class.runtime_type
+  let lookup = find_named_type_descriptor(self.cu, class.name)
+  class.runtime_type = new_runtime_type_object(lookup.type_id, lookup.desc)
+  class.runtime_type
 
 proc native_args_supported(f: Function, args: seq[Value]): bool =
   const nativeArgLimit =
@@ -1101,6 +1126,9 @@ proc call_instance_method(self: ptr VirtualMachine, instance: Value, method_name
   if class.is_nil or not class.methods.hasKey(call_method_key):
     return false
 
+  if class.runtime_type != nil:
+    discard resolve_method(class.runtime_type, call_method_key)
+
   let meth = class.methods[call_method_key]
   case meth.callable.kind:
   of VkFunction:
@@ -1204,6 +1232,9 @@ proc call_super_method_resolved(self: ptr VirtualMachine, parent_class: Class, i
 
   if meth.is_nil:
     not_allowed("Method '" & method_name & "' not found in super class hierarchy")
+
+  if class != nil and class.runtime_type != nil:
+    discard resolve_method(class.runtime_type, method_key)
 
   case meth.callable.kind:
   of VkFunction:
@@ -1312,6 +1343,8 @@ proc call_value_method(self: ptr VirtualMachine, value: Value, method_name: stri
       if self.trace:
         echo "call_value_method: method ", method_name, " missing on ", value.kind
     return false
+  if value_class.runtime_type != nil:
+    discard resolve_method(value_class.runtime_type, method_name.to_key())
   case meth.callable.kind:
   of VkFunction:
     let f = meth.callable.ref.fn
@@ -4436,6 +4469,21 @@ proc exec*(self: ptr VirtualMachine): Value =
         
         # Access the class - VkClass should always be a reference value
         let class = class_value.ref.class
+        let runtime_type = ensure_class_runtime_type(self, class)
+        let method_key = name.str.to_key()
+        let method_callable = fn_value
+        attach_method_hook(runtime_type, method_key, proc(): Value =
+          if method_callable.kind == VkFunction and method_callable.ref.fn.body_compiled == nil:
+            method_callable.ref.fn.compile()
+          method_callable
+        )
+        if method_key == "init".to_key() or method_key == "__init__".to_key():
+          attach_initializer_hook(runtime_type, proc(): Value =
+            if method_callable.kind == VkFunction and method_callable.ref.fn.body_compiled == nil:
+              method_callable.ref.fn.compile()
+            runtime_type.methods[method_key] = method_callable
+            method_callable
+          )
         let m = Method(
           name: name.str,
           callable: fn_value,
@@ -4481,6 +4529,13 @@ proc exec*(self: ptr VirtualMachine): Value =
         
         # Set the constructor
         class.constructor = fn_value
+        let runtime_type = ensure_class_runtime_type(self, class)
+        let ctor_callable = fn_value
+        attach_constructor_hook(runtime_type, proc(): Value =
+          if ctor_callable.kind == VkFunction and ctor_callable.ref.fn.body_compiled == nil:
+            ctor_callable.ref.fn.compile()
+          ctor_callable
+        )
 
         # Set the function's namespace to the class namespace
         fn_value.ref.fn.ns = class.ns
@@ -4953,6 +5008,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           if base.kind == VkClass and class.parent.is_nil:
             class.parent = base.ref.class
         class.add_standard_instance_methods()
+        discard ensure_class_runtime_type(self, class)
         let r = new_ref(VkClass)
         r.class = class
         let v = r.to_ref_value()
@@ -4993,6 +5049,11 @@ proc exec*(self: ptr VirtualMachine): Value =
           not_allowed("Class '" & class.name & "' defines ctor, use 'new' instead of 'new!'")
         if (not is_macro_call) and class.has_macro_constructor:
           not_allowed("Class '" & class.name & "' defines ctor!, use 'new!' instead of 'new'")
+
+        if class.runtime_type != nil:
+          let resolved_ctor = resolve_constructor(class.runtime_type)
+          if resolved_ctor != NIL:
+            class.constructor = resolved_ctor
         
         # Check constructor type
         case class.constructor.kind:
@@ -5108,6 +5169,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           class.ns.parent = class.parent.ns
         else:
           not_allowed("Parent must be a class, got " & $parent_class.kind)
+        discard ensure_class_runtime_type(self, class)
         let r = new_ref(VkClass)
         r.class = class
         let v = r.to_ref_value()
@@ -5967,6 +6029,8 @@ proc exec*(self: ptr VirtualMachine): Value =
           let instance = new_instance_value(class)
 
           # Check if class has an init method
+          if class.runtime_type != nil:
+            discard resolve_initializer(class.runtime_type)
           let init_method = class.get_method("init")
           if init_method != nil:
             # Call init method with no arguments
@@ -6145,6 +6209,8 @@ proc exec*(self: ptr VirtualMachine): Value =
           let instance = new_instance_value(class)
 
           # Check if class has an init method
+          if class.runtime_type != nil:
+            discard resolve_initializer(class.runtime_type)
           let init_method = class.get_method("init")
           if init_method != nil:
             # Call init method with one argument

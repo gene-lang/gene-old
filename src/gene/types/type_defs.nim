@@ -242,6 +242,18 @@ type
     of TdkVar:
       var_id*: int32
 
+  RtImplLoader* = proc(): Value
+
+  RtTypeObj* = ref object
+    type_id*: TypeId
+    descriptor*: TypeDesc
+    constructor*: Value
+    initializer*: Value
+    methods*: Table[Key, Value]
+    constructor_hook*: RtImplLoader
+    initializer_hook*: RtImplLoader
+    method_hooks*: Table[Key, RtImplLoader]
+
   ScopeTracker* = ref object
     parent*: ScopeTracker   # If parent is nil, the scope is the top level scope.
     parent_index_max*: int16
@@ -407,6 +419,7 @@ type
     parent*: Class
     name*: string
     constructor*: Value
+    runtime_type*: RtTypeObj
     methods*: Table[Key, Method]
     members*: Table[Key, Value]  # Static members - class acts as namespace
     on_extended*: Value

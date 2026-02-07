@@ -1,4 +1,4 @@
-import unittest, os, strutils
+import unittest, os, strutils, tables
 
 import gene/parser
 import gene/compiler
@@ -7,7 +7,9 @@ import gene/types except Exception
 import gene/types/runtime_types
 import gene/type_checker
 import gene/vm/args
+import gene/vm
 import commands/gir as gir_command
+import ./helpers
 
 suite "GIR CLI":
   test "gir show renders instructions":
@@ -213,3 +215,86 @@ suite "GIR CLI":
     except CatchableError:
       raised = true
     check raised
+
+  test "runtime type objects load ctor/method/init implementations lazily":
+    let rt = new_runtime_type_object(0'i32, TypeDesc(kind: TdkNamed, name: "Widget"))
+
+    let ctor_fn = to_function(parser.read("(fn __ctor [] 1)"))
+    let method_fn = to_function(parser.read("(fn ping [] 2)"))
+    let init_fn = to_function(parser.read("(fn init [] 3)"))
+    ctor_fn.scope_tracker = new_scope_tracker()
+    method_fn.scope_tracker = new_scope_tracker()
+    init_fn.scope_tracker = new_scope_tracker()
+    let ctor_ref = new_ref(VkFunction)
+    let method_ref = new_ref(VkFunction)
+    let init_ref = new_ref(VkFunction)
+    ctor_ref.fn = ctor_fn
+    method_ref.fn = method_fn
+    init_ref.fn = init_fn
+    let ctor_value = ctor_ref.to_ref_value()
+    let method_value = method_ref.to_ref_value()
+    let init_value = init_ref.to_ref_value()
+
+    var ctor_loads = 0
+    var method_loads = 0
+    var init_loads = 0
+
+    attach_constructor_hook(rt, proc(): Value =
+      ctor_loads.inc()
+      if ctor_fn.body_compiled == nil:
+        compile(ctor_fn)
+      ctor_value
+    )
+    attach_method_hook(rt, "ping".to_key(), proc(): Value =
+      method_loads.inc()
+      if method_fn.body_compiled == nil:
+        compile(method_fn)
+      method_value
+    )
+    attach_initializer_hook(rt, proc(): Value =
+      init_loads.inc()
+      if init_fn.body_compiled == nil:
+        compile(init_fn)
+      init_value
+    )
+
+    check ctor_fn.body_compiled == nil
+    check method_fn.body_compiled == nil
+    check init_fn.body_compiled == nil
+
+    discard resolve_constructor(rt)
+    discard resolve_method(rt, "ping".to_key())
+    discard resolve_initializer(rt)
+
+    check ctor_fn.body_compiled != nil
+    check method_fn.body_compiled != nil
+    check init_fn.body_compiled != nil
+    check ctor_loads == 1
+    check method_loads == 1
+    check init_loads == 1
+
+    # Cached resolves must not reload
+    discard resolve_constructor(rt)
+    discard resolve_method(rt, "ping".to_key())
+    discard resolve_initializer(rt)
+    check ctor_loads == 1
+    check method_loads == 1
+    check init_loads == 1
+
+  test "class definitions attach lazy runtime hooks":
+    init_all()
+    let class_value = VM.exec("""
+      (class Hooked
+        (ctor [] NIL)
+        (method ping [] 1)
+        (method init [] NIL)
+      )
+      Hooked
+    """, "hooked_runtime_type.gene")
+
+    check class_value.kind == VkClass
+    let class_obj = class_value.ref.class
+    check class_obj.runtime_type != nil
+    check class_obj.runtime_type.constructor_hook != nil
+    check class_obj.runtime_type.initializer_hook != nil
+    check len(class_obj.runtime_type.method_hooks) > 0
