@@ -36,8 +36,8 @@ The type checker already has infrastructure for generics:
 (nums .push 4)         # OK
 (nums .push "hello")   # Type error at runtime
 
-# Map with key/value types
-(var scores: (Map String Int) {"alice" 95 "bob" 87})
+# Map with value types - key is always symbol
+(var scores: (Map Int) {^alice 95 ^bob 87})
 ```
 
 **Question:** Should `(Array Int)` be enforced on every `.push` / `.set` call? Or only at function boundaries?
@@ -69,27 +69,37 @@ The type checker already has infrastructure for generics:
 
 **Question:** Is fully implicit inference enough, or do we sometimes need explicit type params on functions?
 
-## Scenario 3: Generic Functions (Explicit, if needed)
+## Scenario 3: Generic Functions (Explicit)
 
-**Goal:** When inference isn't enough, allow explicit parameterization.
+**Goal:** Explicit type parameters on functions.
+
+**Decision (2026-02-07):** Type parameters attach to the function name with colons.
 
 ```gene
-# Option A: Type params as part of function name/signature
-(fn map ^T ^U [arr: (Array T) f: (Fn [T] U)] -> (Array U)
+# Single type parameter
+(fn first:A [a: (Array A)] -> A
+  (a .get 0))
+
+# Multiple type parameters
+(fn map:A:B [arr: (Array A) f: (Fn [A] B)] -> (Array B)
   ...)
 
-# Option B: Type params in the param list with special syntax
-(fn map [arr: (Array T) f: (Fn [T] U)] -> (Array U)
-  ...)
-# T and U are implicitly universally quantified (unknown = type variable)
+# Call site — type params are inferred, not written
+(first [1 2 3])         # A inferred as Int, returns Int
+(map [1 2 3] to_str)    # A=Int, B=String inferred
 
-# Option C: No explicit params, checker infers everything
-(fn map [arr: Array f: Fn] -> Array
-  ...)
-# Checker figures out the relationship from the body
+# Identity function
+(fn identity:T [x: T] -> T x)
+(identity 42)            # T=Int
+(identity "hello")       # T=String
 ```
 
-**Recommendation:** Option B — type variables appear naturally in annotations and the checker treats unknown type names as variables. No extra syntax needed. This is how the existing ADT definitions work: `(type (Result T E) ...)` uses T and E as parameters without special declaration.
+**Why this syntax:**
+- Colon already means "type" in Gene (`x: Int`), so `first:A` reads as "first, parameterized by A"
+- Type params are immediately visible at the function name
+- Multiple params chain naturally: `fn:A`, `fn:A:B`, `fn:A:B:C`
+- No angle brackets, no extra punctuation — stays S-expression native
+- Call site doesn't need explicit types — inference handles it
 
 ## Scenario 4: Generic Classes
 
@@ -115,11 +125,21 @@ The type checker already has infrastructure for generics:
 (var top (s .pop))  # (Option Int)
 ```
 
-**Question:** Should `(class (Stack T) ...)` be the syntax, matching `(type (Result T E) ...)`?
+**Question:** Should generic classes follow the same colon syntax as functions?
 
-**Question:** When creating instances, do we write `(new (Stack Int))` or `(new Stack ^T Int)` or something else?
+```gene
+# Option A: Colon syntax (matches functions)
+(class Stack:T
+  ...)
 
-**Recommendation:** `(class (Stack T) ...)` for definition, `(new (Stack Int))` for instantiation. Consistent with type syntax.
+# Option B: Applied type syntax (matches type definitions)
+(class (Stack T)
+  ...)
+```
+
+**Open:** Colon syntax (`Stack:T`) is consistent with `fn first:A`. Applied syntax (`(Stack T)`) is consistent with `(type (Result T E) ...)`. Need to decide which consistency matters more.
+
+**Instantiation:** `(new Stack [1 2 3])` with T inferred, or `(new (Stack Int))` when explicit.
 
 ## Scenario 5: Type Aliases with Parameters
 
@@ -287,5 +307,6 @@ This is where generics pay for themselves in performance. The current native cod
 | 2026-02-07 | Lightweight generics (option 2) | Full generics too heavy for Gene's dynamic-first design |
 | 2026-02-07 | Inference over annotation | Users shouldn't write type variables in most code |
 | 2026-02-07 | Boundary enforcement for MVP | Simpler, fits gradual philosophy |
-| | Syntax for generic classes | TBD |
+| 2026-02-07 | Colon syntax for fn type params | `fn first:A` — colon already means "type" in Gene, chains naturally for multiple params |
+| | Syntax for generic classes | TBD — `class Stack:T` vs `class (Stack T)` |
 | | Erasure vs reification | TBD |
