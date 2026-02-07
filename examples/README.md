@@ -20,6 +20,8 @@ This directory contains example Gene programs demonstrating various language fea
 - `benchmark.gene` - Performance benchmarking example
 - `fib_benchmark.gene` - Fibonacci benchmark
 - `simple_test.gene` - Simple test framework
+- `sample_typed.gene` - Gradual typing walkthrough sample (typed + untyped code)
+- `how-types-work.md` - End-to-end explanation of parse/typecheck/compile/GIR/runtime behavior for `sample_typed.gene`
 
 ## I/O and Files
 
