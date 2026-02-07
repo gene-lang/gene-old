@@ -295,6 +295,6 @@ suite "GIR CLI":
     check class_value.kind == VkClass
     let class_obj = class_value.ref.class
     check class_obj.runtime_type != nil
-    check class_obj.runtime_type.constructor_hook != nil
-    check class_obj.runtime_type.initializer_hook != nil
-    check len(class_obj.runtime_type.method_hooks) > 0
+    check class_obj.runtime_type.constructor != NIL
+    check class_obj.runtime_type.initializer != NIL
+    check len(class_obj.runtime_type.methods) > 0

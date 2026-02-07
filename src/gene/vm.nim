@@ -8,9 +8,6 @@ import ./types
 from ./types/runtime_types import
   validate_type,
   new_runtime_type_object,
-  attach_constructor_hook,
-  attach_initializer_hook,
-  attach_method_hook,
   resolve_constructor,
   resolve_initializer,
   resolve_method
@@ -4472,18 +4469,9 @@ proc exec*(self: ptr VirtualMachine): Value =
         let runtime_type = ensure_class_runtime_type(self, class)
         let method_key = name.str.to_key()
         let method_callable = fn_value
-        attach_method_hook(runtime_type, method_key, proc(): Value =
-          if method_callable.kind == VkFunction and method_callable.ref.fn.body_compiled == nil:
-            method_callable.ref.fn.compile()
-          method_callable
-        )
+        runtime_type.methods[method_key] = method_callable
         if method_key == "init".to_key() or method_key == "__init__".to_key():
-          attach_initializer_hook(runtime_type, proc(): Value =
-            if method_callable.kind == VkFunction and method_callable.ref.fn.body_compiled == nil:
-              method_callable.ref.fn.compile()
-            runtime_type.methods[method_key] = method_callable
-            method_callable
-          )
+          runtime_type.initializer = method_callable
         let m = Method(
           name: name.str,
           callable: fn_value,
@@ -4530,12 +4518,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         # Set the constructor
         class.constructor = fn_value
         let runtime_type = ensure_class_runtime_type(self, class)
-        let ctor_callable = fn_value
-        attach_constructor_hook(runtime_type, proc(): Value =
-          if ctor_callable.kind == VkFunction and ctor_callable.ref.fn.body_compiled == nil:
-            ctor_callable.ref.fn.compile()
-          ctor_callable
-        )
+        runtime_type.constructor = fn_value
 
         # Set the function's namespace to the class namespace
         fn_value.ref.fn.ns = class.ns
