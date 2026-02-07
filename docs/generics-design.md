@@ -107,15 +107,16 @@ The type checker already has infrastructure for generics:
 
 ```gene
 # Parameterized class
-(class (Stack T)
+(class Stack:T
   (var items: (Array T) [])
-  
+
   (method push [val: T]
     (items .push val))
-  
+
   (method pop [] -> (Option T)
     (if (items .empty?)
       None
+    else
       (Some (items .pop)))))
 
 # Usage
@@ -130,14 +131,18 @@ The type checker already has infrastructure for generics:
 ```gene
 # Generic class definition
 (class Stack:T
-  (prop items: (Array T) [])
-  
+  (prop items: (Array T)) # props should be initiated in the constructor
+
+  (ctor [items...: T]
+    (/items = items))
+
   (method push [val: T]
     (items .push val))
-  
+
   (method pop [] -> (Option T)
     (if (items .empty?)
       None
+    else
       (Some (items .pop)))))
 
 # Multiple type params
@@ -322,11 +327,17 @@ This is where generics pay for themselves in performance. The current native cod
 ## Open Questions
 
 1. **Syntax for generic classes:** `(class (Stack T) ...)` — is this natural enough?
+A: `(class Stack:T ...)`
 2. **Instantiation syntax:** `(new (Stack Int))` vs `(new Stack ^T Int)` vs inference?
-3. **Boundary vs full enforcement:** Check element types on every mutation, or only at function call boundaries?
-4. **Explicit type variables ever needed?** Or can inference + applied types cover all practical cases?
-5. **Interaction with `.is`:** Should `((Array Int) .is Array)` return true? (subtype relationship)
-6. **Erasure vs reification:** Do type parameters exist at runtime (reified) or only at compile time (erased)? Reified is more powerful but more complex.
+A: `(new (Stack Int))` is the right way
+1. **Boundary vs full enforcement:** Check element types on every mutation, or only at function call boundaries?
+A: Boundary enforcement for MVP
+2. **Explicit type variables ever needed?** Or can inference + applied types cover all practical cases?
+A: Inference is enough for MVP
+3. **Interaction with `.is`:** Should `((Array Int) .is Array)` return true? (subtype relationship)
+A: Yes, `(Array Int)` is a subtype of `Array`
+4. **Erasure vs reification:** Do type parameters exist at runtime (reified) or only at compile time (erased)? Reified is more powerful but more complex.
+A: Gene values always carry type information at runtime. E.g. instances know their class and property types from class definition.
 
 ## Decision Log
 
