@@ -191,6 +191,23 @@ The type checker already has infrastructure for generics:
 
 **Recommendation:** Defer. Gene's dynamic nature means `.compare` just works or fails at runtime. Bounds are a "nice to have" for better error messages, not a necessity. Add them in a future phase if demand exists.
 
+## Reified Generics
+
+**Decision (2026-02-07):** No erasure. Gene values always carry type information at runtime.
+
+```gene
+(var s (new Stack 1 2 3))   # Stack:Int at runtime
+(s .is Stack)               # true
+(s .is (Stack Int))         # true
+(s .is (Stack String))      # false
+
+# Runtime type introspection
+(s .type)                   # (Stack Int)
+(s .type_params)            # [Int]
+```
+
+This fits Gene's dynamic-first philosophy — you can always ask a value what it is. The NaN-boxing representation already carries type tags; parameterized types extend this to include type arguments.
+
 ## Scenario 7: Variance (Covariance / Contravariance)
 
 **Goal:** Should `(Array Dog)` be usable where `(Array Animal)` is expected?
@@ -319,5 +336,5 @@ This is where generics pay for themselves in performance. The current native cod
 | 2026-02-07 | Inference over annotation | Users shouldn't write type variables in most code |
 | 2026-02-07 | Boundary enforcement for MVP | Simpler, fits gradual philosophy |
 | 2026-02-07 | Colon syntax for type params | `fn first:A`, `class Stack:T` — colon means "type" in Gene, chains naturally for multiple params |
-| 2026-02-07 | Inference-only at call sites | Type params never explicit at call site — concrete types may be namespaced (`n/ClassX`) or not imported |
-| | Erasure vs reification | TBD |
+| 2026-02-07 | Inference-only at call sites | Type params never explicit at call site — concrete types may be namespaced (`n/ClassX`) or not imported; cast args if needed (deferred) |
+| 2026-02-07 | Reified generics (no erasure) | Gene values always carry type information — type params exist at runtime, `.is` works with parameterized types |
