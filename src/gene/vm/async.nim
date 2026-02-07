@@ -142,7 +142,7 @@ proc init_async*() =
     # Ensure App is initialized
     if App == NIL or App.kind != VkApplication:
       return
-    
+
     # Native function to complete a future
     proc complete_future_fn(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
       # complete_future(future, value) - completes the given future with the value
@@ -163,11 +163,11 @@ proc init_async*() =
     let complete_fn_ref = new_ref(VkNativeFn)
     complete_fn_ref.native_fn = complete_future_fn
     App.app.global_ns.ref.ns["complete_future".to_key()] = complete_fn_ref.to_ref_value()
-    
+
     # Create Future class
     let future_class = new_class("Future")
     # Don't set parent yet - will be set later when object_class is available
-    
+
     # Add Future constructor
     proc future_constructor(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
       # Create a new Future instance
@@ -179,7 +179,7 @@ proc init_async*() =
       return future_val
 
     future_class.def_native_constructor(future_constructor)
-    
+
     # Add complete method
     proc future_complete(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
       # Complete the future with a value
@@ -203,12 +203,12 @@ proc init_async*() =
     future_class.def_native_method("on_failure", future_on_failure)
     future_class.def_native_method("state", future_state)
     future_class.def_native_method("value", future_value)
-    
+
     # Store in Application
     let future_class_ref = new_ref(VkClass)
     future_class_ref.class = future_class
     App.app.future_class = future_class_ref.to_ref_value()
-    
+
     # Add to gene namespace if it exists
     if App.app.gene_ns.kind == VkNamespace:
       App.app.gene_ns.ref.ns["Future".to_key()] = App.app.future_class

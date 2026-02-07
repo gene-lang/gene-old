@@ -83,8 +83,6 @@ proc resolve_method*(rt: RtTypeObj, method_key: Key): Value =
     return resolved
   NIL
 
-discard # String-based type parsing removed — types resolved via TypeDesc at compile time
-
 proc type_desc_to_rt(type_descs: seq[TypeDesc], type_id: TypeId, depth = 0): RtType =
   if type_id == NO_TYPE_ID:
     return RtType(kind: RtAny)

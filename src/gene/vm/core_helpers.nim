@@ -1,0 +1,200 @@
+## VM helper procs: expected_type_id_for, find_named_type_descriptor,
+## ensure_class_runtime_type, native_args_supported, skip_wildcard_import_key,
+## resolve_local_or_namespace, import_items, get_value_class template,
+## enter_function, exit_function.
+## Included from vm.nim — shares its scope.
+
+proc expected_type_id_for(tracker: ScopeTracker, index: int): TypeId {.inline.} =
+  if tracker == nil:
+    return NO_TYPE_ID
+  if index < 0 or index >= tracker.type_expectation_ids.len:
+    return NO_TYPE_ID
+  tracker.type_expectation_ids[index]
+
+proc find_named_type_descriptor(cu: CompilationUnit, name: string): tuple[type_id: TypeId, desc: TypeDesc, found: bool] =
+  if cu == nil:
+    return (NO_TYPE_ID, TypeDesc(kind: TdkNamed, name: name), false)
+  for i, desc in cu.type_descriptors:
+    if desc.kind == TdkNamed and desc.name == name:
+      return (i.int32, desc, true)
+  (NO_TYPE_ID, TypeDesc(kind: TdkNamed, name: name), false)
+
+proc ensure_class_runtime_type(self: ptr VirtualMachine, class: Class): RtTypeObj =
+  if class == nil:
+    return nil
+  if class.runtime_type != nil:
+    return class.runtime_type
+  let lookup = find_named_type_descriptor(self.cu, class.name)
+  class.runtime_type = new_runtime_type_object(lookup.type_id, lookup.desc)
+  class.runtime_type
+
+proc native_args_supported(f: Function, args: seq[Value]): bool =
+  const nativeArgLimit =
+    when defined(arm64) or defined(aarch64):
+      7
+    elif defined(amd64):
+      5
+    else:
+      0
+  if nativeArgLimit == 0:
+    return false
+  if f.matcher.is_nil or not f.matcher.has_type_annotations:
+    return false
+  if f.matcher.children.len != args.len:
+    return false
+  if args.len > nativeArgLimit:
+    return false
+  for i, param in f.matcher.children:
+    let tid = param.type_id
+    if tid == BUILTIN_TYPE_INT_ID:
+      if args[i].kind != VkInt:
+        return false
+    elif tid == BUILTIN_TYPE_FLOAT_ID:
+      if args[i].kind != VkFloat:
+        return false
+    else:
+      return false
+  true
+
+## try_native_call, native_trampoline moved to vm/native.nim
+## (included later, after forward declarations)
+proc skip_wildcard_import_key(key: Key): bool {.inline.} =
+  key == "__module_name__".to_key() or
+  key == "__is_main__".to_key() or
+  key == "__init__".to_key() or
+  key == "__init_ran__".to_key() or
+  key == "__compiled__".to_key() or
+  key == "__exports__".to_key() or
+  key == "gene".to_key() or
+  key == "genex".to_key()
+
+proc resolve_local_or_namespace(self: ptr VirtualMachine, name: string): tuple[found: bool, value: Value] =
+  let key = name.to_key()
+  if self.frame != nil and self.frame.scope != nil and self.frame.scope.tracker != nil:
+    let found = self.frame.scope.tracker.locate(key)
+    if found.local_index >= 0:
+      var scope = self.frame.scope
+      var parent_index = found.parent_index
+      while parent_index > 0 and scope != nil:
+        parent_index.dec()
+        scope = scope.parent
+      if scope != nil and found.local_index < scope.members.len:
+        return (true, scope.members[found.local_index])
+  if self.frame != nil and self.frame.ns != nil and self.frame.ns.members.hasKey(key):
+    return (true, self.frame.ns.members[key])
+  return (false, NIL)
+
+proc import_items(self: ptr VirtualMachine, source_ns: Namespace, items: seq[ImportItem]) =
+  if source_ns == nil or self.frame == nil or self.frame.ns == nil:
+    return
+
+  for item in items:
+    if item.name == "*":
+      for key, value in source_ns.members:
+        if value != NIL and not skip_wildcard_import_key(key):
+          self.frame.ns.members[key] = value
+    else:
+      let value = resolve_import_value(source_ns, item.name)
+      let import_name = if item.alias != "":
+        item.alias
+      else:
+        let parts = item.name.split("/")
+        parts[^1]
+      self.frame.ns.members[import_name.to_key()] = value
+
+# Template to get the class of a value for unified method calls
+template get_value_class(val: Value): Class =
+  case val.kind:
+  of VkCustom:
+    types.ref(val).custom_class
+  of VkInstance:
+    instance_class(val)
+  of VkNil:
+    types.ref(App.app.nil_class).class
+  of VkBool:
+    types.ref(App.app.bool_class).class
+  of VkInt:
+    types.ref(App.app.int_class).class
+  of VkFloat:
+    types.ref(App.app.float_class).class
+  of VkChar:
+    types.ref(App.app.char_class).class
+  of VkString:
+    types.ref(App.app.string_class).class
+  of VkSymbol:
+    types.ref(App.app.symbol_class).class
+  of VkComplexSymbol:
+    types.ref(App.app.complex_symbol_class).class
+  of VkArray:
+    types.ref(App.app.array_class).class
+  of VkMap:
+    types.ref(App.app.map_class).class
+  of VkGene:
+    types.ref(App.app.gene_class).class
+  of VkDate:
+    types.ref(App.app.date_class).class
+  of VkDateTime:
+    types.ref(App.app.datetime_class).class
+  of VkSet:
+    types.ref(App.app.set_class).class
+  of VkSelector:
+    types.ref(App.app.selector_class).class
+  of VkRegex:
+    types.ref(App.app.regex_class).class
+  of VkFuture:
+    types.ref(App.app.future_class).class
+  of VkGenerator:
+    types.ref(App.app.generator_class).class
+  of VkThread:
+    types.ref(THREAD_CLASS_VALUE).class
+  of VkThreadMessage:
+    types.ref(THREAD_MESSAGE_CLASS_VALUE).class
+  of VkClass:
+    types.ref(App.app.class_class).class
+  of VkAspect:
+    types.ref(App.app.aspect_class).class
+  else:
+    types.ref(App.app.object_class).class
+
+proc enter_function(self: ptr VirtualMachine, name: string) {.inline.} =
+  if self.profiling:
+    let start_time = cpuTime()
+    self.profile_stack.add((name, start_time))
+    
+proc exit_function(self: ptr VirtualMachine) {.inline.} =
+  if self.profiling and self.profile_stack.len > 0:
+    let (fn_name, start_time) = self.profile_stack[^1]
+    self.profile_stack.del(self.profile_stack.len - 1)
+    
+    let end_time = cpuTime()
+    let elapsed = end_time - start_time
+    
+    # Update or create profile entry
+    if fn_name notin self.profile_data:
+      self.profile_data[fn_name] = FunctionProfile(
+        name: fn_name,
+        call_count: 0,
+        total_time: 0.0,
+        self_time: 0.0,
+        min_time: elapsed,
+        max_time: elapsed
+      )
+    
+    var profile = self.profile_data[fn_name]
+    profile.call_count.inc()
+    profile.total_time += elapsed
+    
+    # Update min/max
+    if elapsed < profile.min_time:
+      profile.min_time = elapsed
+    if elapsed > profile.max_time:
+      profile.max_time = elapsed
+    
+    # Calculate self time (subtract child call times)
+    for i in countdown(self.profile_stack.len - 1, 0):
+      if self.profile_stack[i].name == fn_name:
+        break
+      # This is a simplification - proper self time calculation is more complex
+    profile.self_time = profile.total_time  # For now, just use total
+
+    self.profile_data[fn_name] = profile
