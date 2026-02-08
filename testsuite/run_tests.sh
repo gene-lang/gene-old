@@ -63,8 +63,9 @@ run_test() {
         else
             # Run test and capture output
             if actual_output=$(cd "$test_dir" && run_gene "$test_basename" 2>&1); then
-                # Filter out empty lines from actual output for comparison
-                actual_output=$(echo "$actual_output" | grep -v '^$' || true)
+                # Filter out empty lines and compile-time type warnings from actual output
+                # (compile warnings contain "Type error:", runtime warnings like "Lossy conversion" are kept)
+                actual_output=$(echo "$actual_output" | grep -v '^$' | grep -v 'Warning:.*Type error:' || true)
                 
                 # Normalize outputs (remove trailing spaces)
                 echo "$expected_output" | sed 's/[[:space:]]*$//' > /tmp/expected_$$.txt

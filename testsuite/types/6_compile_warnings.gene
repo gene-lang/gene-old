@@ -1,0 +1,30 @@
+# Compile-time type warnings (gradual mode)
+# This test verifies that programs with type mismatches
+# still run (warnings don't halt compilation).
+
+# Function call with wrong arg type → runtime error caught
+# (compile-time warning is emitted to stderr but program continues)
+(fn f [x: Int] x)
+(try
+  (f "bad")
+catch *
+  (println "caught call"))
+# Expected: caught call
+
+# Return type mismatch → runtime error caught
+(fn bad [] -> Int "oops")
+(try
+  (bad)
+catch *
+  (println "caught return"))
+# Expected: caught return
+
+# Correct calls work normally
+(fn add [a: Int b: Int] (a + b))
+(println (add 1 2))
+# Expected: 3
+
+# Untyped args still work (gradual typing)
+(fn flex [x] x)
+(println (flex "anything"))
+# Expected: anything

@@ -80,6 +80,7 @@ type
     effect_stack*: seq[seq[string]]
     type_descs*: seq[TypeDesc]
     type_desc_index*: Table[string, TypeId]
+    warnings*: seq[string]
 
 let ANY_TYPE = TypeExpr(kind: TkAny)
 
@@ -171,7 +172,8 @@ proc new_type_checker*(strict: bool = true, module_filename: string = ""): TypeC
                       "named:Symbol": BUILTIN_TYPE_SYMBOL_ID,
                       "named:Char": BUILTIN_TYPE_CHAR_ID,
                       "named:Array": BUILTIN_TYPE_ARRAY_ID,
-                      "named:Map": BUILTIN_TYPE_MAP_ID}.toTable
+                      "named:Map": BUILTIN_TYPE_MAP_ID}.toTable,
+    warnings: @[]
   )
   result.register_builtin_adts()
 
@@ -179,6 +181,17 @@ proc type_descriptors*(self: TypeChecker): seq[TypeDesc] =
   if self == nil:
     return @[]
   result = self.type_descs
+
+proc warn(self: TypeChecker, msg: string) =
+  ## In strict mode, raise an error. In gradual mode, record a warning.
+  if self.strict:
+    raise new_exception(types.Exception, msg)
+  self.warnings.add(msg)
+
+proc flush_warnings*(self: TypeChecker): seq[string] =
+  ## Return and clear accumulated warnings.
+  result = self.warnings
+  self.warnings = @[]
 
 proc add_adt(self: TypeChecker, name: string, params: seq[string], variants: seq[AdtVariant]) =
   var def = AdtDef(
@@ -1096,7 +1109,13 @@ proc check_call(self: TypeChecker, callee_type: TypeExpr, args: seq[Value], prop
   let check_count = min(pos_count, required_params)
   for i in 0..<check_count:
     let arg_type = self.check_expr(args[i])
-    self.unify(pos_params[i].typ, arg_type, context)
+    if self.strict:
+      self.unify(pos_params[i].typ, arg_type, context)
+    else:
+      try:
+        self.unify(pos_params[i].typ, arg_type, context)
+      except CatchableError as e:
+        self.warn("Warning: " & e.msg)
   # For variadic, remaining args go into the rest param - just type-check them
   for i in check_count..<pos_count:
     discard self.check_expr(args[i])
@@ -1107,11 +1126,20 @@ proc check_call(self: TypeChecker, callee_type: TypeExpr, args: seq[Value], prop
       discard self.check_expr(v)
     elif kw_params.hasKey(key_name):
       let arg_type = self.check_expr(v)
-      self.unify(kw_params[key_name].typ, arg_type, context)
+      if self.strict:
+        self.unify(kw_params[key_name].typ, arg_type, context)
+      else:
+        try:
+          self.unify(kw_params[key_name].typ, arg_type, context)
+        except CatchableError as e:
+          self.warn("Warning: " & e.msg)
     elif ct.kind == TkFn and ct.kw_splat:
       discard self.check_expr(v)
     else:
-      raise new_exception(types.Exception, "Type error: unexpected keyword argument '" & key_name & "' in " & context)
+      if self.strict:
+        raise new_exception(types.Exception, "Type error: unexpected keyword argument '" & key_name & "' in " & context)
+      else:
+        self.warn("Warning: Type error: unexpected keyword argument '" & key_name & "' in " & context)
   return self.resolve_self(ct.ret)
 
 proc check_method_call(self: TypeChecker, recv_type: TypeExpr, method_name: string, args: seq[Value], props: Table[Key, Value], context: string): TypeExpr =
@@ -1184,7 +1212,13 @@ proc check_var(self: TypeChecker, gene: ptr Gene): TypeExpr =
   if gene.children.len > value_index:
     let value_type = self.check_expr(gene.children[value_index])
     if annotated != nil:
-      self.unify(annotated, value_type, "var " & name)
+      if self.strict:
+        self.unify(annotated, value_type, "var " & name)
+      else:
+        try:
+          self.unify(annotated, value_type, "var " & name)
+        except CatchableError as e:
+          self.warn("Warning: " & e.msg)
       self.define(name, annotated)
       return annotated
     else:
@@ -1324,7 +1358,13 @@ proc check_return(self: TypeChecker, gene: ptr Gene): TypeExpr =
     else:
       TypeExpr(kind: TkNamed, name: "Nil")
   if self.current_return != nil:
-    self.unify(self.current_return, ret_type, "return")
+    if self.strict:
+      self.unify(self.current_return, ret_type, "return")
+    else:
+      try:
+        self.unify(self.current_return, ret_type, "return")
+      except CatchableError as e:
+        self.warn("Warning: " & e.msg)
   return ret_type
 
 proc check_match(self: TypeChecker, gene: ptr Gene): TypeExpr =
@@ -1575,20 +1615,44 @@ proc check_infix(self: TypeChecker, gene: ptr Gene): TypeExpr =
       (right_res.kind == TkNamed and right_res.name == "Float")
     if want_float:
       if left_type.kind != TkAny:
-        self.unify(TypeExpr(kind: TkNamed, name: "Float"), left_type, op.str)
+        if self.strict:
+          self.unify(TypeExpr(kind: TkNamed, name: "Float"), left_type, op.str)
+        else:
+          try: self.unify(TypeExpr(kind: TkNamed, name: "Float"), left_type, op.str)
+          except CatchableError as e: self.warn("Warning: " & e.msg)
       if right_type.kind != TkAny:
-        self.unify(TypeExpr(kind: TkNamed, name: "Float"), right_type, op.str)
+        if self.strict:
+          self.unify(TypeExpr(kind: TkNamed, name: "Float"), right_type, op.str)
+        else:
+          try: self.unify(TypeExpr(kind: TkNamed, name: "Float"), right_type, op.str)
+          except CatchableError as e: self.warn("Warning: " & e.msg)
       return TypeExpr(kind: TkNamed, name: "Float")
     if left_type.kind != TkAny:
-      self.unify(TypeExpr(kind: TkNamed, name: "Int"), left_type, op.str)
+      if self.strict:
+        self.unify(TypeExpr(kind: TkNamed, name: "Int"), left_type, op.str)
+      else:
+        try: self.unify(TypeExpr(kind: TkNamed, name: "Int"), left_type, op.str)
+        except CatchableError as e: self.warn("Warning: " & e.msg)
     if right_type.kind != TkAny:
-      self.unify(TypeExpr(kind: TkNamed, name: "Int"), right_type, op.str)
+      if self.strict:
+        self.unify(TypeExpr(kind: TkNamed, name: "Int"), right_type, op.str)
+      else:
+        try: self.unify(TypeExpr(kind: TkNamed, name: "Int"), right_type, op.str)
+        except CatchableError as e: self.warn("Warning: " & e.msg)
     return TypeExpr(kind: TkNamed, name: "Int")
   of "++":
     if left_type.kind != TkAny:
-      self.unify(TypeExpr(kind: TkNamed, name: "String"), left_type, "++")
+      if self.strict:
+        self.unify(TypeExpr(kind: TkNamed, name: "String"), left_type, "++")
+      else:
+        try: self.unify(TypeExpr(kind: TkNamed, name: "String"), left_type, "++")
+        except CatchableError as e: self.warn("Warning: " & e.msg)
     if right_type.kind != TkAny:
-      self.unify(TypeExpr(kind: TkNamed, name: "String"), right_type, "++")
+      if self.strict:
+        self.unify(TypeExpr(kind: TkNamed, name: "String"), right_type, "++")
+      else:
+        try: self.unify(TypeExpr(kind: TkNamed, name: "String"), right_type, "++")
+        except CatchableError as e: self.warn("Warning: " & e.msg)
     return TypeExpr(kind: TkNamed, name: "String")
   of "==", "!=", "<", "<=", ">", ">=":
     return TypeExpr(kind: TkNamed, name: "Bool")
@@ -1596,7 +1660,13 @@ proc check_infix(self: TypeChecker, gene: ptr Gene): TypeExpr =
     return TypeExpr(kind: TkNamed, name: "Bool")
   of "=":
     # Assignment
-    self.unify(left_type, right_type, "=")
+    if self.strict:
+      self.unify(left_type, right_type, "=")
+    else:
+      try:
+        self.unify(left_type, right_type, "=")
+      except CatchableError as e:
+        self.warn("Warning: " & e.msg)
     return left_type
   of "+=", "-=", "*=", "/=":
     # Compound assignment - type is same as left operand
@@ -1703,7 +1773,13 @@ proc check_fn(self: TypeChecker, gene: ptr Gene): TypeExpr =
     last = self.check_expr(gene.children[i])
   # If no explicit return type, allow inferred last expr
   if return_type != ANY_TYPE and return_type != nil:
-    self.unify(return_type, last, "fn " & name)
+    if self.strict:
+      self.unify(return_type, last, "fn " & name)
+    else:
+      try:
+        self.unify(return_type, last, "fn " & name)
+      except CatchableError as e:
+        self.warn("Warning: " & e.msg)
   self.current_return = saved_return
   self.pop_scope()
   return fn_type

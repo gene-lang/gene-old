@@ -408,6 +408,17 @@ proc parse_and_compile*(input: string, filename = "<input>", eager_functions = f
           let location = trace_location(trace)
           let message = if location.len > 0: location & ": " & e.msg else: e.msg
           raise new_exception(types.Exception, message)
+        # Emit compile-time type warnings (gradual mode)
+        let warnings = checker.flush_warnings()
+        for w in warnings:
+          var trace: SourceTrace = nil
+          if node.kind == VkGene and node.gene != nil:
+            trace = node.gene.trace
+          let location = trace_location(trace)
+          if location.len > 0:
+            stderr.writeLine(location & ": " & w)
+          else:
+            stderr.writeLine(w)
       try:
         if is_vmstmt_form(node):
           self.compile_vmstmt(node.gene)
@@ -444,6 +455,17 @@ proc parse_and_compile*(input: string, filename = "<input>", eager_functions = f
               let location = trace_location(trace)
               let message = if location.len > 0: location & ": " & e.msg else: e.msg
               raise new_exception(types.Exception, message)
+            # Emit compile-time type warnings (gradual mode)
+            let warnings = checker.flush_warnings()
+            for w in warnings:
+              var trace: SourceTrace = nil
+              if node.kind == VkGene and node.gene != nil:
+                trace = node.gene.trace
+              let location = trace_location(trace)
+              if location.len > 0:
+                stderr.writeLine(location & ": " & w)
+              else:
+                stderr.writeLine(w)
           try:
             # Compile current item
             if is_vmstmt_form(node):
@@ -463,7 +485,7 @@ proc parse_and_compile*(input: string, filename = "<input>", eager_functions = f
     except ParseEofError:
       # Expected end of input
       discard
-  
+
   # Finalize compilation
   self.end_scope()
   self.emit(Instruction(kind: IkEnd))
@@ -527,6 +549,17 @@ proc parse_and_compile_repl*(input: string, filename = "<repl>", scope_tracker: 
             let location = trace_location(trace)
             let message = if location.len > 0: location & ": " & e.msg else: e.msg
             raise new_exception(types.Exception, message)
+          # Emit compile-time type warnings (gradual mode)
+          let warnings = checker.flush_warnings()
+          for w in warnings:
+            var trace: SourceTrace = nil
+            if node.kind == VkGene and node.gene != nil:
+              trace = node.gene.trace
+            let location = trace_location(trace)
+            if location.len > 0:
+              stderr.writeLine(location & ": " & w)
+            else:
+              stderr.writeLine(w)
         try:
           if is_vmstmt_form(node):
             self.compile_vmstmt(node.gene)
@@ -619,6 +652,17 @@ proc parse_and_compile*(stream: Stream, filename = "<input>", eager_functions = 
           let location = trace_location(trace)
           let message = if location.len > 0: location & ": " & e.msg else: e.msg
           raise new_exception(types.Exception, message)
+        # Emit compile-time type warnings (gradual mode)
+        let warnings = checker.flush_warnings()
+        for w in warnings:
+          var trace: SourceTrace = nil
+          if node.kind == VkGene and node.gene != nil:
+            trace = node.gene.trace
+          let location = trace_location(trace)
+          if location.len > 0:
+            stderr.writeLine(location & ": " & w)
+          else:
+            stderr.writeLine(w)
       try:
         # Compile current item
         if is_vmstmt_form(node):
@@ -656,6 +700,17 @@ proc parse_and_compile*(stream: Stream, filename = "<input>", eager_functions = 
               let location = trace_location(trace)
               let message = if location.len > 0: location & ": " & e.msg else: e.msg
               raise new_exception(types.Exception, message)
+            # Emit compile-time type warnings (gradual mode)
+            let warnings = checker.flush_warnings()
+            for w in warnings:
+              var trace: SourceTrace = nil
+              if node.kind == VkGene and node.gene != nil:
+                trace = node.gene.trace
+              let location = trace_location(trace)
+              if location.len > 0:
+                stderr.writeLine(location & ": " & w)
+              else:
+                stderr.writeLine(w)
           try:
             # Compile current item
             if is_vmstmt_form(node):
