@@ -1,0 +1,61 @@
+# Property type annotations
+
+# Typed properties with correct values
+(class Point
+  (prop x: Int)
+  (prop y: Int)
+  (ctor [a b] (/x = a) (/y = b)))
+(var p (new Point 1 2))
+(println p/x)
+# Expected: 1
+
+(println p/y)
+# Expected: 2
+
+# Property mutation with correct type
+(p/x = 42)
+(println p/x)
+# Expected: 42
+
+# Nil passes property type checks
+(p/x = nil)
+(println p/x)
+# Expected: nil
+
+# Int->Float coercion on property
+(class Holder
+  (prop val: Float)
+  (ctor [v] (/val = v)))
+(var h (new Holder 3))
+(println h/val)
+# Expected: 3.0
+
+# Constructor type violation caught
+(class Bad
+  (prop x: Int)
+  (ctor [a] (/x = a)))
+(try
+  (new Bad "wrong")
+catch *
+  (println "caught ctor"))
+# Expected: caught ctor
+
+# Mutation type violation caught
+(var p2 (new Point 1 2))
+(try
+  (p2/x = "wrong")
+catch *
+  (println "caught mutation"))
+# Expected: caught mutation
+
+# Untyped property accepts anything
+(class Flex
+  (prop x)
+  (ctor [a] (/x = a)))
+(var f (new Flex "hello"))
+(println f/x)
+# Expected: hello
+
+(f/x = 42)
+(println f/x)
+# Expected: 42
