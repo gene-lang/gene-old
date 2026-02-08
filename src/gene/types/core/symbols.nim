@@ -1,5 +1,5 @@
 ## Symbol table: to_symbol_value, to_key, get_symbol.
-## Included from value_core.nim — shares its scope.
+## Included from core.nim — shares its scope.
 
 #################### Symbol #####################
 

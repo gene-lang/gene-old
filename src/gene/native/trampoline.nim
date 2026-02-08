@@ -1,6 +1,6 @@
 import std/tables
 import ../types
-import ../types/value_core
+import ../types/core
 
 type
   NativeFnSig* = object

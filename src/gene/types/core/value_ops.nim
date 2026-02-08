@@ -1,6 +1,6 @@
 ## Common (Key/Id), Reference (retain, release, array_ptr, map_ptr, instance_ptr,
 ## new_ref), Value (==, kind, is_literal, $, str_no_quotes, [], size).
-## Included from value_core.nim — shares its scope.
+## Included from core.nim — shares its scope.
 
 #################### Common ######################
 

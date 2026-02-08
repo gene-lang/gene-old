@@ -5,7 +5,7 @@
 
 import tables, strutils, math
 import ./type_defs
-import ./value_core
+import ./core
 
 type
   RtTypeKind = enum

@@ -1,5 +1,5 @@
 ## Application, Namespace operations, Scope operations, ScopeTracker.
-## Included from value_core.nim — shares its scope.
+## Included from core.nim — shares its scope.
 
 #################### Application #################
 

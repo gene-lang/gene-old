@@ -1,6 +1,6 @@
 ## Int, String, ComplexSymbol, Array, Stream, Set, Map, Instance,
 ## Range, Regex, Date/DateTime/Time, Selector, SourceTrace, Gene constructors.
-## Included from value_core.nim — shares its scope.
+## Included from core.nim — shares its scope.
 
 #################### Int ########################
 

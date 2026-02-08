@@ -1,7 +1,7 @@
 import strformat
 
 import ./type_defs
-import ./value_core
+import ./core
 
 var LABEL_COUNTER {.threadvar.}: int16
 

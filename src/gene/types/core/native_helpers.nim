@@ -1,6 +1,6 @@
 ## Native function argument helpers: get_positional_arg, get_keyword_arg,
 ## call_native_fn, and related converters.
-## Included from value_core.nim — shares its scope.
+## Included from core.nim — shares its scope.
 
 #################### Native ######################
 

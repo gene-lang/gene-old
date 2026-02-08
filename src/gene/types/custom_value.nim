@@ -1,5 +1,5 @@
 import ./type_defs
-import ./value_core
+import ./core
 
 #################### Custom Value #################
 

@@ -1,5 +1,5 @@
 ## Function (to_function, new_fn) and Block (to_block, new_block).
-## Included from value_core.nim — shares its scope.
+## Included from core.nim — shares its scope.
 
 #################### Function ####################
 

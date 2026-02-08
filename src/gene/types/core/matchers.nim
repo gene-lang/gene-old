@@ -1,6 +1,6 @@
 ## Pattern Matching: Matcher, RootMatcher, parse, type resolution
 ## (intern_type_desc, resolve_type_value_to_id).
-## Included from value_core.nim — shares its scope.
+## Included from core.nim — shares its scope.
 
 #################### Pattern Matching ############
 

@@ -11,7 +11,7 @@
 
 import std/[tables, strformat, strutils, sequtils]
 import ../types
-import ../types/value_core
+import ../types/core
 import ./hir
 import ./trampoline
 

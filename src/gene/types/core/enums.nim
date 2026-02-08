@@ -1,5 +1,5 @@
 ## Enum operations
-## Included from value_core.nim — shares its scope.
+## Included from core.nim — shares its scope.
 
 proc new_enum*(name: string): EnumDef =
   return EnumDef(

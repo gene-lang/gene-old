@@ -109,13 +109,13 @@ proc toRaw*(v: Value): uint64 {.inline.} =
   ## Extract raw uint64 from Value
   v.raw
 
-include ./symbols
-include ./value_ops
-include ./constructors
-include ./collections
-include ./matchers
-include ./functions
-include ./enums
-include ./futures
-include ./native_helpers
-include ./frames
+include ./core/symbols
+include ./core/value_ops
+include ./core/constructors
+include ./core/collections
+include ./core/matchers
+include ./core/functions
+include ./core/enums
+include ./core/futures
+include ./core/native_helpers
+include ./core/frames

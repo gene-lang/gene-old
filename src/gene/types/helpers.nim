@@ -1,7 +1,7 @@
 import os, times, tables
 
 import ./type_defs
-import ./value_core
+import ./core
 import ./classes
 
 proc refresh_env_map*()
@@ -194,7 +194,7 @@ proc wrap_nim_exception*(ex: ref CatchableError, location: string = ""): Value =
     # Fallback to string if exception class not initialized
     return ex.msg.to_value()
 
-  let cls = value_core.`ref`(exception_class_val).class
+  let cls = core.`ref`(exception_class_val).class
   var props = initTable[Key, Value]()
   props["message".to_key()] = ex.msg.to_value()
   props["nim_type".to_key()] = ($type(ex[])).to_value()

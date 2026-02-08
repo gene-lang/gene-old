@@ -1,5 +1,5 @@
 ## Frame operations: frame pool, CallBaseStack, stack push/pop.
-## Included from value_core.nim — shares its scope.
+## Included from core.nim — shares its scope.
 
 #################### Frame #######################
 const INITIAL_FRAME_POOL_SIZE* = 128
