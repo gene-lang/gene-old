@@ -419,6 +419,8 @@ type
     for_singleton*: bool # if it's the class associated with a single object, can not be extended
     version*: uint64  # Incremented when methods are mutated
     has_macro_constructor*: bool  # Track if class has macro constructor for validation
+    prop_types*: Table[Key, TypeId]  # property name → TypeId
+    prop_type_descs*: seq[TypeDesc]  # type descriptors for property types
 
   Method* = ref object
     class*: Class
@@ -662,6 +664,7 @@ type
     IkCallInit
     IkDefineMethod      # Define a method on a class
     IkDefineConstructor # Define a constructor on a class
+    IkDefineProp        # Define a typed property on a class
     IkCallSuperMethod   # Call superclass eager method
     IkCallSuperMethodMacro # Call superclass macro method
     IkCallSuperCtor     # Call superclass constructor (eager)

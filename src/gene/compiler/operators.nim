@@ -1040,6 +1040,10 @@ proc compile_gene(self: Compiler, input: Value) =
         # Constructor definition inside class body
         self.compile_constructor_definition(gene)
         return
+      of "prop":
+        # Property definition inside class body
+        self.compile_prop_definition(gene)
+        return
       of ".fn", ".fn!", ".ctor", ".ctor!":
         not_allowed("Legacy dotted class members are not supported; use (method ...) or (ctor ...) instead")
       of "eval":

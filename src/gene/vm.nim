@@ -7,6 +7,8 @@ import asyncdispatch  # For event loop polling in async support
 import ./types
 from ./types/runtime_types import
   validate_type,
+  validate_or_coerce_type,
+  emit_type_warning,
   new_runtime_type_object,
   resolve_constructor,
   resolve_initializer,

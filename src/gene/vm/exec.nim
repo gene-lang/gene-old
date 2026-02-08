@@ -100,6 +100,13 @@ proc exec*(self: ptr VirtualMachine): Value =
           var result_val = v
           if is_function_like(self.frame.kind) and self.frame.target.kind == VkFunction:
             let f = self.frame.target.ref.fn
+
+            # Validate return type for implicit returns (function reached end)
+            if f.matcher.return_type_id != NO_TYPE_ID and f.matcher.type_descriptors.len > 0:
+              if result_val != NIL:
+                let warning = validate_or_coerce_type(result_val, f.matcher.return_type_id, f.matcher.type_descriptors, "return value of " & f.name)
+                emit_type_warning(warning)
+
             if f.async:
               # Wrap the return value in a future
               let future_val = new_future_value()
@@ -624,6 +631,14 @@ proc exec*(self: ptr VirtualMachine): Value =
           of VkClass:
             target.ref.class.ns[name] = value
           of VkInstance:
+            # Check property type if class has type annotations
+            let cls = target.instance_class
+            if cls != nil and name in cls.prop_types:
+              let expected_type_id = cls.prop_types[name]
+              if expected_type_id != NO_TYPE_ID and cls.prop_type_descs.len > 0 and value != NIL:
+                let prop_name = get_symbol((cast[uint64](name) and PAYLOAD_MASK).int)
+                let warning = validate_or_coerce_type(value, expected_type_id, cls.prop_type_descs, "property " & prop_name)
+                emit_type_warning(warning)
             instance_props(target)[name] = value
           of VkArray:
             # Arrays don't support named members, this is likely an error
@@ -2760,6 +2775,29 @@ proc exec*(self: ptr VirtualMachine): Value =
         # Return the function
         self.frame.push(fn_value)
 
+      of IkDefineProp:
+        # Define a typed property on a class
+        # arg0 = property name key, arg1 = TypeId (or NO_TYPE_ID)
+        let name = cast[Key](inst.arg0.raw)
+        let type_id = inst.arg1
+
+        # The class is passed as the first argument during class initialization
+        let class_value = if self.frame.args.kind == VkGene and self.frame.args.gene.children.len > 0:
+          self.frame.args.gene.children[0]
+        else:
+          not_allowed("Cannot find class for prop definition")
+          NIL
+
+        if class_value.kind != VkClass:
+          not_allowed("Can only define props on classes, got " & $class_value.kind)
+
+        let cls = class_value.ref.class
+        cls.prop_types[name] = type_id
+        if type_id != NO_TYPE_ID and cls.prop_type_descs.len == 0:
+          # Copy type descriptors from the compilation unit
+          cls.prop_type_descs = self.cu.type_descriptors
+        self.frame.push(NIL)
+
       of IkSuper:
         # Push a proxy representing the parent class for super calls
         let instance = current_self_value(self.frame)
@@ -2968,6 +3006,14 @@ proc exec*(self: ptr VirtualMachine): Value =
           not_allowed("Return from top level")
         else:
           var v = self.frame.pop()
+
+          # Validate return type if the function/method has one declared
+          if is_function_like(self.frame.kind) and self.frame.target.kind == VkFunction:
+            let f = self.frame.target.ref.fn
+            if f.matcher.return_type_id != NO_TYPE_ID and f.matcher.type_descriptors.len > 0:
+              if v != NIL:  # nil passes all type checks (consistent with param handling)
+                let warning = validate_or_coerce_type(v, f.matcher.return_type_id, f.matcher.type_descriptors, "return value of " & f.name)
+                emit_type_warning(warning)
 
           # Check if we're returning from a function called by exec_function
           let returning_from_exec_function = self.frame.from_exec_function

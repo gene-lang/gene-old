@@ -1,0 +1,37 @@
+# Method return type checking
+
+# Method with correct return type
+(class Foo
+  (method bar [] -> Int 42))
+(var f (new Foo))
+(println (f .bar))
+# Expected: 42
+
+# Method with nil return (nil passes all type checks)
+(class Baz
+  (method qux [] -> Int nil))
+(var b (new Baz))
+(println (b .qux))
+# Expected: nil
+
+# Method with Int->Float coercion
+(class Coerce
+  (method val [] -> Float 3))
+(var c (new Coerce))
+(println (c .val))
+# Expected: 3.0
+
+# Function with correct return type (existing behavior)
+(fn good [] -> Int 10)
+(println (good))
+# Expected: 10
+
+# Method return type violation is caught by try/catch
+(class Bad
+  (method wrong [] -> Int "oops"))
+(var bad (new Bad))
+(try
+  (bad .wrong)
+catch *
+  (println "caught"))
+# Expected: caught

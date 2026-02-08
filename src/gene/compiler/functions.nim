@@ -237,6 +237,24 @@ proc compile_constructor_definition(self: Compiler, gene: ptr Gene) =
   # Set as constructor for the class
   self.emit(Instruction(kind: IkDefineConstructor))
 
+proc compile_prop_definition(self: Compiler, gene: ptr Gene) =
+  ## Compile property definition: (prop x) or (prop x: Type)
+  if gene.children.len == 0:
+    not_allowed("prop requires a name")
+  var name_val = gene.children[0]
+  var type_id: TypeId = NO_TYPE_ID
+  if name_val.kind == VkSymbol and name_val.str.ends_with(":"):
+    # (prop x: Int) — name_val is "x:", children[1] is "Int"
+    let base_name = name_val.str[0..^2]
+    if gene.children.len > 1:
+      type_id = resolve_type_value_to_id(gene.children[1], self.output.type_descriptors, self.output.type_aliases)
+    self.emit(Instruction(kind: IkDefineProp, arg0: base_name.to_key().to_value(), arg1: type_id))
+  else:
+    # (prop x) — untyped property declaration
+    if name_val.kind != VkSymbol:
+      not_allowed("prop name must be a symbol")
+    self.emit(Instruction(kind: IkDefineProp, arg0: name_val.str.to_key().to_value(), arg1: NO_TYPE_ID))
+
 proc compile_class_with_container(self: Compiler, class_name: Value, parent_class: Value, container_expr: Value, body_start: int, gene: ptr Gene) =
   ## Helper to compile class with container handling
   ## Implements stack-based approach: compile container → push to stack → create class as member
