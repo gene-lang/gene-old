@@ -194,6 +194,7 @@ Notes:
   # Initialize VM
   init_app_and_vm()
   VM.native_code = options.native_code
+  VM.type_check = options.type_check
   init_stdlib()
   set_program_args("<pipe>", @[])
 

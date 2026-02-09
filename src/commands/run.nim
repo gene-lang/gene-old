@@ -184,6 +184,7 @@ proc handle*(cmd: string, args: seq[string]): CommandResult =
 
   init_app_and_vm()
   VM.native_code = options.native_code
+  VM.type_check = options.type_check
   init_stdlib()
   set_program_args(file, options.args)
   VM.repl_on_error = options.repl_on_error

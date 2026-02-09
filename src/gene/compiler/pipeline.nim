@@ -362,9 +362,10 @@ proc parse_and_compile*(input: string, filename = "<input>", eager_functions = f
   )
   self.preserve_root_scope = module_mode
   self.local_definitions = module_mode
+  self.output.type_check = type_check
   self.emit(Instruction(kind: IkStart))
   self.start_scope()
-  
+
   var is_first = true
   var prev_pushed = false
   # Gradual typing: non-strict mode allows unknown types (treated as Any)
@@ -524,6 +525,7 @@ proc parse_and_compile_repl*(input: string, filename = "<repl>", scope_tracker: 
     declared_names: @[initTable[Key, bool]()],
     skip_root_scope_start: true
   )
+  self.output.type_check = type_check
   self.emit(Instruction(kind: IkStart))
 
   var is_first = true
@@ -606,6 +608,7 @@ proc parse_and_compile*(stream: Stream, filename = "<input>", eager_functions = 
     method_access_mode: MamAutoCall
   )
   self.preserve_root_scope = module_mode
+  self.output.type_check = type_check
   self.output.instructions.add(Instruction(kind: IkStart))
   self.start_scope()
 

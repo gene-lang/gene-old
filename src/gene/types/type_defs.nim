@@ -488,6 +488,7 @@ type
     hint_mode*: MatchingHintMode
     children*: seq[Matcher]
     has_type_annotations*: bool  # True if any child has a type annotation
+    type_check*: bool  # Whether runtime type validation is enabled
     return_type_id*: TypeId
     type_descriptors*: seq[TypeDesc]
 
@@ -814,6 +815,7 @@ type
     id*: Id
     kind*: CompilationUnitKind
     skip_return*: bool
+    type_check*: bool  # Whether runtime type validation is enabled
     matcher*: RootMatcher
     instructions*: seq[Instruction]
     trace_root*: SourceTrace
@@ -920,6 +922,7 @@ type
     scheduler_running*: bool  # Set to true when run_forever is active, false to stop
     aop_contexts*: seq[AopContext]  # Stack of active around advice contexts
     native_code*: bool  # Enable native code execution when available
+    type_check*: bool  # Whether runtime type validation is enabled (set from --no-type-check)
 
   NativeContext* = object
     vm*: ptr VirtualMachine

@@ -2,7 +2,7 @@
 ## Included from vm.nim — shares its scope.
 
 proc exec*(self: ptr VirtualMachine, code: string, module_name: string): Value =
-  let compiled = parse_and_compile(code, module_name, module_mode = true, run_init = false)
+  let compiled = parse_and_compile(code, module_name, module_mode = true, run_init = false, type_check = self.type_check)
 
   let ns = new_namespace(App.app.global_ns.ref.ns, module_name)
   ns["__module_name__".to_key()] = module_name.to_value()
@@ -41,7 +41,7 @@ proc exec*(self: ptr VirtualMachine, code: string, module_name: string): Value =
 
 proc exec*(self: ptr VirtualMachine, stream: Stream, module_name: string): Value =
   ## Execute Gene code from a stream (more memory-efficient for large files)
-  let compiled = parse_and_compile(stream, module_name, module_mode = true, run_init = false)
+  let compiled = parse_and_compile(stream, module_name, module_mode = true, run_init = false, type_check = self.type_check)
 
   let ns = new_namespace(App.app.global_ns.ref.ns, module_name)
   ns["__module_name__".to_key()] = module_name.to_value()

@@ -19,6 +19,7 @@ proc new_compilation_unit*(): CompilationUnit =
   LABEL_COUNTER = 0
   CompilationUnit(
     id: new_id(),
+    type_check: true,
     trace_root: nil,
     instruction_traces: @[],
     inline_caches: @[],

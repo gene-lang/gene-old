@@ -123,7 +123,7 @@ proc process_args_core(matcher: RootMatcher, positional: ptr UncheckedArray[Valu
     raise new_exception(types.Exception, "Expected " & $pos_index & " arguments, got " & $pos_count)
 
   # Runtime type validation for annotated parameters
-  if matcher.has_type_annotations:
+  if matcher.type_check and matcher.has_type_annotations:
     for i, param in matcher.children:
       if param.type_id != NO_TYPE_ID and matcher.type_descriptors.len > 0 and i < scope.members.len:
         var value = scope.members[i]
@@ -136,7 +136,7 @@ proc process_args_core(matcher: RootMatcher, positional: ptr UncheckedArray[Valu
 
 # Inline type validation for fast paths
 template validate_fast_path_types(matcher: RootMatcher, scope: Scope) =
-  if matcher.has_type_annotations:
+  if matcher.type_check and matcher.has_type_annotations:
     for i, param in matcher.children:
       if param.type_id != NO_TYPE_ID and matcher.type_descriptors.len > 0 and i < scope.members.len:
         var value = scope.members[i]
