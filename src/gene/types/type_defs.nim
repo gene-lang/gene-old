@@ -236,6 +236,13 @@ type
     of TdkVar:
       var_id*: int32
 
+  ModuleTypeRegistry* = ref object
+    module_path*: string
+    descriptors*: OrderedTable[TypeId, TypeDesc]
+
+  GlobalTypeRegistry* = ref object
+    modules*: OrderedTable[string, ModuleTypeRegistry]
+
   RtImplLoader* = proc(): Value
 
   RtTypeObj* = ref object
@@ -828,6 +835,7 @@ type
     module_imports*: seq[string]
     module_types*: seq[ModuleTypeNode]
     type_descriptors*: seq[TypeDesc]
+    type_registry*: ModuleTypeRegistry  # Phase 4: module-scoped type registry
     type_aliases*: Table[string, TypeId]
 
   # Used by the compiler to keep track of scopes and variables

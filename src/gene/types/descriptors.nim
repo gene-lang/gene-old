@@ -206,3 +206,31 @@ proc set_expected_type_id*(tracker: ScopeTracker, index: int16,
   while tracker.type_expectation_ids.len <= index.int:
     tracker.type_expectation_ids.add(NO_TYPE_ID)
   tracker.type_expectation_ids[index.int] = expected_type_id
+
+proc new_global_type_registry*(): GlobalTypeRegistry =
+  GlobalTypeRegistry(modules: initOrderedTable[string, ModuleTypeRegistry]())
+
+proc get_or_create_module*(g: GlobalTypeRegistry, path: string): ModuleTypeRegistry =
+  if path in g.modules:
+    return g.modules[path]
+  result = ModuleTypeRegistry(
+    module_path: path,
+    descriptors: initOrderedTable[TypeId, TypeDesc](),
+  )
+  g.modules[path] = result
+
+proc populate_registry*(cu_type_descriptors: seq[TypeDesc]): ModuleTypeRegistry =
+  ## Build a ModuleTypeRegistry from a flat seq[TypeDesc] (legacy format).
+  ## Groups descriptors by module_path; returns a single registry for the
+  ## primary module (uses the first non-"stdlib" module_path found, or "").
+  var module_path = ""
+  for desc in cu_type_descriptors:
+    if desc.module_path != "stdlib" and desc.module_path != "":
+      module_path = desc.module_path
+      break
+  result = ModuleTypeRegistry(
+    module_path: module_path,
+    descriptors: initOrderedTable[TypeId, TypeDesc](),
+  )
+  for i, desc in cu_type_descriptors:
+    result.descriptors[i.TypeId] = desc
