@@ -5,6 +5,7 @@
 #################### Built-in Type Registry ####################
 
 const
+  BUILTIN_TYPE_MODULE_PATH* = "stdlib"
   BUILTIN_TYPE_ANY_ID*: TypeId = 0
   BUILTIN_TYPE_INT_ID*: TypeId = 1
   BUILTIN_TYPE_FLOAT_ID*: TypeId = 2
@@ -21,16 +22,16 @@ proc builtin_type_descs*(): seq[TypeDesc] =
   ## Return the pre-created TypeDesc objects for all built-in types.
   ## Index positions match the BUILTIN_TYPE_*_ID constants.
   @[
-    TypeDesc(kind: TdkAny),                           # 0 = Any
-    TypeDesc(kind: TdkNamed, name: "Int"),             # 1 = Int
-    TypeDesc(kind: TdkNamed, name: "Float"),           # 2 = Float
-    TypeDesc(kind: TdkNamed, name: "String"),          # 3 = String
-    TypeDesc(kind: TdkNamed, name: "Bool"),            # 4 = Bool
-    TypeDesc(kind: TdkNamed, name: "Nil"),             # 5 = Nil
-    TypeDesc(kind: TdkNamed, name: "Symbol"),          # 6 = Symbol
-    TypeDesc(kind: TdkNamed, name: "Char"),            # 7 = Char
-    TypeDesc(kind: TdkNamed, name: "Array"),           # 8 = Array
-    TypeDesc(kind: TdkNamed, name: "Map"),             # 9 = Map
+    TypeDesc(module_path: BUILTIN_TYPE_MODULE_PATH, kind: TdkAny),                             # 0 = Any
+    TypeDesc(module_path: BUILTIN_TYPE_MODULE_PATH, kind: TdkNamed, name: "Int"),             # 1 = Int
+    TypeDesc(module_path: BUILTIN_TYPE_MODULE_PATH, kind: TdkNamed, name: "Float"),           # 2 = Float
+    TypeDesc(module_path: BUILTIN_TYPE_MODULE_PATH, kind: TdkNamed, name: "String"),          # 3 = String
+    TypeDesc(module_path: BUILTIN_TYPE_MODULE_PATH, kind: TdkNamed, name: "Bool"),            # 4 = Bool
+    TypeDesc(module_path: BUILTIN_TYPE_MODULE_PATH, kind: TdkNamed, name: "Nil"),             # 5 = Nil
+    TypeDesc(module_path: BUILTIN_TYPE_MODULE_PATH, kind: TdkNamed, name: "Symbol"),          # 6 = Symbol
+    TypeDesc(module_path: BUILTIN_TYPE_MODULE_PATH, kind: TdkNamed, name: "Char"),            # 7 = Char
+    TypeDesc(module_path: BUILTIN_TYPE_MODULE_PATH, kind: TdkNamed, name: "Array"),           # 8 = Array
+    TypeDesc(module_path: BUILTIN_TYPE_MODULE_PATH, kind: TdkNamed, name: "Map"),             # 9 = Map
   ]
 
 proc lookup_builtin_type*(name: string): TypeId =
@@ -86,31 +87,32 @@ proc type_desc_key(desc: TypeDesc, type_descs: seq[TypeDesc], depth = 0): string
   if depth > TYPE_DESC_MAX_DEPTH:
     return "any"
 
+  let module_prefix = "module:" & desc.module_path & ";"
   case desc.kind
   of TdkAny:
-    return "any"
+    return module_prefix & "any"
   of TdkNamed:
-    return "named:" & desc.name
+    return module_prefix & "named:" & desc.name
   of TdkApplied:
     var parts: seq[string] = @[]
     for arg in desc.args:
       parts.add(type_desc_key_for_id(type_descs, arg, depth + 1))
-    return "applied:" & desc.ctor & "[" & join_strings(parts, ",") & "]"
+    return module_prefix & "applied:" & desc.ctor & "[" & join_strings(parts, ",") & "]"
   of TdkUnion:
     var parts: seq[string] = @[]
     for member in desc.members:
       parts.add(type_desc_key_for_id(type_descs, member, depth + 1))
-    return "union:" & join_strings(sorted_unique_strings(parts), "|")
+    return module_prefix & "union:" & join_strings(sorted_unique_strings(parts), "|")
   of TdkFn:
     var params: seq[string] = @[]
     for param in desc.params:
       params.add(type_desc_key_for_id(type_descs, param, depth + 1))
     let effects = sorted_unique_strings(desc.effects)
-    return "fn:[" & join_strings(params, ",") & "]->" &
+    return module_prefix & "fn:[" & join_strings(params, ",") & "]->" &
       type_desc_key_for_id(type_descs, desc.ret, depth + 1) &
       "!" & join_strings(effects, ",")
   of TdkVar:
-    return "var:" & $desc.var_id
+    return module_prefix & "var:" & $desc.var_id
 
 proc type_desc_key_for_id(type_descs: seq[TypeDesc], type_id: TypeId, depth = 0): string {.gcsafe.} =
   if type_id == NO_TYPE_ID:
@@ -145,6 +147,15 @@ proc normalize_type_id_list(type_descs: seq[TypeDesc], ids: seq[TypeId]): seq[Ty
 
 proc normalize_type_desc(desc: TypeDesc, type_descs: seq[TypeDesc]): TypeDesc {.gcsafe.} =
   result = desc
+  if result.module_path.len == 0:
+    case desc.kind
+    of TdkAny:
+      result.module_path = BUILTIN_TYPE_MODULE_PATH
+    of TdkNamed:
+      if lookup_builtin_type(desc.name) != NO_TYPE_ID:
+        result.module_path = BUILTIN_TYPE_MODULE_PATH
+    else:
+      discard
   case desc.kind
   of TdkUnion:
     result.members = normalize_type_id_list(type_descs, desc.members)

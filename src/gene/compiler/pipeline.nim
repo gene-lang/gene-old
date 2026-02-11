@@ -75,13 +75,13 @@ proc remap_checker_type_id(checker_type_id: TypeId,
     for arg in desc.args:
       args.add(remap_checker_type_id(arg, checker_descs, checker_to_output, checker_visiting,
                                      output_descs, output_desc_index, depth + 1))
-    mapped = TypeDesc(kind: TdkApplied, ctor: desc.ctor, args: args)
+    mapped = TypeDesc(module_path: desc.module_path, kind: TdkApplied, ctor: desc.ctor, args: args)
   of TdkUnion:
     var members: seq[TypeId] = @[]
     for member in desc.members:
       members.add(remap_checker_type_id(member, checker_descs, checker_to_output, checker_visiting,
                                         output_descs, output_desc_index, depth + 1))
-    mapped = TypeDesc(kind: TdkUnion, members: members)
+    mapped = TypeDesc(module_path: desc.module_path, kind: TdkUnion, members: members)
   of TdkFn:
     var params: seq[TypeId] = @[]
     for param in desc.params:
@@ -89,7 +89,7 @@ proc remap_checker_type_id(checker_type_id: TypeId,
                                        output_descs, output_desc_index, depth + 1))
     let ret = remap_checker_type_id(desc.ret, checker_descs, checker_to_output, checker_visiting,
                                     output_descs, output_desc_index, depth + 1)
-    mapped = TypeDesc(kind: TdkFn, params: params, ret: ret, effects: desc.effects)
+    mapped = TypeDesc(module_path: desc.module_path, kind: TdkFn, params: params, ret: ret, effects: desc.effects)
   else:
     discard
 

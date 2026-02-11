@@ -218,6 +218,7 @@ type
     TdkVar
 
   TypeDesc* = object
+    module_path*: string  # "stdlib" for built-ins, "" for local module-scoped types
     case kind*: TypeDescKind
     of TdkAny:
       discard

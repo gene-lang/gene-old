@@ -4,7 +4,7 @@ import ./types
 
 const
   GIR_MAGIC = "GENE"
-  GIR_VERSION* = 13'u32
+  GIR_VERSION* = 14'u32
   COMPILER_VERSION = "0.1.2"
   VALUE_ABI_VERSION* = 2'u32  # Version 2: Value is object wrapper with GC
   
@@ -141,6 +141,7 @@ proc readModuleTypeTree(stream: Stream): seq[ModuleTypeNode] =
 
 proc writeTypeDesc(stream: Stream, desc: TypeDesc) =
   stream.write(desc.kind.uint8)
+  stream.write_string(desc.module_path)
   case desc.kind
   of TdkAny:
     discard
@@ -168,24 +169,25 @@ proc writeTypeDesc(stream: Stream, desc: TypeDesc) =
 
 proc readTypeDesc(stream: Stream): TypeDesc =
   let kind = cast[TypeDescKind](stream.readUint8())
+  let module_path = stream.read_string()
   case kind
   of TdkAny:
-    result = TypeDesc(kind: TdkAny)
+    result = TypeDesc(module_path: module_path, kind: TdkAny)
   of TdkNamed:
-    result = TypeDesc(kind: TdkNamed, name: stream.read_string())
+    result = TypeDesc(module_path: module_path, kind: TdkNamed, name: stream.read_string())
   of TdkApplied:
     let ctor = stream.read_string()
     let arg_count = stream.readUint32()
     var args: seq[TypeId] = @[]
     for _ in 0..<arg_count:
       args.add(stream.readInt32())
-    result = TypeDesc(kind: TdkApplied, ctor: ctor, args: args)
+    result = TypeDesc(module_path: module_path, kind: TdkApplied, ctor: ctor, args: args)
   of TdkUnion:
     let member_count = stream.readUint32()
     var members: seq[TypeId] = @[]
     for _ in 0..<member_count:
       members.add(stream.readInt32())
-    result = TypeDesc(kind: TdkUnion, members: members)
+    result = TypeDesc(module_path: module_path, kind: TdkUnion, members: members)
   of TdkFn:
     let param_count = stream.readUint32()
     var params: seq[TypeId] = @[]
@@ -196,9 +198,9 @@ proc readTypeDesc(stream: Stream): TypeDesc =
     var effects: seq[string] = @[]
     for _ in 0..<effect_count:
       effects.add(stream.read_string())
-    result = TypeDesc(kind: TdkFn, params: params, ret: ret, effects: effects)
+    result = TypeDesc(module_path: module_path, kind: TdkFn, params: params, ret: ret, effects: effects)
   of TdkVar:
-    result = TypeDesc(kind: TdkVar, var_id: stream.readInt32())
+    result = TypeDesc(module_path: module_path, kind: TdkVar, var_id: stream.readInt32())
 
 proc writeTypeDescTable(stream: Stream, descs: seq[TypeDesc]) =
   stream.write(descs.len.uint32)
