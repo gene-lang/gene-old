@@ -11,18 +11,47 @@ proc new_fn*(name: string, matcher: RootMatcher, body: sink seq[Value]): Functio
     body: body,
   )
 
+proc anchor_module_paths(type_descs: var seq[TypeDesc], module_path: string) =
+  ## Ensure non-builtin descriptors carry the parent module path.
+  if module_path.len == 0:
+    return
+  for i in 0..<type_descs.len:
+    var desc = type_descs[i]
+    if desc.module_path.len > 0:
+      continue
+    var should_anchor = true
+    if desc.kind == TdkNamed and lookup_builtin_type(desc.name) != NO_TYPE_ID:
+      should_anchor = false
+    if should_anchor:
+      desc.module_path = module_path
+      type_descs[i] = desc
+
+proc register_type_descs(registry: ModuleTypeRegistry, type_descs: seq[TypeDesc], module_path: string) =
+  ## Keep parent module registry in sync with descriptors used by nested functions.
+  if registry == nil:
+    return
+  if registry.module_path.len == 0:
+    registry.module_path = module_path
+  for i, desc in type_descs:
+    registry.descriptors[i.TypeId] = desc
+
 proc to_function*(node: Value, cu_type_descs: var seq[TypeDesc],
                   type_aliases: Table[string, TypeId] = initTable[string, TypeId](),
-                  module_path = ""): Function {.gcsafe.}
+                  module_path = "",
+                  type_registry: ModuleTypeRegistry = nil): Function {.gcsafe.}
 
 proc to_function*(node: Value): Function {.gcsafe.} =
   ## Create a Function from a Gene node, using a local type descriptor table.
   var local_descs = builtin_type_descs()
-  return to_function(node, local_descs)
+  var inferred_module_path = ""
+  if node.kind == VkGene and node.gene != nil and node.gene.trace != nil:
+    inferred_module_path = module_path_from_source(node.gene.trace.filename)
+  return to_function(node, local_descs, module_path = inferred_module_path)
 
 proc to_function*(node: Value, cu_type_descs: var seq[TypeDesc],
                   type_aliases: Table[string, TypeId] = initTable[string, TypeId](),
-                  module_path = ""): Function {.gcsafe.} =
+                  module_path = "",
+                  type_registry: ModuleTypeRegistry = nil): Function {.gcsafe.} =
   if node.kind != VkGene:
     raise new_exception(type_defs.Exception, "Expected Gene for function definition, got " & $node.kind)
 
@@ -140,6 +169,8 @@ proc to_function*(node: Value, cu_type_descs: var seq[TypeDesc],
       let ret_type = node.gene.children[body_start + 1]
       matcher.return_type_id = resolve_type_value_to_id(ret_type, type_descs, aliases, module_path)
       body_start += 2
+  anchor_module_paths(type_descs, module_path)
+  register_type_descs(type_registry, type_descs, module_path)
   # Attach the type_descs to the matcher for runtime validation
   matcher.type_descriptors = type_descs
 

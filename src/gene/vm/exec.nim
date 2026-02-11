@@ -2895,7 +2895,12 @@ proc exec*(self: ptr VirtualMachine): Value =
         {.push checks: off}
         let info = to_function_def_info(inst.arg0)
         let f = if self.cu != nil:
-            to_function(info.input, self.cu.type_descriptors, self.cu.type_aliases, self.cu.module_path)
+            if self.cu.type_registry == nil:
+              self.cu.type_registry = populate_registry(self.cu.type_descriptors)
+              if self.cu.type_registry != nil and self.cu.type_registry.module_path.len == 0:
+                self.cu.type_registry.module_path = self.cu.module_path
+            to_function(info.input, self.cu.type_descriptors, self.cu.type_aliases,
+              self.cu.module_path, self.cu.type_registry)
           else:
             to_function(info.input)
 

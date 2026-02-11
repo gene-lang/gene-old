@@ -62,7 +62,12 @@ proc compile_fn(self: Compiler, input: Value, define_binding = true) =
 
   var compiled_body: CompilationUnit = nil
   if self.eager_functions:
-    var fn_obj = to_function(input, self.output.type_descriptors, self.output.type_aliases, self.output.module_path)
+    if self.output.type_registry == nil:
+      self.output.type_registry = populate_registry(self.output.type_descriptors)
+      if self.output.type_registry != nil and self.output.type_registry.module_path.len == 0:
+        self.output.type_registry.module_path = self.output.module_path
+    var fn_obj = to_function(input, self.output.type_descriptors, self.output.type_aliases,
+      self.output.module_path, self.output.type_registry)
     fn_obj.scope_tracker = tracker_copy
     compile(fn_obj, true)
     compiled_body = fn_obj.body_compiled

@@ -220,6 +220,31 @@ suite "GIR CLI":
     check diff == FALSE
     check alias_same == TRUE
 
+  test "to_function anchors descriptors to parent module registry":
+    var parent_descs = builtin_type_descs()
+    var aliases = initTable[string, TypeId]()
+    let parent_registry = populate_registry(parent_descs)
+    parent_registry.module_path = ""
+    let fn_obj = to_function(
+      parser.read("(fn anchored [a: (Array String)] -> (Array String) a)"),
+      parent_descs,
+      aliases,
+      "tmp/anchored_module.gene",
+      parent_registry
+    )
+
+    check parent_registry.module_path == "tmp/anchored_module.gene"
+    check parent_registry.descriptors.len == parent_descs.len
+    check fn_obj.matcher != nil
+    check fn_obj.matcher.type_descriptors.len == parent_descs.len
+
+    var saw_applied = false
+    for desc in fn_obj.matcher.type_descriptors:
+      if desc.kind == TdkApplied:
+        saw_applied = true
+        check desc.module_path == "tmp/anchored_module.gene"
+    check saw_applied
+
   test "matcher argument checks use descriptor ids when names are absent":
     let matcher = new_arg_matcher()
     let param = new_matcher(matcher, MatchData)

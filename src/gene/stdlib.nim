@@ -2483,7 +2483,16 @@ proc class_fn(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count
   let args_gene = create_gene_args(args, arg_count, has_keyword_args)
   let x = args_gene.gene.type.ref.bound_method.self
   # define a fn like method on a class
-  let fn = to_function(args_gene)
+  let fn =
+    if vm != nil and vm.cu != nil:
+      if vm.cu.type_registry == nil:
+        vm.cu.type_registry = populate_registry(vm.cu.type_descriptors)
+        if vm.cu.type_registry != nil and vm.cu.type_registry.module_path.len == 0:
+          vm.cu.type_registry.module_path = vm.cu.module_path
+      to_function(args_gene, vm.cu.type_descriptors, vm.cu.type_aliases,
+        vm.cu.module_path, vm.cu.type_registry)
+    else:
+      to_function(args_gene)
 
   let r = new_ref(VkFunction)
   r.fn = fn
