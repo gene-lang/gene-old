@@ -1,7 +1,7 @@
 {.push warning[ResultShadowed]: off.}
 import base64, re, json, osproc, os, strutils, times, asyncdispatch, asyncfile, tables
 import ./types
-from ./types/runtime_types import coerce_value_to_type, emit_type_warning, runtime_type_name
+from ./types/runtime_types import coerce_value_to_type, emit_type_warning, runtime_type_name, types_equivalent
 import ./parser
 import ./compiler
 import ./repl_session
@@ -1832,6 +1832,47 @@ proc core_len(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count
   {.cast(gcsafe).}:
     return core_len_impl(vm, args, arg_count, has_keyword_args)
 
+proc runtime_type_descs_for(vm: ptr VirtualMachine): seq[TypeDesc] =
+  if vm != nil and vm.cu != nil and vm.cu.type_descriptors.len > 0:
+    return vm.cu.type_descriptors
+  return builtin_type_descs()
+
+proc normalize_type_input(value: Value): Value =
+  case value.kind
+  of VkClass:
+    if value.ref != nil and value.ref.class != nil and value.ref.class.name.len > 0:
+      return value.ref.class.name.to_symbol_value()
+    return "Any".to_symbol_value()
+  of VkComplexSymbol:
+    if value.ref != nil and value.ref.csymbol.len > 0:
+      return value.ref.csymbol.join("/").to_symbol_value()
+    return "Any".to_symbol_value()
+  of VkString:
+    if value.str.len == 0:
+      return "Any".to_symbol_value()
+    return value.str.to_symbol_value()
+  else:
+    return value
+
+proc core_types_equivalent(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                           has_keyword_args: bool): Value =
+  let positional = get_positional_count(arg_count, has_keyword_args)
+  if positional < 2:
+    raise new_exception(types.Exception, "types_equivalent requires 2 arguments")
+
+  let left_raw = get_positional_arg(args, 0, has_keyword_args)
+  let right_raw = get_positional_arg(args, 1, has_keyword_args)
+
+  if left_raw.kind notin {VkSymbol, VkString, VkGene, VkClass, VkComplexSymbol}:
+    not_allowed("types_equivalent expects a type expression/value as first argument")
+  if right_raw.kind notin {VkSymbol, VkString, VkGene, VkClass, VkComplexSymbol}:
+    not_allowed("types_equivalent expects a type expression/value as second argument")
+
+  var descs = runtime_type_descs_for(vm)
+  let left_id = resolve_type_value_to_id(normalize_type_input(left_raw), descs)
+  let right_id = resolve_type_value_to_id(normalize_type_input(right_raw), descs)
+  return types_equivalent(left_id, right_id, descs).to_value()
+
 # Debug value (write to stderr)
 proc core_debug*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
   for i in 0..<get_positional_count(arg_count, has_keyword_args):
@@ -3140,6 +3181,8 @@ proc init_gene_core_functions() =
   App.app.gene_ns.ns["tap".to_key()] = vm_tap.to_value()      # $tap resolves via global tap
   App.app.gene_ns.ns["eval".to_key()] = vm_eval.to_value()    # eval function
   App.app.gene_ns.ns["repl".to_key()] = NativeFn(core_repl).to_value()  # $repl resolves via global repl
+  App.app.gene_ns.ns["types_equivalent".to_key()] = core_types_equivalent.to_value()
+  App.app.gene_ns.ns["types_equiv".to_key()] = core_types_equivalent.to_value()
 
   var sleep_ref = new_ref(VkNativeFn)
   sleep_ref.native_fn = gene_sleep
@@ -3380,6 +3423,8 @@ proc init_stdlib*() =
 
   # Collections
   global_ns["len".to_key()] = NativeFn(core_len).to_value()
+  global_ns["types_equivalent".to_key()] = core_types_equivalent.to_value()
+  global_ns["types_equiv".to_key()] = core_types_equivalent.to_value()
 
   # Assertions and debugging
   global_ns["assert".to_key()] = core_assert.to_value()

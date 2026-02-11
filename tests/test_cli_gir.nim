@@ -210,6 +210,16 @@ suite "GIR CLI":
     check is_compatible(fn_value, expected_int_id, expected_descs)
     check not is_compatible(fn_value, expected_string_id, expected_descs)
 
+  test "types_equivalent builtin compares structural applied types":
+    init_all()
+    let same = VM.exec("(types_equivalent `(Array Int) `(Array Int))", "types_equivalent_same.gene")
+    let diff = VM.exec("(types_equivalent `(Array Int) `(Array String))", "types_equivalent_diff.gene")
+    let alias_same = VM.exec("(types_equiv Int Int)", "types_equiv_alias.gene")
+
+    check same == TRUE
+    check diff == FALSE
+    check alias_same == TRUE
+
   test "matcher argument checks use descriptor ids when names are absent":
     let matcher = new_arg_matcher()
     let param = new_matcher(matcher, MatchData)

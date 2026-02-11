@@ -400,6 +400,16 @@ proc is_compatible*(value: Value, expected_type_id: TypeId, type_descs: seq[Type
   let parsed = type_desc_to_rt(type_descs, expected_type_id)
   return is_compatible_rt(value, parsed)
 
+proc types_equivalent*(left_type_id: TypeId, right_type_id: TypeId,
+                      type_descs: seq[TypeDesc]): bool =
+  ## Structural type equivalence based on runtime compatibility logic.
+  ## This is symmetric compatibility over the same descriptor table.
+  if type_descs.len == 0:
+    return left_type_id == right_type_id
+  let left = type_desc_to_rt(type_descs, left_type_id)
+  let right = type_desc_to_rt(type_descs, right_type_id)
+  return type_expr_compatible(left, right) and type_expr_compatible(right, left)
+
 proc normalize_numeric_type_name(expected_type: string): string =
   case expected_type.toLowerAscii()
   of "int", "int64", "i64":
