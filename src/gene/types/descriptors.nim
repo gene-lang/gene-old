@@ -49,6 +49,135 @@ proc lookup_builtin_type*(name: string): TypeId =
   of "Map": BUILTIN_TYPE_MAP_ID
   else: NO_TYPE_ID
 
+const TYPE_DESC_MAX_DEPTH = 64
+
+proc sorted_unique_strings(values: seq[string]): seq[string] {.gcsafe.} =
+  if values.len == 0:
+    return @[]
+  result = values
+  var i = 1
+  while i < result.len:
+    let item = result[i]
+    var j = i
+    while j > 0 and system.cmp(result[j - 1], item) > 0:
+      result[j] = result[j - 1]
+      j.dec()
+    result[j] = item
+    i.inc()
+
+  var write = 0
+  for item in result:
+    if write == 0 or result[write - 1] != item:
+      result[write] = item
+      write.inc()
+  result.setLen(write)
+
+proc join_strings(values: seq[string], sep: string): string {.gcsafe.} =
+  if values.len == 0:
+    return ""
+  result = values[0]
+  for i in 1..<values.len:
+    result &= sep
+    result &= values[i]
+
+proc type_desc_key_for_id(type_descs: seq[TypeDesc], type_id: TypeId, depth = 0): string {.gcsafe.}
+
+proc type_desc_key(desc: TypeDesc, type_descs: seq[TypeDesc], depth = 0): string {.gcsafe.} =
+  if depth > TYPE_DESC_MAX_DEPTH:
+    return "any"
+
+  case desc.kind
+  of TdkAny:
+    return "any"
+  of TdkNamed:
+    return "named:" & desc.name
+  of TdkApplied:
+    var parts: seq[string] = @[]
+    for arg in desc.args:
+      parts.add(type_desc_key_for_id(type_descs, arg, depth + 1))
+    return "applied:" & desc.ctor & "[" & join_strings(parts, ",") & "]"
+  of TdkUnion:
+    var parts: seq[string] = @[]
+    for member in desc.members:
+      parts.add(type_desc_key_for_id(type_descs, member, depth + 1))
+    return "union:" & join_strings(sorted_unique_strings(parts), "|")
+  of TdkFn:
+    var params: seq[string] = @[]
+    for param in desc.params:
+      params.add(type_desc_key_for_id(type_descs, param, depth + 1))
+    let effects = sorted_unique_strings(desc.effects)
+    return "fn:[" & join_strings(params, ",") & "]->" &
+      type_desc_key_for_id(type_descs, desc.ret, depth + 1) &
+      "!" & join_strings(effects, ",")
+  of TdkVar:
+    return "var:" & $desc.var_id
+
+proc type_desc_key_for_id(type_descs: seq[TypeDesc], type_id: TypeId, depth = 0): string {.gcsafe.} =
+  if type_id == NO_TYPE_ID:
+    return "any"
+  if type_id < 0 or type_id.int >= type_descs.len:
+    return "any"
+  type_desc_key(type_descs[type_id.int], type_descs, depth + 1)
+
+proc normalize_type_id_list(type_descs: seq[TypeDesc], ids: seq[TypeId]): seq[TypeId] {.gcsafe.} =
+  if ids.len == 0:
+    return @[]
+
+  var entries: seq[tuple[key: string, id: TypeId]] = @[]
+  for id in ids:
+    entries.add((key: type_desc_key_for_id(type_descs, id), id: id))
+
+  var i = 1
+  while i < entries.len:
+    let item = entries[i]
+    var j = i
+    while j > 0 and system.cmp(entries[j - 1].key, item.key) > 0:
+      entries[j] = entries[j - 1]
+      j.dec()
+    entries[j] = item
+    i.inc()
+
+  var last_key = ""
+  for entry in entries:
+    if result.len == 0 or entry.key != last_key:
+      result.add(entry.id)
+      last_key = entry.key
+
+proc normalize_type_desc(desc: TypeDesc, type_descs: seq[TypeDesc]): TypeDesc {.gcsafe.} =
+  result = desc
+  case desc.kind
+  of TdkUnion:
+    result.members = normalize_type_id_list(type_descs, desc.members)
+  of TdkFn:
+    result.effects = sorted_unique_strings(desc.effects)
+  else:
+    discard
+
+proc ensure_type_desc_index*(type_descs: seq[TypeDesc], type_desc_index: var Table[string, TypeId]) {.gcsafe.} =
+  ## Ensure an index table contains canonical descriptor keys for all type IDs.
+  for i, desc in type_descs:
+    let key = type_desc_key(desc, type_descs)
+    if not type_desc_index.hasKey(key):
+      type_desc_index[key] = i.TypeId
+
+proc intern_type_desc*(type_descs: var seq[TypeDesc], desc: TypeDesc,
+                       type_desc_index: var Table[string, TypeId]): TypeId {.gcsafe.} =
+  ## Shared descriptor interner used by both compiler/matcher and type-checker paths.
+  ensure_type_desc_index(type_descs, type_desc_index)
+  let normalized = normalize_type_desc(desc, type_descs)
+  let key = type_desc_key(normalized, type_descs)
+  if type_desc_index.hasKey(key):
+    return type_desc_index[key]
+  let id = type_descs.len.TypeId
+  type_descs.add(normalized)
+  type_desc_index[key] = id
+  id
+
+proc intern_type_desc*(type_descs: var seq[TypeDesc], desc: TypeDesc): TypeId {.gcsafe.} =
+  ## Compatibility wrapper for existing call sites that don't carry an index table.
+  var type_desc_index = initTable[string, TypeId]()
+  intern_type_desc(type_descs, desc, type_desc_index)
+
 proc set_expected_type_id*(tracker: ScopeTracker, index: int16,
                           expected_type_id: TypeId) {.inline.} =
   ## Store a TypeId expectation for a variable slot in the scope tracker.

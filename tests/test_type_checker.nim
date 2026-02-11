@@ -1,9 +1,23 @@
 import unittest
 
 import ./helpers
+import ../src/gene/parser
+import ../src/gene/type_checker as tc
+
+proc test_strict_type_error(code: string) =
+  var code = cleanup(code)
+  test "Strict type checking: " & code:
+    let checker = tc.new_type_checker(strict = true, module_filename = "test_code")
+    var raised = false
+    try:
+      for node in read_all(code):
+        checker.type_check_node(node)
+    except CatchableError:
+      raised = true
+    check raised
 
 suite "Static type checking":
-  test_vm_error """
+  test_strict_type_error """
     (fn f [x: NotAType] x)
   """
 
@@ -83,7 +97,7 @@ suite "Static type checking":
       0)
   """, 2
 
-  test_vm_error """
+  test_strict_type_error """
     (var x: (Int | String) 1)
     (if (x .is Int)
       (do
@@ -94,7 +108,7 @@ suite "Static type checking":
       0)
   """
 
-  test_vm_error """
+  test_strict_type_error """
     (var x: (Int | String) 1)
     (if (x .is Int)
       1

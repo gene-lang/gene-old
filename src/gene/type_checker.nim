@@ -1,4 +1,4 @@
-import tables, strutils, os, algorithm
+import tables, strutils, os
 
 import ./types
 import ./gir
@@ -163,18 +163,10 @@ proc new_type_checker*(strict: bool = true, module_filename: string = ""): TypeC
     init_self_stack: @[],
     effect_stack: @[],
     type_descs: builtin_type_descs(),
-    type_desc_index: {"any": BUILTIN_TYPE_ANY_ID,
-                      "named:Int": BUILTIN_TYPE_INT_ID,
-                      "named:Float": BUILTIN_TYPE_FLOAT_ID,
-                      "named:String": BUILTIN_TYPE_STRING_ID,
-                      "named:Bool": BUILTIN_TYPE_BOOL_ID,
-                      "named:Nil": BUILTIN_TYPE_NIL_ID,
-                      "named:Symbol": BUILTIN_TYPE_SYMBOL_ID,
-                      "named:Char": BUILTIN_TYPE_CHAR_ID,
-                      "named:Array": BUILTIN_TYPE_ARRAY_ID,
-                      "named:Map": BUILTIN_TYPE_MAP_ID}.toTable,
+    type_desc_index: initTable[string, TypeId](),
     warnings: @[]
   )
+  ensure_type_desc_index(result.type_descs, result.type_desc_index)
   result.register_builtin_adts()
 
 proc type_descriptors*(self: TypeChecker): seq[TypeDesc] =
@@ -373,100 +365,37 @@ proc type_to_string(t: TypeExpr): string =
   of TkVar:
     return "T" & $rt.id
 
-proc sorted_unique_strings(values: seq[string]): seq[string] =
-  if values.len == 0:
-    return @[]
-  result = values
-  result.sort(system.cmp[string])
-  var write = 0
-  for item in result:
-    if write == 0 or result[write - 1] != item:
-      result[write] = item
-      write.inc()
-  result.setLen(write)
-
-proc canonical_type_key(self: TypeChecker, t: TypeExpr): string
-
-proc canonical_type_key(self: TypeChecker, t: TypeExpr): string =
-  if t == nil:
-    return "any"
-  let rt = self.resolve_self(self.resolve(t))
-  case rt.kind
-  of TkAny:
-    return "any"
-  of TkNamed:
-    return "named:" & rt.name
-  of TkApplied:
-    var parts: seq[string] = @[]
-    for arg in rt.args:
-      parts.add(self.canonical_type_key(arg))
-    return "applied:" & rt.ctor & "[" & parts.join(",") & "]"
-  of TkUnion:
-    var parts: seq[string] = @[]
-    for member in rt.members:
-      parts.add(self.canonical_type_key(member))
-    let normalized = sorted_unique_strings(parts)
-    return "union:" & normalized.join("|")
-  of TkFn:
-    var params: seq[string] = @[]
-    for param in rt.params:
-      params.add(self.canonical_type_key(param.typ))
-    let effects = sorted_unique_strings(rt.effects)
-    return "fn:[" & params.join(",") & "]->" & self.canonical_type_key(rt.ret) &
-      "!" & effects.join(",")
-  of TkVar:
-    return "var:" & $rt.id
-
 proc intern_type_desc(self: TypeChecker, t: TypeExpr): TypeId =
   if t == nil:
     return NO_TYPE_ID
   let rt = self.resolve_self(self.resolve(t))
-  let key = self.canonical_type_key(rt)
-  if self.type_desc_index.hasKey(key):
-    return self.type_desc_index[key]
-
-  var desc: TypeDesc
   case rt.kind
   of TkAny:
-    desc = TypeDesc(kind: TdkAny)
+    return intern_type_desc(self.type_descs, TypeDesc(kind: TdkAny), self.type_desc_index)
   of TkNamed:
-    desc = TypeDesc(kind: TdkNamed, name: rt.name)
+    return intern_type_desc(self.type_descs, TypeDesc(kind: TdkNamed, name: rt.name), self.type_desc_index)
   of TkApplied:
     var args: seq[TypeId] = @[]
     for arg in rt.args:
       args.add(self.intern_type_desc(arg))
-    desc = TypeDesc(kind: TdkApplied, ctor: rt.ctor, args: args)
+    return intern_type_desc(self.type_descs, TypeDesc(kind: TdkApplied, ctor: rt.ctor, args: args), self.type_desc_index)
   of TkUnion:
-    var entries: seq[tuple[key: string, id: TypeId]] = @[]
-    for member in rt.members:
-      let member_key = self.canonical_type_key(member)
-      entries.add((key: member_key, id: self.intern_type_desc(member)))
-    entries.sort(proc (a, b: tuple[key: string, id: TypeId]): int = system.cmp(a.key, b.key))
     var members: seq[TypeId] = @[]
-    var last_key = ""
-    for entry in entries:
-      if members.len == 0 or entry.key != last_key:
-        members.add(entry.id)
-        last_key = entry.key
-    desc = TypeDesc(kind: TdkUnion, members: members)
+    for member in rt.members:
+      members.add(self.intern_type_desc(member))
+    return intern_type_desc(self.type_descs, TypeDesc(kind: TdkUnion, members: members), self.type_desc_index)
   of TkFn:
     var params: seq[TypeId] = @[]
     for param in rt.params:
       params.add(self.intern_type_desc(param.typ))
-    let effects = sorted_unique_strings(rt.effects)
-    desc = TypeDesc(
+    return intern_type_desc(self.type_descs, TypeDesc(
       kind: TdkFn,
       params: params,
       ret: self.intern_type_desc(rt.ret),
-      effects: effects
-    )
+      effects: rt.effects
+    ), self.type_desc_index)
   of TkVar:
-    desc = TypeDesc(kind: TdkVar, var_id: rt.id.int32)
-
-  let id = self.type_descs.len.int32
-  self.type_descs.add(desc)
-  self.type_desc_index[key] = id
-  id
+    return intern_type_desc(self.type_descs, TypeDesc(kind: TdkVar, var_id: rt.id.int32), self.type_desc_index)
 
 proc push_scope(self: TypeChecker) =
   self.scopes.add(initTable[string, TypeExpr]())

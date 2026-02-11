@@ -45,6 +45,76 @@ proc compile_init*(input: Value, local_defs = false): CompilationUnit =
   self.output.update_jumps()
   result = self.output
 
+proc remap_checker_type_id(checker_type_id: TypeId,
+                           checker_descs: seq[TypeDesc],
+                           checker_to_output: var seq[TypeId],
+                           checker_visiting: var seq[bool],
+                           output_descs: var seq[TypeDesc],
+                           output_desc_index: var Table[string, TypeId],
+                           depth = 0): TypeId =
+  if checker_type_id == NO_TYPE_ID:
+    return NO_TYPE_ID
+  if depth > 64:
+    return BUILTIN_TYPE_ANY_ID
+
+  let idx = checker_type_id.int
+  if idx < 0 or idx >= checker_descs.len:
+    return BUILTIN_TYPE_ANY_ID
+  if checker_to_output[idx] != NO_TYPE_ID:
+    return checker_to_output[idx]
+  if checker_visiting[idx]:
+    return BUILTIN_TYPE_ANY_ID
+
+  checker_visiting[idx] = true
+  let desc = checker_descs[idx]
+  var mapped = desc
+
+  case desc.kind
+  of TdkApplied:
+    var args: seq[TypeId] = @[]
+    for arg in desc.args:
+      args.add(remap_checker_type_id(arg, checker_descs, checker_to_output, checker_visiting,
+                                     output_descs, output_desc_index, depth + 1))
+    mapped = TypeDesc(kind: TdkApplied, ctor: desc.ctor, args: args)
+  of TdkUnion:
+    var members: seq[TypeId] = @[]
+    for member in desc.members:
+      members.add(remap_checker_type_id(member, checker_descs, checker_to_output, checker_visiting,
+                                        output_descs, output_desc_index, depth + 1))
+    mapped = TypeDesc(kind: TdkUnion, members: members)
+  of TdkFn:
+    var params: seq[TypeId] = @[]
+    for param in desc.params:
+      params.add(remap_checker_type_id(param, checker_descs, checker_to_output, checker_visiting,
+                                       output_descs, output_desc_index, depth + 1))
+    let ret = remap_checker_type_id(desc.ret, checker_descs, checker_to_output, checker_visiting,
+                                    output_descs, output_desc_index, depth + 1)
+    mapped = TypeDesc(kind: TdkFn, params: params, ret: ret, effects: desc.effects)
+  else:
+    discard
+
+  let mapped_id = intern_type_desc(output_descs, mapped, output_desc_index)
+  checker_to_output[idx] = mapped_id
+  checker_visiting[idx] = false
+  mapped_id
+
+proc merge_checker_type_descriptors(output_descs: var seq[TypeDesc], checker_descs: seq[TypeDesc]) =
+  ## Merge checker descriptors into compiler descriptors while preserving existing TypeIds.
+  if checker_descs.len == 0:
+    return
+
+  var output_desc_index = initTable[string, TypeId]()
+  ensure_type_desc_index(output_descs, output_desc_index)
+
+  var checker_to_output = newSeq[TypeId](checker_descs.len)
+  for i in 0..<checker_to_output.len:
+    checker_to_output[i] = NO_TYPE_ID
+  var checker_visiting = newSeq[bool](checker_descs.len)
+
+  for i in 0..<checker_descs.len:
+    discard remap_checker_type_id(i.TypeId, checker_descs, checker_to_output, checker_visiting,
+                                  output_descs, output_desc_index)
+
 ## replace_chunk moved to compiler/optimize.nim
 ## comptime and is_module_def_node moved to compiler/comptime.nim
 
@@ -495,7 +565,7 @@ proc parse_and_compile*(input: string, filename = "<input>", eager_functions = f
   self.output.ensure_trace_capacity()
   self.output.trace_root = parser.trace_root
   if checker != nil:
-    self.output.type_descriptors = checker.type_descriptors()
+    merge_checker_type_descriptors(self.output.type_descriptors, checker.type_descriptors())
   if module_mode:
     self.output.kind = CkModule
   
@@ -586,7 +656,7 @@ proc parse_and_compile_repl*(input: string, filename = "<repl>", scope_tracker: 
   self.output.ensure_trace_capacity()
   self.output.trace_root = parser.trace_root
   if checker != nil:
-    self.output.type_descriptors = checker.type_descriptors()
+    merge_checker_type_descriptors(self.output.type_descriptors, checker.type_descriptors())
 
   return self.output
 
@@ -742,7 +812,7 @@ proc parse_and_compile*(stream: Stream, filename = "<input>", eager_functions = 
   self.output.ensure_trace_capacity()
   self.output.trace_root = parser.trace_root
   if checker != nil:
-    self.output.type_descriptors = checker.type_descriptors()
+    merge_checker_type_descriptors(self.output.type_descriptors, checker.type_descriptors())
   if module_mode:
     self.output.kind = CkModule
 

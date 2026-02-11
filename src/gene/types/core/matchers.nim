@@ -304,24 +304,9 @@ proc type_expr_to_string*(v: Value): string =
   else:
     return "Any"
 
-proc intern_type_desc*(type_descs: var seq[TypeDesc], desc: TypeDesc): TypeId =
-  ## Intern a TypeDesc into the type_descs table, returning its TypeId.
-  ## Reuses existing entries for named types to avoid duplicates.
-  case desc.kind
-  of TdkNamed:
-    for i, existing in type_descs:
-      if existing.kind == TdkNamed and existing.name == desc.name:
-        return i.TypeId
-  of TdkAny:
-    return BUILTIN_TYPE_ANY_ID
-  else:
-    discard
-  let id = type_descs.len.TypeId
-  type_descs.add(desc)
-  return id
-
-proc resolve_type_value_to_id*(v: Value, type_descs: var seq[TypeDesc],
-                              type_aliases: Table[string, TypeId] = initTable[string, TypeId]()): TypeId =
+proc resolve_type_value_to_id_with_index(v: Value, type_descs: var seq[TypeDesc],
+                                        type_desc_index: var Table[string, TypeId],
+                                        type_aliases: Table[string, TypeId]): TypeId {.gcsafe.} =
   ## Resolve a Gene AST type expression to a TypeId, interning into type_descs.
   ## Handles: symbols (Int), applied types (Array Int), unions (Int | String), Fn types.
   ## Checks type_aliases for user-defined type aliases (e.g., UserId → Int | String).
@@ -334,14 +319,14 @@ proc resolve_type_value_to_id*(v: Value, type_descs: var seq[TypeDesc],
     if type_aliases.hasKey(v.str):
       return type_aliases[v.str]
     # Unknown named type (user class etc) - intern it
-    return intern_type_desc(type_descs, TypeDesc(kind: TdkNamed, name: v.str))
+    return intern_type_desc(type_descs, TypeDesc(kind: TdkNamed, name: v.str), type_desc_index)
   of VkString:
     let builtin_id = lookup_builtin_type(v.str)
     if builtin_id != NO_TYPE_ID:
       return builtin_id
     if type_aliases.hasKey(v.str):
       return type_aliases[v.str]
-    return intern_type_desc(type_descs, TypeDesc(kind: TdkNamed, name: v.str))
+    return intern_type_desc(type_descs, TypeDesc(kind: TdkNamed, name: v.str), type_desc_index)
   of VkGene:
     let gene = v.gene
     if gene == nil:
@@ -357,16 +342,16 @@ proc resolve_type_value_to_id*(v: Value, type_descs: var seq[TypeDesc],
           if item.kind == VkSymbol and item.str.startsWith("^"):
             # Keyword param - skip label, use type
             if i + 1 < items.len:
-              params.add(resolve_type_value_to_id(items[i + 1], type_descs))
+              params.add(resolve_type_value_to_id_with_index(items[i + 1], type_descs, type_desc_index, type_aliases))
               i += 2
             else:
               params.add(BUILTIN_TYPE_ANY_ID)
               i += 1
           else:
-            params.add(resolve_type_value_to_id(item, type_descs))
+            params.add(resolve_type_value_to_id_with_index(item, type_descs, type_desc_index, type_aliases))
             i += 1
       let ret =
-        if gene.children.len > 1: resolve_type_value_to_id(gene.children[1], type_descs)
+        if gene.children.len > 1: resolve_type_value_to_id_with_index(gene.children[1], type_descs, type_desc_index, type_aliases)
         else: BUILTIN_TYPE_ANY_ID
       var effects: seq[string] = @[]
       if gene.children.len > 2:
@@ -377,20 +362,26 @@ proc resolve_type_value_to_id*(v: Value, type_descs: var seq[TypeDesc],
             for eff in array_data(effect_list):
               if eff.kind == VkSymbol:
                 effects.add(eff.str)
-      return intern_type_desc(type_descs, TypeDesc(kind: TdkFn, params: params, ret: ret, effects: effects))
+      return intern_type_desc(type_descs, TypeDesc(kind: TdkFn, params: params, ret: ret, effects: effects), type_desc_index)
     # Handle union type: (Int | String)
     if is_union_gene(gene):
       var members: seq[TypeId] = @[]
       for member in union_members(v):
-        members.add(resolve_type_value_to_id(member, type_descs))
-      return intern_type_desc(type_descs, TypeDesc(kind: TdkUnion, members: members))
+        members.add(resolve_type_value_to_id_with_index(member, type_descs, type_desc_index, type_aliases))
+      return intern_type_desc(type_descs, TypeDesc(kind: TdkUnion, members: members), type_desc_index)
     # Handle applied type: (Array Int)
     if gene.`type`.kind == VkSymbol:
       let ctor = gene.`type`.str
       var args: seq[TypeId] = @[]
       for child in gene.children:
-        args.add(resolve_type_value_to_id(child, type_descs))
-      return intern_type_desc(type_descs, TypeDesc(kind: TdkApplied, ctor: ctor, args: args))
+        args.add(resolve_type_value_to_id_with_index(child, type_descs, type_desc_index, type_aliases))
+      return intern_type_desc(type_descs, TypeDesc(kind: TdkApplied, ctor: ctor, args: args), type_desc_index)
     return BUILTIN_TYPE_ANY_ID
   else:
     return BUILTIN_TYPE_ANY_ID
+
+proc resolve_type_value_to_id*(v: Value, type_descs: var seq[TypeDesc],
+                              type_aliases: Table[string, TypeId] = initTable[string, TypeId]()): TypeId {.gcsafe.} =
+  var type_desc_index = initTable[string, TypeId]()
+  ensure_type_desc_index(type_descs, type_desc_index)
+  resolve_type_value_to_id_with_index(v, type_descs, type_desc_index, type_aliases)
