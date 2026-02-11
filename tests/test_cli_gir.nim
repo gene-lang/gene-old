@@ -195,6 +195,21 @@ suite "GIR CLI":
       raised = true
     check raised
 
+  test "runtime function compatibility compares applied args structurally":
+    var actual_descs = builtin_type_descs()
+    let fn_obj = to_function(parser.read("(fn takes_int_array [a: (Array Int)] a)"), actual_descs)
+
+    let fn_ref = new_ref(VkFunction)
+    fn_ref.fn = fn_obj
+    let fn_value = fn_ref.to_ref_value()
+
+    var expected_descs = builtin_type_descs()
+    let expected_int_id = resolve_type_value_to_id(parser.read("(Fn [(Array Int)] Any)"), expected_descs)
+    let expected_string_id = resolve_type_value_to_id(parser.read("(Fn [(Array String)] Any)"), expected_descs)
+
+    check is_compatible(fn_value, expected_int_id, expected_descs)
+    check not is_compatible(fn_value, expected_string_id, expected_descs)
+
   test "matcher argument checks use descriptor ids when names are absent":
     let matcher = new_arg_matcher()
     let param = new_matcher(matcher, MatchData)

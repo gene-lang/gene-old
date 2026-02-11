@@ -323,7 +323,14 @@ proc type_expr_compatible(actual: RtType, expected: RtType): bool =
   if actual.kind == RtNamed and expected.kind == RtNamed:
     return actual.name == expected.name
   if actual.kind == RtApplied and expected.kind == RtApplied:
-    return actual.ctor == expected.ctor
+    if actual.ctor != expected.ctor:
+      return false
+    if actual.args.len != expected.args.len:
+      return false
+    for i in 0..<actual.args.len:
+      if not type_expr_compatible(actual.args[i], expected.args[i]):
+        return false
+    return true
   if actual.kind == RtApplied and expected.kind == RtNamed:
     return actual.ctor == expected.name
   if actual.kind == RtNamed and expected.kind == RtApplied:
