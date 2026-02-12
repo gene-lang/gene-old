@@ -4735,11 +4735,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           continue
 
         of VkInterception:
-          if args.len == 0:
-            not_allowed("Intercepted callable requires self as first argument")
-          let instance = args[0]
-          let call_args = if args.len > 1: args[1..^1] else: @[]
-          let result = self.run_intercepted_method(target.ref.interception, instance, call_args, @[])
+          let result = self.run_intercepted_method(target.ref.interception, NIL, args, @[])
           self.frame.push(result)
 
         else:
@@ -4891,6 +4887,10 @@ proc exec*(self: ptr VirtualMachine): Value =
           inst = self.cu.instructions[self.pc].addr
           continue
 
+        of VkInterception:
+          let result = self.run_intercepted_method(target.ref.interception, NIL, args, kw_pairs)
+          self.frame.push(result)
+
         else:
           not_allowed("IkUnifiedCallKw requires a callable, got " & $target.kind)
         {.pop}
@@ -5018,6 +5018,10 @@ proc exec*(self: ptr VirtualMachine): Value =
           self.pc = 0
           inst = self.cu.instructions[self.pc].addr
           continue
+
+        of VkInterception:
+          let result = self.run_intercepted_method(target.ref.interception, NIL, args, @[])
+          self.frame.push(result)
 
         else:
           not_allowed("IkUnifiedCallDynamic requires a callable, got " & $target.kind)

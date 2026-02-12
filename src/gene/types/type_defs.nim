@@ -46,6 +46,7 @@ type
     original*: Value      # Original callable (method/function)
     aspect*: Value        # The aspect that created this interception
     param_name*: string   # Which aspect param this method maps to
+    active*: bool         # Whether this interception is active
 
   # AOP Aspect type
   AopAfterAdvice* = object

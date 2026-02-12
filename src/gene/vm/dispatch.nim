@@ -607,50 +607,70 @@ proc call_value_method(self: ptr VirtualMachine, value: Value, method_name: stri
     not_allowed("Method must be a function or native function")
     return false
 
+proc run_intercepted_method(self: ptr VirtualMachine, interception: Interception, instance: Value,
+                            args: seq[Value], kw_pairs: seq[(Key, Value)] = @[]): Value
+
 proc call_interception_original(self: ptr VirtualMachine, original: Value, instance: Value,
                                 args: seq[Value], kw_pairs: seq[(Key, Value)]): Value =
   case original.kind
   of VkFunction:
+    if instance == NIL:
+      if kw_pairs.len > 0:
+        not_allowed("Keyword arguments are not supported for intercepted standalone functions")
+      return self.exec_function(original, args)
     if kw_pairs.len > 0:
       return self.exec_method_kw(original, instance, args, kw_pairs)
     return self.exec_method(original, instance, args)
   of VkNativeFn:
     let has_kw = kw_pairs.len > 0
+    let has_instance = instance != NIL
     let offset = if has_kw: 1 else: 0
-    var call_args = newSeq[Value](args.len + 1 + offset)
+    let extra = if has_instance: 1 else: 0
+    var call_args = newSeq[Value](args.len + extra + offset)
     if has_kw:
       var kw_map = new_map_value()
       for (k, v) in kw_pairs:
         map_data(kw_map)[k] = v
       call_args[0] = kw_map
-    call_args[offset] = instance
-    for i, arg in args:
-      call_args[i + offset + 1] = arg
+    if has_instance:
+      call_args[offset] = instance
+      for i, arg in args:
+        call_args[i + offset + 1] = arg
+    else:
+      for i, arg in args:
+        call_args[i + offset] = arg
     return call_native_fn(original.ref.native_fn, self, call_args, has_kw)
   of VkInterception:
-    return self.call_interception_original(original.ref.interception.original, instance, args, kw_pairs)
+    return self.run_intercepted_method(original.ref.interception, instance, args, kw_pairs)
   else:
     not_allowed("Intercepted callable must be a function or native function")
 
 proc run_intercepted_method(self: ptr VirtualMachine, interception: Interception, instance: Value,
                             args: seq[Value], kw_pairs: seq[(Key, Value)] = @[]): Value =
+  if not interception.active:
+    return self.call_interception_original(interception.original, instance, args, kw_pairs)
+
   let aspect_val = interception.aspect
   if aspect_val.kind != VkAspect:
     not_allowed("Aspect interception requires a VkAspect")
   let aspect = aspect_val.ref.aspect
   let param_name = interception.param_name
-  let wrapped_method = Method(
-    class: nil,
-    name: param_name,
-    callable: interception.original,
-    is_macro: false
-  )
-  let wrapped_ref = new_ref(VkBoundMethod)
-  wrapped_ref.bound_method = BoundMethod(
-    self: instance,
-    `method`: wrapped_method
-  )
-  let wrapped_value = wrapped_ref.to_ref_value()
+  let wrapped_value =
+    if instance == NIL:
+      interception.original
+    else:
+      let wrapped_method = Method(
+        class: nil,
+        name: param_name,
+        callable: interception.original,
+        is_macro: false
+      )
+      let wrapped_ref = new_ref(VkBoundMethod)
+      wrapped_ref.bound_method = BoundMethod(
+        self: instance,
+        `method`: wrapped_method
+      )
+      wrapped_ref.to_ref_value()
   let ctx = AopContext(
     wrapped: interception.original,
     instance: instance,
@@ -664,30 +684,6 @@ proc run_intercepted_method(self: ptr VirtualMachine, interception: Interception
   self.aop_contexts.add(ctx)
   defer:
     discard self.aop_contexts.pop()
-
-  proc matcher_positional_bounds(matcher: RootMatcher): tuple[minc: int, maxc: int, has_splat: bool] =
-    var minc = 0
-    var maxc = 0
-    var has_splat = false
-    for param in matcher.children:
-      if param.kind == MatchProp or param.is_prop:
-        continue
-      if param.is_splat:
-        has_splat = true
-      else:
-        maxc += 1
-        if param.required():
-          minc += 1
-    (minc, maxc, has_splat)
-
-  proc advice_accepts_result(advice_fn: Value, base_count: int): bool =
-    if advice_fn.kind != VkFunction:
-      return true
-    let bounds = matcher_positional_bounds(advice_fn.ref.fn.matcher)
-    if bounds.has_splat:
-      return true
-    let desired = base_count + 1
-    desired <= bounds.maxc
 
   proc call_advice(advice_fn: Value, instance: Value, args: seq[Value]): Value =
     case advice_fn.kind
@@ -737,9 +733,7 @@ proc run_intercepted_method(self: ptr VirtualMachine, interception: Interception
 
   if not exception_escaped and aspect.enabled and aspect.after_advices.hasKey(param_name):
     for advice_fn in aspect.after_advices[param_name]:
-      var after_args = args
-      if advice_accepts_result(advice_fn.callable, args.len + 1):
-        after_args = args & @[result]
+      let after_args = args & @[result]
       let advice_result = call_advice(advice_fn.callable, instance, after_args)
       if advice_fn.replace_result:
         result = advice_result
@@ -918,4 +912,3 @@ proc call_super_constructor(self: ptr VirtualMachine, parent_class: Class, insta
   else:
     not_allowed("Superclass constructor must be a function or native function")
     return false
-

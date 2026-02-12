@@ -1,0 +1,30 @@
+# Expected: before 4
+# Expected: around 4
+# Expected: inc 4
+# Expected: after 4 5
+# Expected: after2 4
+# Expected: result 5
+
+(aspect AF [f]
+  (before f [x]
+    (println "before" x)
+  )
+  (around f [x wrapped]
+    (println "around" x)
+    (wrapped x)
+  )
+  (after f [x result]
+    (println "after" x result)
+  )
+  (after f [x]
+    (println "after2" x)
+  )
+)
+
+(fn inc [x]
+  (println "inc" x)
+  (x + 1)
+)
+
+(var wrapped (AF .apply-fn inc "f"))
+(println "result" (wrapped 4))

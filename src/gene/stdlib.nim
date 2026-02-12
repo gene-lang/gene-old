@@ -2697,6 +2697,17 @@ proc aspect_macro(vm: ptr VirtualMachine, gene_value: Value, caller_frame: Frame
     
     return aspect_val
 
+proc create_interception_value(original: Value, aspect_value: Value, param_name: string): Value =
+  let interception = Interception(
+    original: original,
+    aspect: aspect_value,
+    param_name: param_name,
+    active: true
+  )
+  let interception_ref = new_ref(VkInterception)
+  interception_ref.interception = interception
+  interception_ref.to_ref_value()
+
 # Aspect.apply - apply aspect to a class
 # (A .apply C "m1" "m2")
 proc aspect_apply(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
@@ -2720,40 +2731,82 @@ proc aspect_apply(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_c
   if positional - 2 != aspect.param_names.len:
     not_allowed("aspect.apply requires " & $aspect.param_names.len & " method name arguments")
   
-  var param_to_method: Table[string, string] = initTable[string, string]()
+  let applied = new_array_value()
   for i in 0..<aspect.param_names.len:
+    let param_name = aspect.param_names[i]
     let method_name_val = get_positional_arg(args, i + 2, has_keyword_args)
+    var method_name = ""
     case method_name_val.kind
     of VkString, VkSymbol:
-      param_to_method[aspect.param_names[i]] = method_name_val.str
+      method_name = method_name_val.str
     else:
       not_allowed("method name must be a string or symbol")
-  
-  # Wrap each mapped method with intercepted behavior
-  for param_name, method_name in param_to_method:
+
     let method_key = method_name.to_key()
     if not class.methods.hasKey(method_key):
       not_allowed("class does not have method: " & method_name)
-    
+
     let original_method = class.methods[method_key]
-    var original_callable = original_method.callable
-    if original_callable.kind == VkInterception:
-      original_callable = original_callable.ref.interception.original
-    
-    # Create Interception wrapper with proper fields
-    let interception = Interception(
-      original: original_callable,
-      aspect: self,
-      param_name: param_name
-    )
-    
-    let interception_ref = new_ref(VkInterception)
-    interception_ref.interception = interception
-    
-    # Update the method's callable to use the interception
-    class.methods[method_key].callable = interception_ref.to_ref_value()
-  
-  return NIL
+    let interception_val = create_interception_value(original_method.callable, self, param_name)
+    # Keep existing interception wrappers so aspects chain instead of replacing each other.
+    class.methods[method_key].callable = interception_val
+    array_data(applied).add(interception_val)
+
+  return applied
+
+# Aspect.apply-fn - apply aspect to a standalone function
+# (A .apply-fn fn_value "m1")
+proc aspect_apply_fn(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  if arg_count < 3:
+    not_allowed("aspect.apply-fn requires self, function, and parameter name")
+
+  let self = get_positional_arg(args, 0, has_keyword_args)
+  if self.kind != VkAspect:
+    not_allowed("apply-fn must be called on an aspect")
+  let aspect = self.ref.aspect
+
+  let fn_arg = get_positional_arg(args, 1, has_keyword_args)
+  if fn_arg.kind notin {VkFunction, VkNativeFn, VkInterception}:
+    not_allowed("aspect.apply-fn requires a function, native function, or interception")
+
+  let param_name_val = get_positional_arg(args, 2, has_keyword_args)
+  let param_name = case param_name_val.kind
+    of VkString, VkSymbol: param_name_val.str
+    else:
+      not_allowed("parameter name must be a string or symbol")
+      ""
+
+  if not (param_name in aspect.param_names):
+    not_allowed("aspect.apply-fn parameter '" & param_name & "' is not defined in aspect")
+
+  create_interception_value(fn_arg, self, param_name)
+
+proc aspect_set_interception_active(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                                    has_keyword_args: bool, active: bool): Value {.gcsafe.} =
+  if arg_count < 2:
+    not_allowed("aspect interception toggle requires self and interception arguments")
+
+  let self = get_positional_arg(args, 0, has_keyword_args)
+  if self.kind != VkAspect:
+    not_allowed("interception toggle must be called on an aspect")
+
+  let interception_val = get_positional_arg(args, 1, has_keyword_args)
+  if interception_val.kind != VkInterception:
+    not_allowed("interception toggle requires an Interception value")
+
+  if interception_val.ref.interception.aspect != self:
+    not_allowed("interception does not belong to this aspect")
+
+  interception_val.ref.interception.active = active
+  interception_val
+
+proc aspect_enable_interception(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                                has_keyword_args: bool): Value {.gcsafe.} =
+  aspect_set_interception_active(vm, args, arg_count, has_keyword_args, true)
+
+proc aspect_disable_interception(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                                 has_keyword_args: bool): Value {.gcsafe.} =
+  aspect_set_interception_active(vm, args, arg_count, has_keyword_args, false)
 
 proc vm_compile(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
   {.cast(gcsafe).}:
@@ -3471,6 +3524,9 @@ proc init_stdlib*() =
   # Create Aspect class with apply method
   let aspect_class = new_class("Aspect")
   aspect_class.def_native_method("apply", aspect_apply)
+  aspect_class.def_native_method("apply-fn", aspect_apply_fn)
+  aspect_class.def_native_method("enable-interception", aspect_enable_interception)
+  aspect_class.def_native_method("disable-interception", aspect_disable_interception)
   var aspect_class_ref = new_ref(VkClass)
   aspect_class_ref.class = aspect_class
   App.app.aspect_class = aspect_class_ref.to_ref_value()
