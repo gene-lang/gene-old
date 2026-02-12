@@ -17,7 +17,7 @@
 ## 3. Quality Gates (Phase A)
 - [x] 3.1 Add targeted tests for mixed typed/untyped modules and descriptor serialization parity.
 - [x] 3.2 Add GIR cache invalidation tests (old cache rejected/recompiled, new cache accepted).
-- [ ] 3.3 Publish migration notes for developers and extension authors.
+- [x] 3.3 Publish migration notes for developers and extension authors.
 
 ## Deferred Follow-Ups
 - [ ] Phase B proposal: native compilation tiers (`never`/`guarded`/`fully-typed`) with deopt behavior.

@@ -17,6 +17,7 @@ Files live in `docs/` unless stated otherwise.
 ## Language & Runtime Topics
 
 - [gir.md](gir.md) — Gene Intermediate Representation file format
+- [descriptor-pipeline-migration.md](descriptor-pipeline-migration.md) — Phase A migration notes for descriptor-first metadata and GIR cache behavior
 - [../examples/how-types-work.md](../examples/how-types-work.md) — current end-to-end typing pipeline walkthrough with runnable sample
 - [generator_functions.md](generator_functions.md) — generator semantics and VM support
 - [arg_counter.md](arg_counter.md) — argument counting logic used by function matchers
