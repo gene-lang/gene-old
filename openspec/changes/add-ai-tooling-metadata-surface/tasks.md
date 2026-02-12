@@ -4,4 +4,4 @@
 - [x] 1.3 Add CLI tests for metadata output on typed and mixed typed/untyped snippets.
 
 ## 2. Validation
-- [ ] 2.1 Run metadata CLI tests.
+- [x] 2.1 Run metadata CLI tests.
