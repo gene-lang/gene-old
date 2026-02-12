@@ -733,7 +733,9 @@ proc run_intercepted_method(self: ptr VirtualMachine, interception: Interception
 
   if not exception_escaped and aspect.enabled and aspect.after_advices.hasKey(param_name):
     for advice_fn in aspect.after_advices[param_name]:
-      let after_args = args & @[result]
+      var after_args = args
+      if advice_fn.user_arg_count < 0 or advice_fn.user_arg_count > args.len:
+        after_args = args & @[result]
       let advice_result = call_advice(advice_fn.callable, instance, after_args)
       if advice_fn.replace_result:
         result = advice_result

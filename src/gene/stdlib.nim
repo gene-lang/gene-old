@@ -2538,6 +2538,18 @@ proc normalize_advice_args(args_val: Value): Value =
     not_allowed("advice arguments must be an array or symbol")
   normalized
 
+proc advice_user_arg_count(args_val: Value): int =
+  case args_val.kind
+  of VkArray:
+    return array_data(args_val).len
+  of VkSymbol:
+    if args_val.str == "_" or args_val.str == "self":
+      return 0
+    return 1
+  else:
+    not_allowed("advice arguments must be an array or symbol")
+    return 0
+
 proc resolve_advice_callable(callable_val: Value, caller_frame: Frame): Value =
   case callable_val.kind
   of VkFunction, VkNativeFn:
@@ -2630,11 +2642,13 @@ proc aspect_macro(vm: ptr VirtualMachine, gene_value: Value, caller_frame: Frame
         not_allowed("advice target '" & target_name & "' is not a defined method parameter")
 
       var advice_val: Value
+      var user_arg_count = -1
       if advice_gene.children.len == 2:
         advice_val = resolve_advice_callable(advice_gene.children[1], caller_frame)
       else:
         # Create the advice function from remaining children
         # children[1] is the args matcher, children[2..] is the body
+        user_arg_count = advice_user_arg_count(advice_gene.children[1])
         let matcher = new_arg_matcher()
         let matcher_args = normalize_advice_args(advice_gene.children[1])
         matcher.parse(matcher_args)
@@ -2670,7 +2684,8 @@ proc aspect_macro(vm: ptr VirtualMachine, gene_value: Value, caller_frame: Frame
           aspect.after_advices[target_name] = @[]
         aspect.after_advices[target_name].add(AopAfterAdvice(
           callable: advice_val,
-          replace_result: replace_result
+          replace_result: replace_result,
+          user_arg_count: user_arg_count
         ))
       of "invariant":
         if not aspect.invariant_advices.hasKey(target_name):

@@ -52,6 +52,7 @@ type
   AopAfterAdvice* = object
     callable*: Value
     replace_result*: bool
+    user_arg_count*: int  # Number of user-declared args (excluding implicit self), -1 if unknown
 
   Aspect* = ref object
     name*: string

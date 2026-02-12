@@ -4310,6 +4310,10 @@ proc exec*(self: ptr VirtualMachine): Value =
           let result = self.call_bound_method(target, @[], @[])
           self.frame.push(result)
 
+        of VkInterception:
+          let result = self.run_intercepted_method(target.ref.interception, NIL, @[], @[])
+          self.frame.push(result)
+
         of VkBlock:
           let b = target.ref.block
           if b.body_compiled == nil:
@@ -4487,6 +4491,10 @@ proc exec*(self: ptr VirtualMachine): Value =
 
         of VkBoundMethod:
           let result = self.call_bound_method(target, @[arg], @[])
+          self.frame.push(result)
+
+        of VkInterception:
+          let result = self.run_intercepted_method(target.ref.interception, NIL, @[arg], @[])
           self.frame.push(result)
 
         of VkBlock:
