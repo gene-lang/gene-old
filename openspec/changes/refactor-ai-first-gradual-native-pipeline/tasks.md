@@ -12,7 +12,7 @@
 ## 2. Runtime Validation and Diagnostics (Phase A)
 - [x] 2.1 Make VM validation paths descriptor-first (`IkVar`, assignment, matcher binding, returns).
 - [x] 2.2 Improve runtime type errors with expected/actual type, binding context, and source location.
-- [ ] 2.3 Add flow-sensitive narrowing improvements for `if`/`case`/`match` guards in the type checker where required by descriptor adoption.
+- [x] 2.3 Add flow-sensitive narrowing improvements for `if`/`case`/`match` guards in the type checker where required by descriptor adoption.
 
 ## 3. Quality Gates (Phase A)
 - [ ] 3.1 Add targeted tests for mixed typed/untyped modules and descriptor serialization parity.

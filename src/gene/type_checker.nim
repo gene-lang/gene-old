@@ -1170,23 +1170,112 @@ proc check_var(self: TypeChecker, gene: ptr Gene): TypeExpr =
   return ANY_TYPE
 
 proc extract_type_guard(self: TypeChecker, cond: Value): tuple[name: string, guarded_type: TypeExpr, found: bool] =
-  ## Detect simple type guard patterns like: (x .is Int)
+  ## Detect simple type guard patterns like: (x .is Int) and (x is Int)
   if cond.kind != VkGene or cond.gene == nil:
     return ("", nil, false)
   let gene = cond.gene
-  if gene.children.len < 2:
-    return ("", nil, false)
-  let method_sym = gene.children[0]
-  if method_sym.kind != VkSymbol or method_sym.str != ".is":
-    return ("", nil, false)
   let recv = gene.`type`
   if recv.kind != VkSymbol:
     return ("", nil, false)
   let name = recv.str
   if name.len == 0 or name == "_":
     return ("", nil, false)
-  let narrowed = self.parse_type_expr(gene.children[1])
-  return (name, narrowed, true)
+  if gene.children.len < 2:
+    return ("", nil, false)
+
+  let guard_sym = gene.children[0]
+  if guard_sym.kind == VkSymbol and (guard_sym.str == ".is" or guard_sym.str == "is"):
+    let narrowed = self.parse_type_expr(gene.children[1])
+    return (name, narrowed, true)
+  return ("", nil, false)
+
+proc same_type(self: TypeChecker, a: TypeExpr, b: TypeExpr): bool =
+  let ra = self.resolve_self(self.resolve(a))
+  let rb = self.resolve_self(self.resolve(b))
+  if ra == nil or rb == nil:
+    return false
+  let aid = self.intern_type_desc(ra)
+  let bid = self.intern_type_desc(rb)
+  if aid != NO_TYPE_ID and bid != NO_TYPE_ID:
+    return aid == bid
+  return type_to_string(ra) == type_to_string(rb)
+
+proc type_is_adt(self: TypeChecker, typ: TypeExpr, adt_name: string): bool =
+  if adt_name.len == 0:
+    return false
+  let rt = self.resolve_self(self.resolve(typ))
+  case rt.kind
+  of TkApplied:
+    return rt.ctor == adt_name
+  of TkNamed:
+    return rt.name == adt_name
+  else:
+    return false
+
+proc narrow_type_to_adt(self: TypeChecker, original: TypeExpr, adt_name: string): TypeExpr =
+  let ro = self.resolve_self(self.resolve(original))
+  if ro == nil or adt_name.len == 0:
+    return original
+
+  if ro.kind == TkUnion:
+    var keep: seq[TypeExpr] = @[]
+    for member in ro.members:
+      if self.type_is_adt(member, adt_name):
+        keep.add(self.resolve_self(self.resolve(member)))
+    if keep.len == 0:
+      return ro
+    if keep.len == 1:
+      return keep[0]
+    return TypeExpr(kind: TkUnion, members: keep)
+
+  if self.type_is_adt(ro, adt_name):
+    return ro
+  return ro
+
+proc subtract_adt_type(self: TypeChecker, original: TypeExpr, adt_name: string): TypeExpr =
+  let ro = self.resolve_self(self.resolve(original))
+  if ro == nil or adt_name.len == 0:
+    return original
+
+  if ro.kind == TkUnion:
+    var keep: seq[TypeExpr] = @[]
+    for member in ro.members:
+      if not self.type_is_adt(member, adt_name):
+        keep.add(self.resolve_self(self.resolve(member)))
+    if keep.len == 0:
+      return ANY_TYPE
+    if keep.len == 1:
+      return keep[0]
+    return TypeExpr(kind: TkUnion, members: keep)
+
+  if self.type_is_adt(ro, adt_name):
+    return ANY_TYPE
+  return ro
+
+proc extract_adt_pattern(self: TypeChecker, pattern: Value): tuple[adt_name: string, ctor: string, found: bool] =
+  case pattern.kind
+  of VkGene:
+    if pattern.gene != nil and pattern.gene.`type`.kind == VkSymbol:
+      let ctor = pattern.gene.`type`.str
+      let (adt, _, found) = self.find_adt_variant(ctor)
+      if found and adt != nil:
+        return (adt.name, ctor, true)
+  of VkSymbol:
+    let ctor = pattern.str
+    let (adt, _, found) = self.find_adt_variant(ctor)
+    if found and adt != nil:
+      return (adt.name, ctor, true)
+  else:
+    discard
+  return ("", "", false)
+
+proc add_unique_string(items: var seq[string], value: string) =
+  if value.len == 0:
+    return
+  for existing in items:
+    if existing == value:
+      return
+  items.add(value)
 
 proc subtract_narrowed_type(self: TypeChecker, original: TypeExpr, removed: TypeExpr): TypeExpr =
   ## Compute a conservative else-branch type after removing a narrowed member.
@@ -1196,14 +1285,13 @@ proc subtract_narrowed_type(self: TypeChecker, original: TypeExpr, removed: Type
   if ro == nil or rr == nil:
     return original
 
-  let removed_key = type_to_string(rr)
   if ro.kind == TkUnion:
     var keep: seq[TypeExpr] = @[]
     for member in ro.members:
       let rm = self.resolve(member)
       if rm == nil:
         keep.add(member)
-      elif type_to_string(rm) != removed_key:
+      elif not self.same_type(rm, rr):
         keep.add(rm)
     if keep.len == 0:
       return ANY_TYPE
@@ -1211,7 +1299,7 @@ proc subtract_narrowed_type(self: TypeChecker, original: TypeExpr, removed: Type
       return keep[0]
     return TypeExpr(kind: TkUnion, members: keep)
 
-  if type_to_string(ro) == removed_key:
+  if self.same_type(ro, rr):
     return ANY_TYPE
 
   return ro
@@ -1311,7 +1399,13 @@ proc check_match(self: TypeChecker, gene: ptr Gene): TypeExpr =
   if gene.children.len < 2:
     return ANY_TYPE
 
-  let scrutinee_type = self.check_expr(gene.children[0])
+  let scrutinee = gene.children[0]
+  let scrutinee_type = self.check_expr(scrutinee)
+  let scrutinee_name =
+    if scrutinee.kind == VkSymbol and scrutinee.str != "_":
+      scrutinee.str
+    else:
+      ""
   var result_type: TypeExpr = nil
   var i = 1
 
@@ -1324,6 +1418,9 @@ proc check_match(self: TypeChecker, gene: ptr Gene): TypeExpr =
     i += 1
 
     self.push_scope()
+    let (pattern_adt_name, _, has_adt_pattern) = self.extract_adt_pattern(pattern)
+    if has_adt_pattern and scrutinee_name.len > 0:
+      self.define(scrutinee_name, self.narrow_type_to_adt(scrutinee_type, pattern_adt_name))
 
     # Extract bindings from pattern
     if pattern.kind == VkGene and pattern.gene != nil:
@@ -1360,65 +1457,120 @@ proc check_match(self: TypeChecker, gene: ptr Gene): TypeExpr =
 
 proc check_case(self: TypeChecker, gene: ptr Gene): TypeExpr =
   ## Type check case expression: (case x when (Ok v) body1 when None body2)
-  ## Normalized form uses props: case_target, case_when (array), case_else
+  ## Supports normalized form in props and direct source form in children.
 
-  # Get the normalized props
   let target_key = CASE_TARGET_KEY.to_key()
   let when_key = CASE_WHEN_KEY.to_key()
   let else_key = CASE_ELSE_KEY.to_key()
 
-  if not gene.props.hasKey(target_key):
+  var target = NIL
+  var when_pairs: seq[tuple[pattern: Value, body: Value]] = @[]
+  var else_body = NIL
+
+  proc branch_expr(items: seq[Value]): Value =
+    if items.len == 0:
+      return NIL
+    if items.len == 1:
+      return items[0]
+    let g = new_gene("do".to_symbol_value())
+    for item in items:
+      g.children.add(item)
+    return g.to_gene_value()
+
+  if gene.props.hasKey(target_key):
+    target = gene.props[target_key]
+    let whens = gene.props.getOrDefault(when_key, NIL)
+    if whens.kind == VkArray:
+      let arr = array_data(whens)
+      var i = 0
+      while i + 1 < arr.len:
+        when_pairs.add((arr[i], arr[i + 1]))
+        i += 2
+    else_body = gene.props.getOrDefault(else_key, NIL)
+  elif gene.children.len > 0:
+    target = gene.children[0]
+    var i = 1
+    while i < gene.children.len:
+      let token = gene.children[i]
+      if token.kind == VkSymbol and token.str == "when":
+        if i + 1 >= gene.children.len:
+          break
+        let when_value = gene.children[i + 1]
+        i += 2
+        var body_items: seq[Value] = @[]
+        while i < gene.children.len:
+          let next = gene.children[i]
+          if next.kind == VkSymbol and (next.str == "when" or next.str == "else"):
+            break
+          body_items.add(next)
+          i.inc()
+        when_pairs.add((when_value, branch_expr(body_items)))
+        continue
+      if token.kind == VkSymbol and token.str == "else":
+        i.inc()
+        var else_items: seq[Value] = @[]
+        while i < gene.children.len:
+          else_items.add(gene.children[i])
+          i.inc()
+        else_body = branch_expr(else_items)
+        break
+      i.inc()
+
+  if target == NIL:
     return ANY_TYPE
 
-  let target = gene.props[target_key]
-  let whens = gene.props.getOrDefault(when_key, NIL)
-  let else_body = gene.props.getOrDefault(else_key, NIL)
-
   let scrutinee_type = self.check_expr(target)
+  let scrutinee_name =
+    if target.kind == VkSymbol and target.str != "_":
+      target.str
+    else:
+      ""
+  var matched_adt_names: seq[string] = @[]
   var result_type: TypeExpr = nil
 
-  # Process when clauses (stored as pairs: [value1, body1, value2, body2, ...])
-  if whens.kind == VkArray:
-    let arr = array_data(whens)
-    var i = 0
-    while i < arr.len:
-      if i + 1 >= arr.len:
-        break
+  for pair in when_pairs:
+    let when_value = pair.pattern
+    let when_body = pair.body
+    let (pattern_adt_name, _, has_adt_pattern) = self.extract_adt_pattern(when_value)
+    if has_adt_pattern:
+      add_unique_string(matched_adt_names, pattern_adt_name)
 
-      let when_value = arr[i]
-      let when_body = arr[i + 1]
+    self.push_scope()
+    if has_adt_pattern and scrutinee_name.len > 0:
+      self.define(scrutinee_name, self.narrow_type_to_adt(scrutinee_type, pattern_adt_name))
 
-      self.push_scope()
+    # Extract bindings from pattern
+    if when_value.kind == VkGene and when_value.gene != nil:
+      let pat_gene = when_value.gene
+      if pat_gene.`type`.kind == VkSymbol:
+        let ctor = pat_gene.`type`.str
+        let (_, variant, found) = self.find_adt_variant(ctor)
+        if found and variant.field_count > 0:
+          if pat_gene.children.len > 0 and pat_gene.children[0].kind == VkSymbol:
+            let bound_name = pat_gene.children[0].str
+            if bound_name != "_":
+              let bound_type = self.adt_binding_type(scrutinee_type, ctor)
+              self.define(bound_name, bound_type)
 
-      # Extract bindings from pattern
-      if when_value.kind == VkGene and when_value.gene != nil:
-        let pat_gene = when_value.gene
-        if pat_gene.`type`.kind == VkSymbol:
-          let ctor = pat_gene.`type`.str
-          let (_, variant, found) = self.find_adt_variant(ctor)
-          if found and variant.field_count > 0:
-            if pat_gene.children.len > 0 and pat_gene.children[0].kind == VkSymbol:
-              let bound_name = pat_gene.children[0].str
-              if bound_name != "_":
-                let bound_type = self.adt_binding_type(scrutinee_type, ctor)
-                self.define(bound_name, bound_type)
+    let body_type = self.check_expr(when_body)
+    self.pop_scope()
 
-      let body_type = self.check_expr(when_body)
-      self.pop_scope()
-
-      if result_type == nil:
-        result_type = body_type
-      else:
-        try:
-          self.unify(result_type, body_type, "case")
-        except CatchableError:
-          result_type = TypeExpr(kind: TkUnion, members: @[result_type, body_type])
-
-      i += 2
+    if result_type == nil:
+      result_type = body_type
+    else:
+      try:
+        self.unify(result_type, body_type, "case")
+      except CatchableError:
+        result_type = TypeExpr(kind: TkUnion, members: @[result_type, body_type])
 
   # Process else clause
   if else_body != NIL:
     self.push_scope()
+    if scrutinee_name.len > 0 and matched_adt_names.len > 0:
+      var remaining = scrutinee_type
+      for adt_name in matched_adt_names:
+        remaining = self.subtract_adt_type(remaining, adt_name)
+      self.define(scrutinee_name, remaining)
     let else_type = self.check_expr(else_body)
     self.pop_scope()
     if result_type == nil:

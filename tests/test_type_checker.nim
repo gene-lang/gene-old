@@ -117,3 +117,27 @@ suite "Static type checking":
         (var y x)
         (y + 1)))
   """
+
+  test_strict_type_error """
+    (var x: (Int | String) 1)
+    (if (x is Int)
+      1
+    else
+      (x + 1))
+  """
+
+  test_strict_type_error """
+    (var x: ((Result Int String) | Int) (Ok 1))
+    (case x
+      when (Ok v)
+        (x + 1)
+      else
+        0)
+  """
+
+  test_strict_type_error """
+    (var x: ((Result Int String) | Int) (Ok 1))
+    (match x
+      (Ok v) (x + 1)
+      _ 0)
+  """
