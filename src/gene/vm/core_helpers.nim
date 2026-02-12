@@ -94,6 +94,31 @@ proc native_args_supported(f: Function, args: seq[Value]): bool =
       return false
   true
 
+proc effective_native_tier(self: ptr VirtualMachine): NativeCompileTier {.inline.} =
+  if self == nil:
+    return NctNever
+  if self.native_tier == NctNever and self.native_code:
+    return NctGuarded
+  self.native_tier
+
+proc native_has_fully_typed_boundary(f: Function): bool {.inline.} =
+  if f == nil or f.matcher == nil:
+    return false
+  if f.matcher.return_type_id == NO_TYPE_ID:
+    return false
+  f.matcher.return_type_id == BUILTIN_TYPE_INT_ID or
+    f.matcher.return_type_id == BUILTIN_TYPE_FLOAT_ID
+
+proc native_call_supported(self: ptr VirtualMachine, f: Function, args: seq[Value]): bool =
+  let tier = self.effective_native_tier()
+  if tier == NctNever:
+    return false
+  if not native_args_supported(f, args):
+    return false
+  if tier == NctFullyTyped and not native_has_fully_typed_boundary(f):
+    return false
+  true
+
 ## try_native_call, native_trampoline moved to vm/native.nim
 ## (included later, after forward declarations)
 proc skip_wildcard_import_key(key: Key): bool {.inline.} =

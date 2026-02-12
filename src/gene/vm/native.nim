@@ -67,11 +67,12 @@ proc native_trampoline*(
     return cast[int64](result_val)
 
 proc try_native_call(self: ptr VirtualMachine, f: Function, args: seq[Value], out_value: var Value): bool =
-  if not self.native_code:
+  if self.effective_native_tier() == NctNever:
     return false
   if f.is_generator or f.async or f.is_macro_like:
     return false
-  if not native_args_supported(f, args):
+  if not native_call_supported(self, f, args):
+    # Tier/guard miss deoptimizes this call to the VM bytecode path.
     return false
   if not f.native_ready:
     if f.native_failed:
