@@ -36,12 +36,24 @@ const FIB_NATIVE = """
   [a b fib])
 """
 
+const MISSING_RETURN_ANNOTATION = """
+(do
+  (fn candidate [x: Int]
+    (+ x 1))
+  (candidate 10)
+  candidate)
+"""
+
 test "native trampoline: typed helper call compiles natively":
   init_all()
   let prev = VM.native_code
+  let prev_tier = VM.native_tier
+  defer:
+    VM.native_code = prev
+    VM.native_tier = prev_tier
+  VM.native_tier = NctGuarded
   VM.native_code = true
   let result = VM.exec(TRAMPOLINE_OK, "test_native_trampoline_ok")
-  VM.native_code = prev
   check result.kind == VkFunction
   let f = result.ref.fn
   check f.native_ready
@@ -51,9 +63,13 @@ test "native trampoline: typed helper call compiles natively":
 test "native trampoline: untyped callee disables native compile":
   init_all()
   let prev = VM.native_code
+  let prev_tier = VM.native_tier
+  defer:
+    VM.native_code = prev
+    VM.native_tier = prev_tier
+  VM.native_tier = NctGuarded
   VM.native_code = true
   let result = VM.exec(TRAMPOLINE_UNTYPED, "test_native_trampoline_untyped")
-  VM.native_code = prev
   check result.kind == VkFunction
   let f = result.ref.fn
   check not f.native_ready
@@ -62,9 +78,13 @@ test "native trampoline: untyped callee disables native compile":
 test "native codegen: fib runs natively":
   init_all()
   let prev = VM.native_code
+  let prev_tier = VM.native_tier
+  defer:
+    VM.native_code = prev
+    VM.native_tier = prev_tier
+  VM.native_tier = NctGuarded
   VM.native_code = true
   let result = VM.exec(FIB_NATIVE, "test_native_fib")
-  VM.native_code = prev
   check result.kind == VkArray
   let items = array_data(result)
   check items.len == 3
@@ -75,3 +95,60 @@ test "native codegen: fib runs natively":
   check f.native_ready
   check not f.native_failed
   check f.native_entry != nil
+
+test "native tier never disables native compile attempts":
+  init_all()
+  let prev = VM.native_code
+  let prev_tier = VM.native_tier
+  defer:
+    VM.native_code = prev
+    VM.native_tier = prev_tier
+  VM.native_tier = NctNever
+  VM.native_code = false
+
+  let result = VM.exec(TRAMPOLINE_OK, "test_native_tier_never")
+  check result.kind == VkFunction
+  let f = result.ref.fn
+  check not f.native_ready
+  check not f.native_failed
+
+test "native tier fully-typed requires typed return boundary":
+  init_all()
+  let prev = VM.native_code
+  let prev_tier = VM.native_tier
+  defer:
+    VM.native_code = prev
+    VM.native_tier = prev_tier
+  VM.native_tier = NctFullyTyped
+  VM.native_code = true
+
+  let result = VM.exec(MISSING_RETURN_ANNOTATION, "test_native_tier_fully_typed")
+  check result.kind == VkFunction
+  let f = result.ref.fn
+  check not f.native_ready
+  check not f.native_failed
+
+test "native guarded tier deopts on runtime guard miss":
+  init_all()
+  let prev = VM.native_code
+  let prev_tier = VM.native_tier
+  defer:
+    VM.native_code = prev
+    VM.native_tier = prev_tier
+  VM.native_tier = NctGuarded
+  VM.native_code = true
+
+  let fn_value = VM.exec("(do (fn id [x: Int] -> Int x) id)", "test_native_tier_guarded_deopt")
+  check fn_value.kind == VkFunction
+  discard VM.exec_function(fn_value, @[1.to_value()])
+  let f = fn_value.ref.fn
+  check f.native_ready
+
+  var raised = false
+  try:
+    discard VM.exec_function(fn_value, @["oops".to_value()])
+  except CatchableError:
+    raised = true
+  check raised
+  check f.native_ready
+  check not f.native_failed
