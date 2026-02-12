@@ -141,6 +141,58 @@ suite "GIR CLI":
 
     removeFile(gir_path)
 
+  test "gir preserves module type registry and aliases":
+    let code = "(var x 1) x"
+    let compiled = compiler.parse_and_compile(code, "<registry-test>")
+    let module_path = "tmp/type_registry_roundtrip.gene"
+    let user_id = 11'i32
+    let union_id = 27'i32
+    let fn_id = 43'i32
+
+    let user_desc = TypeDesc(module_path: module_path, kind: TdkNamed, name: "User")
+    let union_desc = TypeDesc(module_path: module_path, kind: TdkUnion, members: @[user_id, 1'i32])
+    let fn_desc = TypeDesc(module_path: module_path, kind: TdkFn, params: @[user_id], ret: union_id, effects: @["io/read"])
+
+    compiled.type_descriptors = @[user_desc, union_desc, fn_desc]
+    compiled.type_registry = ModuleTypeRegistry(
+      module_path: module_path,
+      descriptors: initOrderedTable[TypeId, TypeDesc](),
+    )
+    compiled.type_registry.descriptors[user_id] = user_desc
+    compiled.type_registry.descriptors[union_id] = union_desc
+    compiled.type_registry.descriptors[fn_id] = fn_desc
+    compiled.type_aliases = initTable[string, TypeId]()
+    compiled.type_aliases["UserType"] = user_id
+    compiled.type_aliases["UserResult"] = union_id
+    compiled.type_aliases["UserFactory"] = fn_id
+
+    let gir_path = "build/tests/type_registry_roundtrip.gir"
+    createDir(parentDir(gir_path))
+    gir.save_gir(compiled, gir_path)
+    let loaded = gir.load_gir(gir_path)
+
+    check loaded.type_registry != nil
+    check loaded.type_registry.module_path == module_path
+    check loaded.type_registry.descriptors.len == 3
+    check loaded.type_registry.descriptors.hasKey(user_id)
+    check loaded.type_registry.descriptors[user_id].kind == TdkNamed
+    check loaded.type_registry.descriptors[user_id].name == "User"
+    check loaded.type_registry.descriptors.hasKey(union_id)
+    check loaded.type_registry.descriptors[union_id].kind == TdkUnion
+    check loaded.type_registry.descriptors[union_id].members == @[user_id, 1'i32]
+    check loaded.type_registry.descriptors.hasKey(fn_id)
+    check loaded.type_registry.descriptors[fn_id].kind == TdkFn
+    check loaded.type_registry.descriptors[fn_id].params == @[user_id]
+    check loaded.type_registry.descriptors[fn_id].ret == union_id
+    check loaded.type_registry.descriptors[fn_id].effects == @["io/read"]
+
+    check loaded.type_aliases.len == 3
+    check loaded.type_aliases["UserType"] == user_id
+    check loaded.type_aliases["UserResult"] == union_id
+    check loaded.type_aliases["UserFactory"] == fn_id
+
+    removeFile(gir_path)
+
   test "type checker propagates descriptor ids into compiler metadata":
     let code = """
       (var x: Int 1)

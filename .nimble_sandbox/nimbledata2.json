@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "reverseDeps": {
+    "db_connector": {
+      "0.1.0": {
+        "b20053975976f94afac253d67cc6ef9200b32d02": [
+          {
+            "path": "/Users/gcao/gene-workspace/gene"
+          }
+        ]
+      }
+    },
+    "nim": {
+      "2.2.6": {
+        "2c9e77a691294dad7472a539f9b78ef0088a1a87": [
+          {
+            "path": "/Users/gcao/gene-workspace/gene"
+          },
+          {
+            "name": "db_connector",
+            "version": "0.1.0",
+            "checksum": "b20053975976f94afac253d67cc6ef9200b32d02"
+          }
+        ]
+      }
+    }
+  }
+}

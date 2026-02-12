@@ -19,8 +19,38 @@ proc workspace_src_paths(): seq[string]
 var ModuleCache* = initTable[string, Namespace]()
 var ModuleLoadState* = initTable[string, bool]()
 var ModuleLoadStack* = newSeq[string]()
+var LoadedModuleTypeRegistry* = new_global_type_registry()
 
 let ExportKey* = "__exports__".to_key()
+
+proc reset_loaded_module_type_registry*() =
+  LoadedModuleTypeRegistry = new_global_type_registry()
+
+proc register_module_type_registry*(module_path: string, cu: CompilationUnit) =
+  if cu == nil:
+    return
+
+  var registry = cu.type_registry
+  if registry == nil and cu.type_descriptors.len > 0:
+    registry = populate_registry(cu.type_descriptors)
+    cu.type_registry = registry
+  if registry == nil:
+    return
+
+  var resolved_path = registry.module_path
+  if resolved_path.len == 0:
+    if cu.module_path.len > 0:
+      resolved_path = cu.module_path
+    else:
+      resolved_path = module_path
+  if resolved_path.len == 0:
+    return
+
+  if registry.module_path.len == 0:
+    registry.module_path = resolved_path
+  let global_module = get_or_create_module(LoadedModuleTypeRegistry, resolved_path)
+  for type_id, desc in registry.descriptors:
+    global_module.descriptors[type_id] = desc
 
 proc ensure_exports_map(ns: Namespace): Value =
   var exports_val = ns.members.getOrDefault(ExportKey, NIL)
@@ -580,7 +610,9 @@ proc compile_module*(path: string): CompilationUnit =
   # Read module file
   let abs_path = absolutePath(path)
   if abs_path.endsWith(".gir"):
-    return load_gir(abs_path)
+    let loaded = load_gir(abs_path)
+    register_module_type_registry(abs_path, loaded)
+    return loaded
 
   var actual_path = abs_path
   if not path.endsWith(".gene"):
@@ -594,7 +626,9 @@ proc compile_module*(path: string): CompilationUnit =
   let gir_path = get_gir_path(actual_path, "build")
   if fileExists(gir_path) and is_gir_up_to_date(gir_path, actual_path):
     try:
-      return load_gir(gir_path)
+      let loaded = load_gir(gir_path)
+      register_module_type_registry(actual_path, loaded)
+      return loaded
     except CatchableError:
       discard
 
@@ -605,6 +639,7 @@ proc compile_module*(path: string): CompilationUnit =
     stream.close()
 
   let compiled = parse_and_compile(stream, actual_path, module_mode = true, run_init = false)
+  register_module_type_registry(actual_path, compiled)
   try:
     save_gir(compiled, gir_path, actual_path)
   except CatchableError:

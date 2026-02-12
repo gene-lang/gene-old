@@ -4,7 +4,7 @@ import ./types
 
 const
   GIR_MAGIC = "GENE"
-  GIR_VERSION* = 14'u32
+  GIR_VERSION* = 15'u32
   COMPILER_VERSION = "0.1.2"
   VALUE_ABI_VERSION* = 2'u32  # Version 2: Value is object wrapper with GC
   
@@ -40,6 +40,8 @@ type
     module_imports*: seq[string]
     module_types*: seq[ModuleTypeNode]
     type_descriptors*: seq[TypeDesc]
+    type_registry*: ModuleTypeRegistry
+    type_aliases*: Table[string, TypeId]
 
 # Serialization helpers
 proc write_string(stream: Stream, s: string) =
@@ -214,6 +216,45 @@ proc readTypeDescTable(stream: Stream): seq[TypeDesc] =
   result = @[]
   for _ in 0..<count:
     result.add(readTypeDesc(stream))
+
+proc writeModuleTypeRegistry(stream: Stream, registry: ModuleTypeRegistry) =
+  if registry == nil:
+    stream.write(0'u32)
+    return
+  stream.write(registry.descriptors.len.uint32)
+  for type_id, desc in registry.descriptors:
+    stream.write(type_id.int32)
+    writeTypeDesc(stream, desc)
+
+proc readModuleTypeRegistry(stream: Stream): ModuleTypeRegistry =
+  let count = stream.readUint32()
+  if count == 0:
+    return nil
+
+  result = ModuleTypeRegistry(
+    module_path: "",
+    descriptors: initOrderedTable[TypeId, TypeDesc](),
+  )
+  for _ in 0..<count:
+    let type_id = stream.readInt32()
+    let desc = readTypeDesc(stream)
+    result.descriptors[type_id] = desc
+    if result.module_path.len == 0 and desc.module_path.len > 0 and desc.module_path != "stdlib":
+      result.module_path = desc.module_path
+
+proc writeTypeAliases(stream: Stream, aliases: Table[string, TypeId]) =
+  stream.write(aliases.len.uint32)
+  for name, type_id in aliases:
+    stream.write_string(name)
+    stream.write(type_id.int32)
+
+proc readTypeAliases(stream: Stream): Table[string, TypeId] =
+  result = initTable[string, TypeId]()
+  let count = stream.readUint32()
+  for _ in 0..<count:
+    let name = stream.read_string()
+    let type_id = stream.readInt32()
+    result[name] = type_id
 
 proc writeCompilationUnitBlock(stream: Stream, cu: CompilationUnit)
 
@@ -427,6 +468,8 @@ proc writeCompilationUnitBlock(stream: Stream, cu: CompilationUnit) =
 
   writeModuleTypeTree(stream, cu.module_types)
   writeTypeDescTable(stream, cu.type_descriptors)
+  writeModuleTypeRegistry(stream, cu.type_registry)
+  writeTypeAliases(stream, cu.type_aliases)
 
 proc readCompilationUnitBlock(stream: Stream): CompilationUnit =
   let kind = cast[CompilationUnitKind](stream.readInt8())
@@ -498,6 +541,8 @@ proc readCompilationUnitBlock(stream: Stream): CompilationUnit =
 
   result.module_types = readModuleTypeTree(stream)
   result.type_descriptors = readTypeDescTable(stream)
+  result.type_registry = readModuleTypeRegistry(stream)
+  result.type_aliases = readTypeAliases(stream)
 
 proc write_instruction(stream: Stream, inst: Instruction) =
   stream.write(inst.kind.uint16)
@@ -620,6 +665,8 @@ proc save_gir*(cu: CompilationUnit, path: string, source_path: string = "", debu
 
   writeModuleTypeTree(stream, cu.module_types)
   writeTypeDescTable(stream, cu.type_descriptors)
+  writeModuleTypeRegistry(stream, cu.type_registry)
+  writeTypeAliases(stream, cu.type_aliases)
 
 proc load_gir_file*(path: string): GirFile =
   ## Load a GIR file and return its structured contents
@@ -708,6 +755,8 @@ proc load_gir_file*(path: string): GirFile =
 
   let module_types = readModuleTypeTree(stream)
   let type_descriptors = readTypeDescTable(stream)
+  let type_registry = readModuleTypeRegistry(stream)
+  let type_aliases = readTypeAliases(stream)
 
   result.header = header
   result.constants = constants
@@ -727,6 +776,8 @@ proc load_gir_file*(path: string): GirFile =
   result.module_imports = module_imports
   result.module_types = module_types
   result.type_descriptors = type_descriptors
+  result.type_registry = type_registry
+  result.type_aliases = type_aliases
 
 proc load_gir*(path: string): CompilationUnit =
   ## Load a compilation unit from a GIR file
@@ -743,6 +794,8 @@ proc load_gir*(path: string): CompilationUnit =
   result.module_imports = gir_file.module_imports
   result.module_types = gir_file.module_types
   result.type_descriptors = gir_file.type_descriptors
+  result.type_registry = gir_file.type_registry
+  result.type_aliases = gir_file.type_aliases
 
   if gir_file.trace_nodes.len > 0:
     var node_refs: seq[SourceTrace] = @[]
