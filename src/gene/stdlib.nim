@@ -2486,9 +2486,7 @@ proc class_fn(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count
   let fn =
     if vm != nil and vm.cu != nil:
       if vm.cu.type_registry == nil:
-        vm.cu.type_registry = populate_registry(vm.cu.type_descriptors)
-        if vm.cu.type_registry != nil and vm.cu.type_registry.module_path.len == 0:
-          vm.cu.type_registry.module_path = vm.cu.module_path
+        vm.cu.type_registry = populate_registry(vm.cu.type_descriptors, vm.cu.module_path)
       to_function(args_gene, vm.cu.type_descriptors, vm.cu.type_aliases,
         vm.cu.module_path, vm.cu.type_registry)
     else:

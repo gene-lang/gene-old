@@ -571,7 +571,7 @@ proc parse_and_compile*(input: string, filename = "<input>", eager_functions = f
   if module_mode:
     self.output.kind = CkModule
   
-  self.output.type_registry = populate_registry(self.output.type_descriptors)
+  self.output.type_registry = populate_registry(self.output.type_descriptors, self.output.module_path)
   return self.output
 
 proc parse_and_compile_repl*(input: string, filename = "<repl>", scope_tracker: ScopeTracker, eager_functions = false, type_check = true): CompilationUnit =
@@ -662,7 +662,7 @@ proc parse_and_compile_repl*(input: string, filename = "<repl>", scope_tracker: 
   if checker != nil:
     merge_checker_type_descriptors(self.output.type_descriptors, checker.type_descriptors())
 
-  self.output.type_registry = populate_registry(self.output.type_descriptors)
+  self.output.type_registry = populate_registry(self.output.type_descriptors, self.output.module_path)
   return self.output
 
 proc parse_and_compile*(stream: Stream, filename = "<input>", eager_functions = false, type_check = true, module_mode = false, run_init = false): CompilationUnit =

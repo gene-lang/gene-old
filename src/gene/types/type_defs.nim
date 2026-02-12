@@ -241,6 +241,11 @@ type
   ModuleTypeRegistry* = ref object
     module_path*: string
     descriptors*: OrderedTable[TypeId, TypeDesc]
+    builtin_types*: OrderedTable[string, TypeId]
+    named_types*: OrderedTable[string, TypeId]
+    applied_types*: OrderedTable[string, TypeId]
+    union_types*: OrderedTable[string, TypeId]
+    function_types*: OrderedTable[string, TypeId]
 
   GlobalTypeRegistry* = ref object
     modules*: OrderedTable[string, ModuleTypeRegistry]

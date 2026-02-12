@@ -32,7 +32,7 @@ proc register_module_type_registry*(module_path: string, cu: CompilationUnit) =
 
   var registry = cu.type_registry
   if registry == nil and cu.type_descriptors.len > 0:
-    registry = populate_registry(cu.type_descriptors)
+    registry = populate_registry(cu.type_descriptors, cu.module_path)
     cu.type_registry = registry
   if registry == nil:
     return
@@ -50,7 +50,7 @@ proc register_module_type_registry*(module_path: string, cu: CompilationUnit) =
     registry.module_path = resolved_path
   let global_module = get_or_create_module(LoadedModuleTypeRegistry, resolved_path)
   for type_id, desc in registry.descriptors:
-    global_module.descriptors[type_id] = desc
+    register_type_desc(global_module, type_id, desc, resolved_path)
 
 proc ensure_exports_map(ns: Namespace): Value =
   var exports_val = ns.members.getOrDefault(ExportKey, NIL)

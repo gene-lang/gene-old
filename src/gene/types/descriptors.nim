@@ -207,30 +207,160 @@ proc set_expected_type_id*(tracker: ScopeTracker, index: int16,
     tracker.type_expectation_ids.add(NO_TYPE_ID)
   tracker.type_expectation_ids[index.int] = expected_type_id
 
+proc new_module_type_registry*(module_path: string): ModuleTypeRegistry =
+  ModuleTypeRegistry(
+    module_path: module_path,
+    descriptors: initOrderedTable[TypeId, TypeDesc](),
+    builtin_types: initOrderedTable[string, TypeId](),
+    named_types: initOrderedTable[string, TypeId](),
+    applied_types: initOrderedTable[string, TypeId](),
+    union_types: initOrderedTable[string, TypeId](),
+    function_types: initOrderedTable[string, TypeId](),
+  )
+
+proc canonical_type_owner_path*(desc: TypeDesc, fallback_module_path = ""): string {.gcsafe.} =
+  ## Determine descriptor ownership: built-ins are stdlib-owned, others are
+  ## owned by their module_path or by the caller-provided module fallback.
+  case desc.kind
+  of TdkAny:
+    return BUILTIN_TYPE_MODULE_PATH
+  of TdkNamed:
+    if lookup_builtin_type(desc.name) != NO_TYPE_ID:
+      return BUILTIN_TYPE_MODULE_PATH
+  else:
+    discard
+  if desc.module_path.len > 0:
+    return desc.module_path
+  fallback_module_path
+
+proc canonicalize_type_desc_owner*(desc: TypeDesc, fallback_module_path = ""): TypeDesc {.gcsafe.} =
+  result = desc
+  let owner = canonical_type_owner_path(desc, fallback_module_path)
+  if owner.len > 0:
+    result.module_path = owner
+
+proc module_registry_scope(path: string): string {.inline.} =
+  if path.len == 0: "<local>" else: path
+
+proc sorted_unique_type_ids(ids: seq[TypeId]): seq[TypeId] {.gcsafe.} =
+  if ids.len == 0:
+    return @[]
+  result = ids
+  var i = 1
+  while i < result.len:
+    let item = result[i]
+    var j = i
+    while j > 0 and result[j - 1] > item:
+      result[j] = result[j - 1]
+      j.dec()
+    result[j] = item
+    i.inc()
+
+  var write = 0
+  for item in result:
+    if write == 0 or result[write - 1] != item:
+      result[write] = item
+      write.inc()
+  result.setLen(write)
+
+proc type_id_list_key(ids: seq[TypeId], normalize = false): string {.gcsafe.} =
+  let values = if normalize: sorted_unique_type_ids(ids) else: ids
+  var parts: seq[string] = @[]
+  for id in values:
+    parts.add($id)
+  join_strings(parts, ",")
+
+proc descriptor_registry_key*(desc: TypeDesc): string {.gcsafe.} =
+  ## Canonical registry key used by module-kind indexes.
+  let scope = module_registry_scope(desc.module_path)
+  case desc.kind
+  of TdkAny:
+    scope & "::any"
+  of TdkNamed:
+    scope & "::named:" & desc.name
+  of TdkApplied:
+    scope & "::applied:" & desc.ctor & "[" & type_id_list_key(desc.args) & "]"
+  of TdkUnion:
+    scope & "::union:[" & type_id_list_key(desc.members, normalize = true) & "]"
+  of TdkFn:
+    scope & "::fn:[" & type_id_list_key(desc.params) & "]->" & $desc.ret &
+      "!" & join_strings(sorted_unique_strings(desc.effects), ",")
+  of TdkVar:
+    scope & "::var:" & $desc.var_id
+
+proc clear_kind_indexes(registry: ModuleTypeRegistry) =
+  registry.builtin_types = initOrderedTable[string, TypeId]()
+  registry.named_types = initOrderedTable[string, TypeId]()
+  registry.applied_types = initOrderedTable[string, TypeId]()
+  registry.union_types = initOrderedTable[string, TypeId]()
+  registry.function_types = initOrderedTable[string, TypeId]()
+
+proc index_type_desc_in_registry(registry: ModuleTypeRegistry, type_id: TypeId, desc: TypeDesc) =
+  if registry == nil:
+    return
+
+  case desc.kind
+  of TdkAny:
+    registry.builtin_types["Any"] = type_id
+  of TdkNamed:
+    if lookup_builtin_type(desc.name) != NO_TYPE_ID and desc.module_path == BUILTIN_TYPE_MODULE_PATH:
+      registry.builtin_types[desc.name] = type_id
+    else:
+      registry.named_types[descriptor_registry_key(desc)] = type_id
+  of TdkApplied:
+    registry.applied_types[descriptor_registry_key(desc)] = type_id
+  of TdkUnion:
+    registry.union_types[descriptor_registry_key(desc)] = type_id
+  of TdkFn:
+    registry.function_types[descriptor_registry_key(desc)] = type_id
+  of TdkVar:
+    discard
+
+proc register_type_desc*(registry: ModuleTypeRegistry, type_id: TypeId, desc: TypeDesc,
+                        fallback_module_path = "") =
+  if registry == nil:
+    return
+
+  let canonical = canonicalize_type_desc_owner(desc, fallback_module_path)
+  registry.descriptors[type_id] = canonical
+  if registry.module_path.len == 0:
+    let owner = canonical.module_path
+    if owner.len > 0 and owner != BUILTIN_TYPE_MODULE_PATH:
+      registry.module_path = owner
+  index_type_desc_in_registry(registry, type_id, canonical)
+
+proc rebuild_module_registry_indexes*(registry: ModuleTypeRegistry, fallback_module_path = "") =
+  if registry == nil:
+    return
+  clear_kind_indexes(registry)
+  for type_id, desc in registry.descriptors.mpairs:
+    desc = canonicalize_type_desc_owner(desc, fallback_module_path)
+    index_type_desc_in_registry(registry, type_id, desc)
+    if registry.module_path.len == 0 and desc.module_path.len > 0 and desc.module_path != BUILTIN_TYPE_MODULE_PATH:
+      registry.module_path = desc.module_path
+
 proc new_global_type_registry*(): GlobalTypeRegistry =
-  GlobalTypeRegistry(modules: initOrderedTable[string, ModuleTypeRegistry]())
+  result = GlobalTypeRegistry(modules: initOrderedTable[string, ModuleTypeRegistry]())
+  let stdlib_registry = new_module_type_registry(BUILTIN_TYPE_MODULE_PATH)
+  for i, desc in builtin_type_descs():
+    register_type_desc(stdlib_registry, i.TypeId, desc, BUILTIN_TYPE_MODULE_PATH)
+  result.modules[BUILTIN_TYPE_MODULE_PATH] = stdlib_registry
 
 proc get_or_create_module*(g: GlobalTypeRegistry, path: string): ModuleTypeRegistry =
   if path in g.modules:
     return g.modules[path]
-  result = ModuleTypeRegistry(
-    module_path: path,
-    descriptors: initOrderedTable[TypeId, TypeDesc](),
-  )
+  result = new_module_type_registry(path)
   g.modules[path] = result
 
-proc populate_registry*(cu_type_descriptors: seq[TypeDesc]): ModuleTypeRegistry =
+proc populate_registry*(cu_type_descriptors: seq[TypeDesc], module_path = ""): ModuleTypeRegistry =
   ## Build a ModuleTypeRegistry from a flat seq[TypeDesc] (legacy format).
   ## Groups descriptors by module_path; returns a single registry for the
   ## primary module (uses the first non-"stdlib" module_path found, or "").
-  var module_path = ""
+  var resolved_module_path = module_path
   for desc in cu_type_descriptors:
-    if desc.module_path != "stdlib" and desc.module_path != "":
-      module_path = desc.module_path
+    if desc.module_path != BUILTIN_TYPE_MODULE_PATH and desc.module_path != "":
+      resolved_module_path = desc.module_path
       break
-  result = ModuleTypeRegistry(
-    module_path: module_path,
-    descriptors: initOrderedTable[TypeId, TypeDesc](),
-  )
+  result = new_module_type_registry(resolved_module_path)
   for i, desc in cu_type_descriptors:
-    result.descriptors[i.TypeId] = desc
+    register_type_desc(result, i.TypeId, desc, resolved_module_path)

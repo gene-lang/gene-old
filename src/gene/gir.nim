@@ -239,16 +239,12 @@ proc readModuleTypeRegistry(stream: Stream): ModuleTypeRegistry =
   if count == 0:
     return nil
 
-  result = ModuleTypeRegistry(
-    module_path: "",
-    descriptors: initOrderedTable[TypeId, TypeDesc](),
-  )
+  result = new_module_type_registry("")
   for _ in 0..<count:
     let type_id = stream.readInt32()
     let desc = readTypeDesc(stream)
-    result.descriptors[type_id] = desc
-    if result.module_path.len == 0 and desc.module_path.len > 0 and desc.module_path != "stdlib":
-      result.module_path = desc.module_path
+    register_type_desc(result, type_id, desc)
+  rebuild_module_registry_indexes(result)
 
 proc writeTypeAliases(stream: Stream, aliases: Table[string, TypeId]) =
   stream.write(aliases.len.uint32)

@@ -4,7 +4,7 @@
 - [x] 0.3 Add a regression test that exercises cached GIR execution (not only `--no-gir-cache` paths).
 
 ## 1. Descriptor Pipeline (Phase A)
-- [ ] 1.1 Define canonical `TypeDesc`/`TypeId` ownership and module-level registries (builtins, named types, applied types, unions, function types).
+- [x] 1.1 Define canonical `TypeDesc`/`TypeId` ownership and module-level registries (builtins, named types, applied types, unions, function types).
 - [ ] 1.2 Remove string-first type transport from compiler metadata (`type_expectations`) and switch to descriptor references.
 - [ ] 1.3 Persist descriptor tables in GIR with stable IDs and module-path provenance.
 - [ ] 1.4 Bump GIR type-metadata version and invalidate/recompile legacy caches (no transparent migration).

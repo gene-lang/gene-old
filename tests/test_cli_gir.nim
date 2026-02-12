@@ -183,13 +183,10 @@ suite "GIR CLI":
     let fn_desc = TypeDesc(module_path: module_path, kind: TdkFn, params: @[user_id], ret: union_id, effects: @["io/read"])
 
     compiled.type_descriptors = @[user_desc, union_desc, fn_desc]
-    compiled.type_registry = ModuleTypeRegistry(
-      module_path: module_path,
-      descriptors: initOrderedTable[TypeId, TypeDesc](),
-    )
-    compiled.type_registry.descriptors[user_id] = user_desc
-    compiled.type_registry.descriptors[union_id] = union_desc
-    compiled.type_registry.descriptors[fn_id] = fn_desc
+    compiled.type_registry = new_module_type_registry(module_path)
+    register_type_desc(compiled.type_registry, user_id, user_desc, module_path)
+    register_type_desc(compiled.type_registry, union_id, union_desc, module_path)
+    register_type_desc(compiled.type_registry, fn_id, fn_desc, module_path)
     compiled.type_aliases = initTable[string, TypeId]()
     compiled.type_aliases["UserType"] = user_id
     compiled.type_aliases["UserResult"] = union_id
@@ -214,6 +211,9 @@ suite "GIR CLI":
     check loaded.type_registry.descriptors[fn_id].params == @[user_id]
     check loaded.type_registry.descriptors[fn_id].ret == union_id
     check loaded.type_registry.descriptors[fn_id].effects == @["io/read"]
+    check loaded.type_registry.named_types.len == 1
+    check loaded.type_registry.union_types.len == 1
+    check loaded.type_registry.function_types.len == 1
 
     check loaded.type_aliases.len == 3
     check loaded.type_aliases["UserType"] == user_id
@@ -221,6 +221,50 @@ suite "GIR CLI":
     check loaded.type_aliases["UserFactory"] == fn_id
 
     removeFile(gir_path)
+
+  test "module registry canonicalizes ownership and kind indexes":
+    let module_path = "tmp/descriptor_ownership.gene"
+    var descs = builtin_type_descs()
+
+    let user_id = intern_type_desc(descs, TypeDesc(kind: TdkNamed, module_path: module_path, name: "User"))
+    let applied_id = intern_type_desc(descs, TypeDesc(kind: TdkApplied, ctor: "Array", args: @[user_id]))
+    let union_id = intern_type_desc(descs, TypeDesc(kind: TdkUnion, members: @[user_id, BUILTIN_TYPE_NIL_ID]))
+    let fn_id = intern_type_desc(descs, TypeDesc(kind: TdkFn, params: @[user_id], ret: union_id, effects: @["io/read"]))
+
+    let registry = populate_registry(descs, module_path)
+    check registry != nil
+    check registry.module_path == module_path
+    check registry.descriptors[user_id].module_path == module_path
+    check registry.descriptors[applied_id].module_path == module_path
+    check registry.descriptors[union_id].module_path == module_path
+    check registry.descriptors[fn_id].module_path == module_path
+    check registry.builtin_types["Int"] == BUILTIN_TYPE_INT_ID
+    check registry.named_types.len >= 1
+    check registry.applied_types.len >= 1
+    check registry.union_types.len >= 1
+    check registry.function_types.len >= 1
+
+    var saw_named = false
+    var saw_applied = false
+    var saw_union = false
+    var saw_fn = false
+    for _, type_id in registry.named_types:
+      if type_id == user_id:
+        saw_named = true
+    for _, type_id in registry.applied_types:
+      if type_id == applied_id:
+        saw_applied = true
+    for _, type_id in registry.union_types:
+      if type_id == union_id:
+        saw_union = true
+    for _, type_id in registry.function_types:
+      if type_id == fn_id:
+        saw_fn = true
+
+    check saw_named
+    check saw_applied
+    check saw_union
+    check saw_fn
 
   test "type checker propagates descriptor ids into compiler metadata":
     let code = """
