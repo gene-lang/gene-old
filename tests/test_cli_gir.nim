@@ -291,10 +291,22 @@ suite "GIR CLI":
               break
       if inst.kind == IkFunction and inst.arg0.kind == VkFunctionDef and not saw_fn_type_ids:
         let info = to_function_def_info(inst.arg0)
-        let f = to_function(info.input)
+        check info.type_expectation_ids.len == 1
+        check info.type_expectation_ids[0] != NO_TYPE_ID
+        check info.return_type_id != NO_TYPE_ID
+        let f = to_function(info.input, type_expectation_ids = info.type_expectation_ids,
+          return_type_id = info.return_type_id)
         check f.matcher.children.len == 1
         check f.matcher.children[0].type_id != NO_TYPE_ID
         check f.matcher.return_type_id != NO_TYPE_ID
+
+        let mismatched_input = parser.read("(fn id [a: String] -> String a)")
+        let f_from_precomputed = to_function(mismatched_input, compiled.type_descriptors,
+          compiled.type_aliases, compiled.module_path, compiled.type_registry,
+          info.type_expectation_ids, info.return_type_id)
+        check f_from_precomputed.matcher.children[0].type_id == info.type_expectation_ids[0]
+        check f_from_precomputed.matcher.return_type_id == info.return_type_id
+
         saw_fn_type_ids = true
 
     check saw_var_type_id

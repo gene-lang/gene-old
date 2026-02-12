@@ -60,17 +60,25 @@ proc compile_fn(self: Compiler, input: Value, define_binding = true) =
   let tracker_copy = copy_scope_tracker(self.scope_tracker)
   var binding_type_id: TypeId = NO_TYPE_ID
 
+  if self.output.type_registry == nil:
+    self.output.type_registry = populate_registry(self.output.type_descriptors, self.output.module_path)
+
+  var fn_obj = to_function(input, self.output.type_descriptors, self.output.type_aliases,
+    self.output.module_path, self.output.type_registry)
+  var type_expectation_ids: seq[TypeId] = @[]
+  if fn_obj.matcher != nil:
+    type_expectation_ids = newSeq[TypeId](fn_obj.matcher.children.len)
+    for i, child in fn_obj.matcher.children:
+      type_expectation_ids[i] = child.type_id
+
   var compiled_body: CompilationUnit = nil
   if self.eager_functions:
-    if self.output.type_registry == nil:
-      self.output.type_registry = populate_registry(self.output.type_descriptors, self.output.module_path)
-    var fn_obj = to_function(input, self.output.type_descriptors, self.output.type_aliases,
-      self.output.module_path, self.output.type_registry)
     fn_obj.scope_tracker = tracker_copy
     compile(fn_obj, true)
     compiled_body = fn_obj.body_compiled
 
-  let info = new_function_def_info(tracker_copy, compiled_body, input)
+  let info = new_function_def_info(tracker_copy, compiled_body, input,
+    type_expectation_ids, if fn_obj.matcher != nil: fn_obj.matcher.return_type_id else: NO_TYPE_ID)
   self.emit(Instruction(kind: IkFunction, arg0: info.to_value()))
 
   if local_binding:

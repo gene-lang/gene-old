@@ -282,6 +282,8 @@ type
     input*: Value
     scope_tracker*: ScopeTracker
     compiled_body*: Value
+    type_expectation_ids*: seq[TypeId]
+    return_type_id*: TypeId
 
   SourceTrace* = ref object
     parent*: SourceTrace

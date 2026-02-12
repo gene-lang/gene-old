@@ -38,20 +38,26 @@ proc register_type_descs(registry: ModuleTypeRegistry, type_descs: seq[TypeDesc]
 proc to_function*(node: Value, cu_type_descs: var seq[TypeDesc],
                   type_aliases: Table[string, TypeId] = initTable[string, TypeId](),
                   module_path = "",
-                  type_registry: ModuleTypeRegistry = nil): Function {.gcsafe.}
+                  type_registry: ModuleTypeRegistry = nil,
+                  type_expectation_ids: seq[TypeId] = @[],
+                  return_type_id: TypeId = NO_TYPE_ID): Function {.gcsafe.}
 
-proc to_function*(node: Value): Function {.gcsafe.} =
+proc to_function*(node: Value, type_expectation_ids: seq[TypeId] = @[],
+                  return_type_id: TypeId = NO_TYPE_ID): Function {.gcsafe.} =
   ## Create a Function from a Gene node, using a local type descriptor table.
   var local_descs = builtin_type_descs()
   var inferred_module_path = ""
   if node.kind == VkGene and node.gene != nil and node.gene.trace != nil:
     inferred_module_path = module_path_from_source(node.gene.trace.filename)
-  return to_function(node, local_descs, module_path = inferred_module_path)
+  return to_function(node, local_descs, module_path = inferred_module_path,
+    type_expectation_ids = type_expectation_ids, return_type_id = return_type_id)
 
 proc to_function*(node: Value, cu_type_descs: var seq[TypeDesc],
                   type_aliases: Table[string, TypeId] = initTable[string, TypeId](),
                   module_path = "",
-                  type_registry: ModuleTypeRegistry = nil): Function {.gcsafe.} =
+                  type_registry: ModuleTypeRegistry = nil,
+                  type_expectation_ids: seq[TypeId] = @[],
+                  return_type_id: TypeId = NO_TYPE_ID): Function {.gcsafe.} =
   if node.kind != VkGene:
     raise new_exception(type_defs.Exception, "Expected Gene for function definition, got " & $node.kind)
 
@@ -61,6 +67,7 @@ proc to_function*(node: Value, cu_type_descs: var seq[TypeDesc],
   # Intern types into the provided table (CU's or local).
   template type_descs: var seq[TypeDesc] = cu_type_descs
   let aliases = type_aliases
+  let use_precomputed_type_ids = type_expectation_ids.len > 0 or return_type_id != NO_TYPE_ID
 
   # Extract type annotations as name -> TypeId mapping, and strip them from args
   proc strip_type_annotations(args: Value, type_id_map: var Table[string, TypeId],
@@ -79,7 +86,7 @@ proc to_function*(node: Value, cu_type_descs: var seq[TypeDesc],
         i.inc
         if i < src.len:
           let type_val = src[i]
-          if not type_id_map.hasKey(base):
+          if not use_precomputed_type_ids and not type_id_map.hasKey(base):
             type_id_map[base] = resolve_type_value_to_id(type_val, type_descs, aliases, module_path)
           i.inc # Skip type expression
         continue
@@ -108,6 +115,18 @@ proc to_function*(node: Value, cu_type_descs: var seq[TypeDesc],
     if matcher.has_type_annotations:
       matcher.hint_mode = MhDefault
 
+  proc apply_precomputed_type_expectations(matcher: RootMatcher, expectation_ids: seq[TypeId]) =
+    if expectation_ids.len == 0:
+      return
+    let count = min(matcher.children.len, expectation_ids.len)
+    for i in 0..<count:
+      let type_id = expectation_ids[i]
+      matcher.children[i].type_id = type_id
+      if type_id != NO_TYPE_ID:
+        matcher.has_type_annotations = true
+    if matcher.has_type_annotations:
+      matcher.hint_mode = MhDefault
+
   var name: string
   let matcher = new_arg_matcher()
   var body_start: int
@@ -122,7 +141,10 @@ proc to_function*(node: Value, cu_type_descs: var seq[TypeDesc],
     of VkArray:
       name = "<unnamed>"
       matcher.parse(strip_type_annotations(first, type_id_map, type_descs, aliases))
-      apply_type_annotations(matcher, type_id_map)
+      if use_precomputed_type_ids:
+        apply_precomputed_type_expectations(matcher, type_expectation_ids)
+      else:
+        apply_type_annotations(matcher, type_id_map)
       body_start = 1
     of VkSymbol, VkString:
       name = first.str
@@ -138,7 +160,10 @@ proc to_function*(node: Value, cu_type_descs: var seq[TypeDesc],
       if args.kind != VkArray:
         raise new_exception(type_defs.Exception, "Invalid function definition: arguments must be an array")
       matcher.parse(args)
-      apply_type_annotations(matcher, type_id_map)
+      if use_precomputed_type_ids:
+        apply_precomputed_type_expectations(matcher, type_expectation_ids)
+      else:
+        apply_type_annotations(matcher, type_id_map)
       body_start = 2
     of VkComplexSymbol:
       name = first.ref.csymbol[^1]
@@ -154,7 +179,10 @@ proc to_function*(node: Value, cu_type_descs: var seq[TypeDesc],
       if args.kind != VkArray:
         raise new_exception(type_defs.Exception, "Invalid function definition: arguments must be an array")
       matcher.parse(args)
-      apply_type_annotations(matcher, type_id_map)
+      if use_precomputed_type_ids:
+        apply_precomputed_type_expectations(matcher, type_expectation_ids)
+      else:
+        apply_type_annotations(matcher, type_id_map)
       body_start = 2
     else:
       raise new_exception(type_defs.Exception, "Invalid function definition: expected name or argument list")
@@ -167,7 +195,10 @@ proc to_function*(node: Value, cu_type_descs: var seq[TypeDesc],
       if body_start + 1 >= node.gene.children.len:
         raise new_exception(type_defs.Exception, "Invalid function definition: missing return type after ->")
       let ret_type = node.gene.children[body_start + 1]
-      matcher.return_type_id = resolve_type_value_to_id(ret_type, type_descs, aliases, module_path)
+      if use_precomputed_type_ids:
+        matcher.return_type_id = return_type_id
+      else:
+        matcher.return_type_id = resolve_type_value_to_id(ret_type, type_descs, aliases, module_path)
       body_start += 2
   anchor_module_paths(type_descs, module_path)
   register_type_descs(type_registry, type_descs, module_path)

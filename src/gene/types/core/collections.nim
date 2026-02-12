@@ -265,7 +265,9 @@ proc materialize_scope_tracker*(snapshot: ScopeTrackerSnapshot): ScopeTracker =
   for pair in snapshot.mappings:
     result.mappings[pair[0]] = pair[1]
 
-proc new_function_def_info*(tracker: ScopeTracker, body: CompilationUnit = nil, input: Value = NIL): FunctionDefInfo =
+proc new_function_def_info*(tracker: ScopeTracker, body: CompilationUnit = nil, input: Value = NIL,
+                            type_expectation_ids: seq[TypeId] = @[],
+                            return_type_id: TypeId = NO_TYPE_ID): FunctionDefInfo =
   var body_value = NIL
   if body != nil:
     let cu_ref = new_ref(VkCompiledUnit)
@@ -275,7 +277,9 @@ proc new_function_def_info*(tracker: ScopeTracker, body: CompilationUnit = nil, 
   result = FunctionDefInfo(
     input: input,
     scope_tracker: tracker,
-    compiled_body: body_value
+    compiled_body: body_value,
+    type_expectation_ids: type_expectation_ids,
+    return_type_id: return_type_id
   )
 
 proc to_value*(info: FunctionDefInfo): Value =

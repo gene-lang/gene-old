@@ -2898,9 +2898,11 @@ proc exec*(self: ptr VirtualMachine): Value =
             if self.cu.type_registry == nil:
               self.cu.type_registry = populate_registry(self.cu.type_descriptors, self.cu.module_path)
             to_function(info.input, self.cu.type_descriptors, self.cu.type_aliases,
-              self.cu.module_path, self.cu.type_registry)
+              self.cu.module_path, self.cu.type_registry,
+              info.type_expectation_ids, info.return_type_id)
           else:
-            to_function(info.input)
+            to_function(info.input, type_expectation_ids = info.type_expectation_ids,
+              return_type_id = info.return_type_id)
 
         # Determine the target namespace for the function
         var target_ns = self.frame.ns
