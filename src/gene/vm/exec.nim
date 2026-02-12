@@ -101,11 +101,8 @@ proc exec*(self: ptr VirtualMachine): Value =
           if is_function_like(self.frame.kind) and self.frame.target.kind == VkFunction:
             let f = self.frame.target.ref.fn
 
-            # Validate return type for implicit returns (function reached end)
-            if self.type_check and f.matcher.return_type_id != NO_TYPE_ID and f.matcher.type_descriptors.len > 0:
-              if result_val != NIL:
-                let warning = validate_or_coerce_type(result_val, f.matcher.return_type_id, f.matcher.type_descriptors, "return value of " & f.name)
-                emit_type_warning(warning)
+            # Validate return type for implicit returns (function reached end).
+            self.validate_return_type_constraint(result_val)
 
             if f.async:
               # Wrap the return value in a future
@@ -171,14 +168,11 @@ proc exec*(self: ptr VirtualMachine): Value =
         let value = self.frame.pop()  # Pop the value from the stack
         if self.frame.scope.isNil:
           not_allowed("IkVar: scope is nil")
-        # Type check: first from instruction arg1, then from scope tracker
-        if self.type_check:
-          let expected_id =
-            if inst.arg1 != NO_TYPE_ID: inst.arg1.TypeId
-            else: expected_type_id_for(self.frame.scope.tracker, index)
-          if value != NIL and expected_id != NO_TYPE_ID:
-            if self.cu != nil and self.cu.type_descriptors.len > 0:
-              validate_type(value, expected_id, self.cu.type_descriptors, "variable")
+        # Type check: first from instruction arg1, then from scope tracker metadata.
+        if inst.arg1 != NO_TYPE_ID and self.type_check and value != NIL and self.cu != nil and self.cu.type_descriptors.len > 0:
+          validate_type(value, inst.arg1.TypeId, self.cu.type_descriptors, "variable")
+        else:
+          self.validate_local_type_constraint(self.frame.scope.tracker, index, value)
         # Ensure the scope has enough space for the index
         while self.frame.scope.members.len <= index:
           self.frame.scope.members.add(NIL)
@@ -195,11 +189,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         {.push checks: off}
         let index = inst.arg1.int
         let value = inst.arg0
-        if self.type_check:
-          let expected_id = expected_type_id_for(self.frame.scope.tracker, index)
-          if value != NIL and expected_id != NO_TYPE_ID:
-            if self.cu != nil and self.cu.type_descriptors.len > 0:
-              validate_type(value, expected_id, self.cu.type_descriptors, "variable")
+        self.validate_local_type_constraint(self.frame.scope.tracker, index, value)
         # Ensure the scope has enough space for the index
         while self.frame.scope.members.len <= index:
           self.frame.scope.members.add(NIL)
@@ -250,11 +240,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         let index = inst.arg0.int64.int
         if index >= self.frame.scope.members.len:
           raise new_exception(types.Exception, fmt"IkVarAssign: index {index} >= scope.members.len {self.frame.scope.members.len}")
-        if self.type_check:
-          let expected_id = expected_type_id_for(self.frame.scope.tracker, index)
-          if value != NIL and expected_id != NO_TYPE_ID:
-            if self.cu != nil and self.cu.type_descriptors.len > 0:
-              validate_type(value, expected_id, self.cu.type_descriptors, "variable")
+        self.validate_local_type_constraint(self.frame.scope.tracker, index, value)
         self.frame.scope.members[index] = value
         {.pop.}
 
@@ -270,11 +256,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         if scope == nil:
           raise new_exception(types.Exception, "IkVarAssignInherited: scope is nil")
         let index = inst.arg0.int64.int
-        if self.type_check:
-          let expected_id = expected_type_id_for(scope.tracker, index)
-          if value != NIL and expected_id != NO_TYPE_ID:
-            if self.cu != nil and self.cu.type_descriptors.len > 0:
-              validate_type(value, expected_id, self.cu.type_descriptors, "variable")
+        self.validate_local_type_constraint(scope.tracker, index, value)
         while scope.members.len <= index:
           scope.members.add(NIL)
         {.push checks: off}
@@ -2269,7 +2251,9 @@ proc exec*(self: ptr VirtualMachine): Value =
         let current = self.frame.scope.members[index]
         if current.kind == VkInt:
           self.frame.scope.members[index] = (current.int64 + 1).to_value()
-          self.frame.push(self.frame.scope.members[index])
+          let updated = self.frame.scope.members[index]
+          self.validate_local_type_constraint(self.frame.scope.tracker, index, updated)
+          self.frame.push(updated)
         else:
           not_allowed("Cannot increment variable of type: " & $current.kind & " (only integers supported)")
         {.pop.}
@@ -2319,7 +2303,9 @@ proc exec*(self: ptr VirtualMachine): Value =
         let current = self.frame.scope.members[index]
         if current.kind == VkInt:
           self.frame.scope.members[index] = (current.int64 - 1).to_value()
-          self.frame.push(self.frame.scope.members[index])
+          let updated = self.frame.scope.members[index]
+          self.validate_local_type_constraint(self.frame.scope.tracker, index, updated)
+          self.frame.push(updated)
         else:
           not_allowed("Cannot decrement variable of type: " & $current.kind & " (only integers supported)")
         {.pop.}
@@ -3060,13 +3046,8 @@ proc exec*(self: ptr VirtualMachine): Value =
         else:
           var v = self.frame.pop()
 
-          # Validate return type if the function/method has one declared
-          if self.type_check and is_function_like(self.frame.kind) and self.frame.target.kind == VkFunction:
-            let f = self.frame.target.ref.fn
-            if f.matcher.return_type_id != NO_TYPE_ID and f.matcher.type_descriptors.len > 0:
-              if v != NIL:  # nil passes all type checks (consistent with param handling)
-                let warning = validate_or_coerce_type(v, f.matcher.return_type_id, f.matcher.type_descriptors, "return value of " & f.name)
-                emit_type_warning(warning)
+          # Validate return type if the function/method has one declared.
+          self.validate_return_type_constraint(v)
 
           # Check if we're returning from a function called by exec_function
           let returning_from_exec_function = self.frame.from_exec_function
@@ -4053,6 +4034,8 @@ proc exec*(self: ptr VirtualMachine): Value =
                 if self.frame.caller_frame == nil:
                   self.frame.push(val)
                 else:
+                  var return_value = val
+                  self.validate_return_type_constraint(return_value)
                   # Profile function exit if needed
                   if self.profiling:
                     self.exit_function()
@@ -4063,7 +4046,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                   inst = self.cu.instructions[self.pc].addr
                   self.frame.update(self.frame.caller_frame)
                   self.frame.ref_count.dec()
-                  self.frame.push(val)  # Push the Err/None as return value
+                  self.frame.push(return_value)  # Push the Err/None as return value
                   continue
               else:
                 # Not a Result/Option, just push it back (no-op)
@@ -4141,7 +4124,10 @@ proc exec*(self: ptr VirtualMachine): Value =
       of IkSetLocal:
         # Optimized local variable set
         {.push checks: off.}
-        self.frame.scope.members[inst.arg0.int64.int] = self.frame.current()
+        let local_idx = inst.arg0.int64.int
+        let value = self.frame.current()
+        self.validate_local_type_constraint(self.frame.scope.tracker, local_idx, value)
+        self.frame.scope.members[local_idx] = value
         {.pop.}
 
       of IkAddLocal:
@@ -4151,7 +4137,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         let local_idx = inst.arg0.int64.int
         let current = self.frame.scope.members[local_idx]
         # Inline add operation for performance
-        let sum_result = case current.kind:
+        var sum_result = case current.kind:
           of VkInt:
             case val.kind:
               of VkInt: (current.int64 + val.int64).to_value()
@@ -4163,6 +4149,7 @@ proc exec*(self: ptr VirtualMachine): Value =
               of VkFloat: add_float_fast(current.float, val.float)
               else: current  # Fallback
           else: current  # Fallback
+        self.validate_local_type_constraint(self.frame.scope.tracker, local_idx, sum_result)
         self.frame.scope.members[local_idx] = sum_result
         self.frame.push(sum_result)
         {.pop.}
@@ -4174,7 +4161,9 @@ proc exec*(self: ptr VirtualMachine): Value =
         let current = self.frame.scope.members[local_idx]
         if current.kind == VkInt:
           self.frame.scope.members[local_idx] = (current.int64 + 1).to_value()
-        self.frame.push(self.frame.scope.members[local_idx])
+        let updated = self.frame.scope.members[local_idx]
+        self.validate_local_type_constraint(self.frame.scope.tracker, local_idx, updated)
+        self.frame.push(updated)
         {.pop.}
 
       of IkDecLocal:
@@ -4184,7 +4173,9 @@ proc exec*(self: ptr VirtualMachine): Value =
         let current = self.frame.scope.members[local_idx]
         if current.kind == VkInt:
           self.frame.scope.members[local_idx] = (current.int64 - 1).to_value()
-        self.frame.push(self.frame.scope.members[local_idx])
+        let updated = self.frame.scope.members[local_idx]
+        self.validate_local_type_constraint(self.frame.scope.tracker, local_idx, updated)
+        self.frame.push(updated)
         {.pop.}
 
       of IkReturnNil:
@@ -4209,6 +4200,8 @@ proc exec*(self: ptr VirtualMachine): Value =
         if self.frame.caller_frame == nil:
           return TRUE
         else:
+          var result_value = TRUE
+          self.validate_return_type_constraint(result_value)
           let returning_frame = self.frame
           self.pop_frame_exception_handlers(returning_frame)
           if self.current_exception != NIL:
@@ -4218,7 +4211,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           inst = self.cu.instructions[self.pc].addr
           self.frame.update(self.frame.caller_frame)
           self.frame.ref_count.dec()
-          self.frame.push(TRUE)
+          self.frame.push(result_value)
           continue
 
       of IkReturnFalse:
@@ -4226,6 +4219,8 @@ proc exec*(self: ptr VirtualMachine): Value =
         if self.frame.caller_frame == nil:
           return FALSE
         else:
+          var result_value = FALSE
+          self.validate_return_type_constraint(result_value)
           let returning_frame = self.frame
           self.pop_frame_exception_handlers(returning_frame)
           if self.current_exception != NIL:
@@ -4235,7 +4230,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           inst = self.cu.instructions[self.pc].addr
           self.frame.update(self.frame.caller_frame)
           self.frame.ref_count.dec()
-          self.frame.push(FALSE)
+          self.frame.push(result_value)
           continue
 
       # Unified call instructions

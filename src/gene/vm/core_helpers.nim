@@ -11,6 +11,31 @@ proc expected_type_id_for(tracker: ScopeTracker, index: int): TypeId {.inline.} 
     return NO_TYPE_ID
   tracker.type_expectation_ids[index]
 
+proc validate_local_type_constraint(self: ptr VirtualMachine, tracker: ScopeTracker, index: int,
+                                    value: Value, context = "variable") {.inline.} =
+  if self == nil or tracker == nil or not self.type_check:
+    return
+  if value == NIL or self.cu == nil or self.cu.type_descriptors.len == 0:
+    return
+  let expected_id = expected_type_id_for(tracker, index)
+  if expected_id == NO_TYPE_ID:
+    return
+  validate_type(value, expected_id, self.cu.type_descriptors, context)
+
+proc validate_return_type_constraint(self: ptr VirtualMachine, value: var Value) {.inline.} =
+  if self == nil or not self.type_check:
+    return
+  if self.frame == nil or self.frame.target.kind != VkFunction:
+    return
+  let f = self.frame.target.ref.fn
+  if f == nil or f.matcher == nil:
+    return
+  if value == NIL or f.matcher.return_type_id == NO_TYPE_ID or f.matcher.type_descriptors.len == 0:
+    return
+  let warning = validate_or_coerce_type(value, f.matcher.return_type_id, f.matcher.type_descriptors,
+    "return value of " & f.name)
+  emit_type_warning(warning)
+
 proc find_named_type_descriptor(cu: CompilationUnit, name: string): tuple[type_id: TypeId, desc: TypeDesc, found: bool] =
   let builtin_id = lookup_builtin_type(name)
   if builtin_id != NO_TYPE_ID:

@@ -372,6 +372,16 @@ suite "GIR CLI":
       raised = true
     check raised
 
+  test "try-unwrap early return enforces descriptor return types":
+    init_all()
+    var raised = false
+    try:
+      discard VM.exec("(fn bad [] -> Int (var v ((Err \"boom\") ?)) v) (bad)", "typed_try_unwrap_return_validation.gene")
+    except CatchableError as e:
+      raised = true
+      check e.msg.contains("return value of bad")
+    check raised
+
   test "runtime function compatibility compares applied args structurally":
     var actual_descs = builtin_type_descs()
     let fn_obj = to_function(parser.read("(fn takes_int_array [a: (Array Int)] a)"), actual_descs)
