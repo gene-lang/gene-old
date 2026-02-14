@@ -1,0 +1,17 @@
+# Args: --contracts=off
+# Disabling contracts should skip pre/post checks
+# Expected: -10
+# Expected: 3
+
+(fn must_be_positive [x: Int] -> Int
+  ^pre [(x > 0)]
+  x
+)
+
+(fn broken_post_off [x: Int] -> Int
+  ^post [(result > x)]
+  x
+)
+
+(println (must_be_positive -10))
+(println (broken_post_off 3))

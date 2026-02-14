@@ -1,0 +1,9 @@
+# Basic postcondition pass
+# Expected: 5
+
+(fn increment [x: Int] -> Int
+  ^post [(result > x)]
+  (x + 1)
+)
+
+(println (increment 4))

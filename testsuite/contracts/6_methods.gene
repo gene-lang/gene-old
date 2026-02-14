@@ -1,0 +1,22 @@
+# Contracts should work for methods
+# ExitCode: 1
+# Expected: Error: Gene exception: ContractViolation: add precondition #1 failed: (delta > 0) | args=[self=VkInstance, delta=-1]
+
+(class Counter
+  (prop value: Int)
+
+  (ctor [value]
+    (/value = value)
+  )
+
+  (method add [delta] -> Int
+    ^pre [(delta > 0)]
+    ^post [(result > (/value - delta))]
+    (/value = (/value + delta))
+    /value
+  )
+)
+
+(var c (new Counter 10))
+(c .add 2)
+(c .add -1)

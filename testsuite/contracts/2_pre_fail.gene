@@ -1,0 +1,10 @@
+# Basic precondition failure should raise ContractViolation
+# ExitCode: 1
+# Expected: Error: Gene exception: ContractViolation: positive_only precondition #1 failed: (x > 0) | args=[x=-2]
+
+(fn positive_only [x: Int] -> Int
+  ^pre [(x > 0)]
+  x
+)
+
+(positive_only -2)

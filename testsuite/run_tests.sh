@@ -43,6 +43,11 @@ run_test() {
     local test_name=$(basename "$test_file" .gene)
     local test_dir=$(dirname "$test_file")
     local test_basename=$(basename "$test_file")
+    local extra_args=$(grep "^# Args:" "$test_file" | sed 's/^# Args: //' | tr '\n' ' ' || true)
+    local expected_exit=$(grep "^# ExitCode:" "$test_file" | head -n 1 | sed 's/^# ExitCode: //' || true)
+    if [ -z "$expected_exit" ]; then
+        expected_exit=0
+    fi
 
     TOTAL=$((TOTAL + 1))
 
@@ -53,54 +58,62 @@ run_test() {
 
         if [ -z "$expected_output" ]; then
             # Empty expected output - just check if it runs
-            if (cd "$test_dir" && run_gene "$test_basename") > /dev/null 2>&1; then
+            set +e
+            (cd "$test_dir" && run_gene $extra_args "$test_basename") > /dev/null 2>&1
+            local exit_code=$?
+            set -e
+            if [ "$exit_code" -eq "$expected_exit" ]; then
                 printf "  %-40s ${GREEN}✓ PASS${NC}\n" "$test_name"
                 PASSED=$((PASSED + 1))
             else
                 printf "  %-40s ${RED}✗ FAIL${NC}\n" "$test_name"
+                echo "    Expected exit code: $expected_exit, actual: $exit_code"
                 FAILED=$((FAILED + 1))
             fi
         else
             # Run test and capture output
-            if actual_output=$(cd "$test_dir" && run_gene "$test_basename" 2>&1); then
-                # Filter out empty lines and compile-time type warnings from actual output
-                # (compile warnings contain "Type error:", runtime warnings like "Lossy conversion" are kept)
-                actual_output=$(echo "$actual_output" | grep -v '^$' | grep -v 'Warning:.*Type error:' || true)
-                
-                # Normalize outputs (remove trailing spaces)
-                echo "$expected_output" | sed 's/[[:space:]]*$//' > /tmp/expected_$$.txt
-                echo "$actual_output" | sed 's/[[:space:]]*$//' > /tmp/actual_$$.txt
-                
-                # Compare outputs
-                if diff -B -w /tmp/expected_$$.txt /tmp/actual_$$.txt > /dev/null 2>&1; then
-                    printf "  %-40s ${GREEN}✓ PASS${NC}\n" "$test_name"
-                    PASSED=$((PASSED + 1))
-                else
-                    printf "  %-40s ${RED}✗ FAIL${NC}\n" "$test_name"
-                    echo "    Expected:"
-                    echo "$expected_output" | sed 's/^/      /'
-                    echo "    Actual:"
-                    echo "$actual_output" | sed 's/^/      /'
-                    FAILED=$((FAILED + 1))
-                fi
-                
-                # Clean up temp files
-                rm -f /tmp/expected_$$.txt /tmp/actual_$$.txt
+            set +e
+            actual_output=$(cd "$test_dir" && run_gene $extra_args "$test_basename" 2>&1)
+            local exit_code=$?
+            set -e
+            # Filter out empty lines and compile-time type warnings from actual output
+            # (compile warnings contain "Type error:", runtime warnings like "Lossy conversion" are kept)
+            actual_output=$(echo "$actual_output" | grep -v '^$' | grep -v 'Warning:.*Type error:' || true)
+
+            # Normalize outputs (remove trailing spaces)
+            echo "$expected_output" | sed 's/[[:space:]]*$//' > /tmp/expected_$$.txt
+            echo "$actual_output" | sed 's/[[:space:]]*$//' > /tmp/actual_$$.txt
+
+            # Compare outputs and exit code
+            if [ "$exit_code" -eq "$expected_exit" ] && diff -B -w /tmp/expected_$$.txt /tmp/actual_$$.txt > /dev/null 2>&1; then
+                printf "  %-40s ${GREEN}✓ PASS${NC}\n" "$test_name"
+                PASSED=$((PASSED + 1))
             else
-                printf "  %-40s ${RED}✗ ERROR${NC}\n" "$test_name"
-                echo "    Error output:"
+                printf "  %-40s ${RED}✗ FAIL${NC}\n" "$test_name"
+                echo "    Expected exit code: $expected_exit, actual: $exit_code"
+                echo "    Expected:"
+                echo "$expected_output" | sed 's/^/      /'
+                echo "    Actual:"
                 echo "$actual_output" | head -5 | sed 's/^/      /'
                 FAILED=$((FAILED + 1))
             fi
+
+            # Clean up temp files
+            rm -f /tmp/expected_$$.txt /tmp/actual_$$.txt
         fi
     else
         # No expected output - just check if it runs without error
-        if (cd "$test_dir" && run_gene "$test_basename") > /dev/null 2>&1; then
+        set +e
+        (cd "$test_dir" && run_gene $extra_args "$test_basename") > /dev/null 2>&1
+        local exit_code=$?
+        set -e
+        if [ "$exit_code" -eq "$expected_exit" ]; then
             printf "  %-40s ${GREEN}✓ PASS${NC}\n" "$test_name"
             PASSED=$((PASSED + 1))
         else
             printf "  %-40s ${RED}✗ FAIL${NC}\n" "$test_name"
-            error_output=$(cd "$test_dir" && run_gene "$test_basename" 2>&1 || true)
+            echo "    Expected exit code: $expected_exit, actual: $exit_code"
+            error_output=$(cd "$test_dir" && run_gene $extra_args "$test_basename" 2>&1 || true)
             echo "    Error output:"
             echo "$error_output" | head -5 | sed 's/^/      /'
             FAILED=$((FAILED + 1))
@@ -156,6 +169,7 @@ else
     run_category "Maps" "maps"
     run_category "Strings" "strings"
     run_category "Functions" "functions"
+    run_category "Contracts" "contracts"
     run_category "Types" "types"
     run_category "Scopes" "scopes"
     run_category "Callable Instances" "callable_instances"

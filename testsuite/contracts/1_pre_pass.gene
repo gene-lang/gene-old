@@ -1,0 +1,9 @@
+# Basic precondition pass
+# Expected: 3
+
+(fn positive_only [x: Int] -> Int
+  ^pre [(x > 0)]
+  x
+)
+
+(println (positive_only 3))

@@ -1,0 +1,10 @@
+# Basic postcondition failure should raise ContractViolation
+# ExitCode: 1
+# Expected: Error: Gene exception: ContractViolation: broken_post postcondition #1 failed: (result > x) | args=[x=4] | result=4
+
+(fn broken_post [x: Int] -> Int
+  ^post [(result > x)]
+  x
+)
+
+(broken_post 4)
