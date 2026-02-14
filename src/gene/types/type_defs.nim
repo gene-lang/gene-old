@@ -577,6 +577,9 @@ type
     trace_stack*: seq[SourceTrace]
     last_error_trace*: SourceTrace
     method_access_mode*: MethodAccessMode
+    contract_fn_name*: string
+    contract_post_conditions*: seq[Value]
+    contract_result_slot*: int16
 
   InstructionKind* {.size: sizeof(int16).} = enum
     IkNoop

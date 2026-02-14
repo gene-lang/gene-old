@@ -9,6 +9,56 @@ proc mark_local_fn(input: Value) =
   if input.kind == VkGene and input.gene != nil:
     input.gene.props[local_def_key()] = TRUE
 
+const
+  CONTRACTS_ENABLED_FN = "__contracts_enabled__"
+  CONTRACT_VIOLATION_FN = "__contract_violation__"
+
+proc contract_call_expr(name: string, args: openArray[Value]): Value =
+  result = new_gene_value()
+  result.gene.type = name.to_symbol_value()
+  for arg in args:
+    result.gene.children.add(arg)
+
+proc contract_condition_text(condition: Value): string =
+  $condition
+
+proc compile_contract_violation(self: Compiler, phase: string, function_name: string,
+                                condition_index: int, condition_text: string,
+                                include_result: bool) =
+  var args: seq[Value] = @[
+    phase.to_value(),
+    function_name.to_value(),
+    condition_index.to_value(),
+    condition_text.to_value(),
+  ]
+  if include_result:
+    args.add("result".to_symbol_value())
+  self.compile(contract_call_expr(CONTRACT_VIOLATION_FN, args))
+  self.emit(Instruction(kind: IkPop))
+
+proc compile_contract_check(self: Compiler, condition: Value, phase: string,
+                            function_name: string, condition_index: int,
+                            include_result = false) =
+  let skip_label = new_label()
+  let fail_label = new_label()
+
+  self.compile(contract_call_expr(CONTRACTS_ENABLED_FN, @[]))
+  self.emit(Instruction(kind: IkJumpIfFalse, arg0: skip_label.to_value()))
+
+  self.compile(condition)
+  self.emit(Instruction(kind: IkJumpIfFalse, arg0: fail_label.to_value()))
+  self.emit(Instruction(kind: IkJump, arg0: skip_label.to_value()))
+
+  self.emit(Instruction(kind: IkNoop, label: fail_label))
+  self.compile_contract_violation(
+    phase,
+    function_name,
+    condition_index,
+    contract_condition_text(condition),
+    include_result
+  )
+  self.emit(Instruction(kind: IkNoop, label: skip_label))
+
 proc compile_fn(self: Compiler, input: Value, define_binding = true) =
   if input.kind == VkGene and input.gene != nil and input.gene.type == "fn".to_symbol_value():
     if input.gene.children.len == 0:

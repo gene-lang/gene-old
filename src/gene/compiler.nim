@@ -556,6 +556,13 @@ proc compile*(f: Function, eager_functions: bool) =
     # Function frames with params already create a runtime scope; avoid extra ScopeStart.
     self.scope_tracker.scope_started = true
 
+  self.contract_fn_name = f.name
+  self.contract_post_conditions = @[]
+  self.contract_result_slot = -1
+
+  for i, condition in f.pre_conditions:
+    self.compile_contract_check(condition, "pre", f.name, i + 1)
+
   # Mark that we're in tail position for the function body
   self.tail_position = true
   self.compile(f.body)
