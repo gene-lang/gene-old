@@ -12,6 +12,7 @@ import ./stdlib/math as stdlib_math
 import ./stdlib/io as stdlib_io
 import ./stdlib/system as stdlib_system
 import ./stdlib/classes as stdlib_classes
+import ./stdlib/regex as stdlib_regex
 import ../genex/ai/ai
 
 # Note: Extensions register their poll handlers via register_scheduler_callback
@@ -3488,7 +3489,7 @@ proc init_gene_namespace*() =
   types.gene_namespace_initialized = true
   let object_class = stdlib_classes.init_basic_classes()
   init_string_class(object_class)
-  init_regex_class(object_class)
+  stdlib_regex.init_regex_class(object_class)
 
   stdlib_classes.init_symbol_classes(object_class)
 
