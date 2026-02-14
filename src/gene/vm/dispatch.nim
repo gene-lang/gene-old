@@ -663,7 +663,9 @@ proc run_intercepted_method(self: ptr VirtualMachine, interception: Interception
         class: nil,
         name: param_name,
         callable: interception.original,
-        is_macro: false
+        is_macro: false,
+        native_param_types: @[],
+        native_return_type: NIL
       )
       let wrapped_ref = new_ref(VkBoundMethod)
       wrapped_ref.bound_method = BoundMethod(

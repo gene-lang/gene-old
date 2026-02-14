@@ -279,25 +279,25 @@ proc init_basic_classes*(): Class =
 
   let int_class = new_class("Int")
   int_class.parent = object_class
-  int_class.def_native_method("to_s", object_to_s_method, @[], "String")
-  int_class.def_native_method("to_i", int_to_i_method, @[], "Int")
-  int_class.def_native_method("to_f", int_to_f_method, @[], "Float")
   r = new_ref(VkClass)
   r.class = int_class
   App.app.int_class = r.to_ref_value()
   App.app.gene_ns.ns["Int".to_key()] = App.app.int_class
   App.app.global_ns.ns["Int".to_key()] = App.app.int_class
+  int_class.def_native_method("to_s", object_to_s_method, @[], App.app.string_class)
+  int_class.def_native_method("to_i", int_to_i_method, @[], App.app.int_class)
 
   let float_class = new_class("Float")
   float_class.parent = object_class
-  float_class.def_native_method("to_s", object_to_s_method, @[], "String")
-  float_class.def_native_method("to_i", float_to_i_method, @[], "Int")
-  float_class.def_native_method("to_f", float_to_f_method, @[], "Float")
   r = new_ref(VkClass)
   r.class = float_class
   App.app.float_class = r.to_ref_value()
   App.app.gene_ns.ns["Float".to_key()] = App.app.float_class
   App.app.global_ns.ns["Float".to_key()] = App.app.float_class
+  float_class.def_native_method("to_s", object_to_s_method, @[], App.app.string_class)
+  float_class.def_native_method("to_i", float_to_i_method, @[], App.app.int_class)
+  float_class.def_native_method("to_f", float_to_f_method, @[], App.app.float_class)
+  int_class.def_native_method("to_f", int_to_f_method, @[], App.app.float_class)
 
   object_class
 
@@ -371,6 +371,8 @@ proc class_fn*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
   let m = Method(
     name: fn.name,
     callable: r.to_ref_value(),
+    native_param_types: @[],
+    native_return_type: NIL,
   )
   case x.kind
   of VkClass:

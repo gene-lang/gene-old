@@ -2753,6 +2753,8 @@ proc exec*(self: ptr VirtualMachine): Value =
           name: name.str,
           callable: fn_value,
           class: class,
+          native_param_types: @[],
+          native_return_type: NIL,
         )
         class.methods[name.str.to_key()] = m
         class.version.inc()

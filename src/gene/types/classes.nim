@@ -197,11 +197,11 @@ proc is_a*(self: Value, class: Class): bool {.inline.} =
       my_class = my_class.parent
 
 proc def_native_method*(self: Class, name: string, f: NativeFn,
-                        params: openArray[(string, string)],
-                        returns: string = "Any") =
+                        params: openArray[(string, Value)],
+                        returns: Value = NIL) =
   let r = new_ref(VkNativeFn)
   r.native_fn = f
-  var native_params: seq[(string, string)] = @[]
+  var native_params: seq[(string, Value)] = @[]
   for p in params:
     native_params.add((p[0], p[1]))
   self.methods[name.to_key()] = Method(
@@ -214,7 +214,7 @@ proc def_native_method*(self: Class, name: string, f: NativeFn,
   self.version.inc()
 
 proc def_native_method*(self: Class, name: string, f: NativeFn) =
-  self.def_native_method(name, f, @[], "Any")
+  self.def_native_method(name, f, @[], NIL)
 
 proc def_member*(self: Class, name: string, value: Value) =
   self.members[name.to_key()] = value
@@ -246,6 +246,8 @@ proc def_native_macro_method*(self: Class, name: string, f: NativeFn) =
     name: name,
     callable: r.to_ref_value(),
     is_macro: true,
+    native_param_types: @[],
+    native_return_type: NIL,
   )
   self.version.inc()
 
@@ -263,7 +265,7 @@ proc new_method*(class: Class, name: string, fn: Function): Method =
     name: name,
     callable: r.to_ref_value(),
     native_param_types: @[],
-    native_return_type: "",
+    native_return_type: NIL,
   )
 
 proc clone*(self: Method): Method =

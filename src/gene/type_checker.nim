@@ -1081,21 +1081,31 @@ proc check_call(self: TypeChecker, callee_type: TypeExpr, args: seq[Value], prop
         self.warn("Warning: Type error: unexpected keyword argument '" & key_name & "' in " & context)
   return self.resolve_self(ct.ret)
 
-proc native_type_from_name(self: TypeChecker, type_name: string): TypeExpr =
-  let name = type_name.strip()
-  if name.len == 0 or name == "Any":
+proc native_type_from_class_value(self: TypeChecker, class_value: Value): TypeExpr =
+  if class_value == NIL or class_value.kind != VkClass:
     return ANY_TYPE
-  case name
-  of "Array":
+  let cls = class_value.ref.class
+  if cls.is_nil or cls.name.len == 0:
+    return ANY_TYPE
+  if cls.name == "Array":
     return TypeExpr(kind: TkApplied, ctor: "Array", args: @[ANY_TYPE])
-  of "Map":
+  if cls.name == "Map":
     return TypeExpr(kind: TkApplied, ctor: "Map", args: @[ANY_TYPE, ANY_TYPE])
-  of "Option":
+  if cls.name == "Option":
     return TypeExpr(kind: TkApplied, ctor: "Option", args: @[ANY_TYPE])
-  of "Result":
+  if cls.name == "Result":
     return TypeExpr(kind: TkApplied, ctor: "Result", args: @[ANY_TYPE, ANY_TYPE])
-  else:
-    return TypeExpr(kind: TkNamed, name: name)
+  return TypeExpr(kind: TkNamed, name: cls.name)
+
+proc class_matches_expected(actual_class: Class, expected_class: Class): bool =
+  if actual_class.is_nil or expected_class.is_nil:
+    return false
+  var current = actual_class
+  while current != nil:
+    if current == expected_class:
+      return true
+    current = current.parent
+  return false
 
 proc runtime_class_for_type(self: TypeChecker, recv_type: TypeExpr): Class =
   let rt = self.resolve(recv_type)
@@ -1134,7 +1144,7 @@ proc check_native_method_call(self: TypeChecker, recv_type: TypeExpr, method_nam
   if runtime_method.is_nil:
     return ANY_TYPE
 
-  if runtime_method.native_param_types.len == 0 and runtime_method.native_return_type.len == 0:
+  if runtime_method.native_param_types.len == 0 and runtime_method.native_return_type == NIL:
     return ANY_TYPE
 
   let expected_count = runtime_method.native_param_types.len
@@ -1157,23 +1167,35 @@ proc check_native_method_call(self: TypeChecker, recv_type: TypeExpr, method_nam
   for i in 0..<check_count:
     let arg_type = self.check_expr(args[i])
     let param = runtime_method.native_param_types[i]
-    let expected_type = self.native_type_from_name(param[1])
+    let expected_class_value = param[1]
+    if expected_class_value == NIL:
+      continue
+    let expected_class = if expected_class_value.kind == VkClass: expected_class_value.ref.class else: nil
+    let actual_class = self.runtime_class_for_type(arg_type)
     let arg_context = context & " " & runtime_class.name & "." & method_name & " arg '" & param[0] & "'"
-    if self.strict:
-      self.unify(expected_type, arg_type, arg_context)
+    if not expected_class.is_nil and not actual_class.is_nil:
+      if not class_matches_expected(actual_class, expected_class):
+        let msg = "Type error: expected " & expected_class.name & ", got " & actual_class.name & " in " & arg_context
+        if self.strict:
+          raise new_exception(types.Exception, msg)
+        else:
+          self.warn("Warning: " & msg)
     else:
-      try:
+      let expected_type = self.native_type_from_class_value(expected_class_value)
+      if self.strict:
         self.unify(expected_type, arg_type, arg_context)
-      except CatchableError as e:
-        self.warn("Warning: " & e.msg)
+      else:
+        try:
+          self.unify(expected_type, arg_type, arg_context)
+        except CatchableError as e:
+          self.warn("Warning: " & e.msg)
 
   for _, value in props:
     discard self.check_expr(value)
 
-  let return_name = runtime_method.native_return_type.strip()
-  if return_name.len == 0:
+  if runtime_method.native_return_type == NIL:
     return ANY_TYPE
-  return self.resolve_self(self.native_type_from_name(return_name))
+  return self.resolve_self(self.native_type_from_class_value(runtime_method.native_return_type))
 
 proc check_method_call(self: TypeChecker, recv_type: TypeExpr, method_name: string, args: seq[Value], props: Table[Key, Value], context: string): TypeExpr =
   let rt = self.resolve(recv_type)

@@ -445,8 +445,8 @@ type
     callable*: Value
     # public*: bool
     is_macro*: bool
-    native_param_types*: seq[(string, string)]  # (param_name, type_name) for native methods
-    native_return_type*: string                  # type name for native method return
+    native_param_types*: seq[(string, Value)]  # (param_name, class_value) for native methods
+    native_return_type*: Value                  # class value; NIL means Any
 
   BoundMethod* = object
     self*: Value
