@@ -11,7 +11,7 @@
 - [x] 2.6 Extract `dates.nim` (Date/DateTime classes and date-related functions).
 - [x] 2.7 Extract `selectors.nim` (`init_selector_class`).
 - [x] 2.8 Extract `gene_meta.nim` (`init_gene_and_meta_classes`).
-- [ ] 2.9 Extract `aspects.nim` (AOP macro/application/interception setup).
+- [x] 2.9 Extract `aspects.nim` (AOP macro/application/interception setup).
 - [ ] 2.10 Extract `core.nim` (core builtins, VM utilities, env/base64/scheduler helpers, namespace wiring) and thin `src/gene/stdlib.nim` orchestrator.
 
 ## 3. Validation

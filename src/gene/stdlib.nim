@@ -19,6 +19,7 @@ import ./stdlib/collections as stdlib_collections
 import ./stdlib/dates as stdlib_dates
 import ./stdlib/selectors as stdlib_selectors
 import ./stdlib/gene_meta as stdlib_gene_meta
+import ./stdlib/aspects as stdlib_aspects
 import ../genex/ai/ai
 
 # Note: Extensions register their poll handlers via register_scheduler_callback
@@ -3597,22 +3598,7 @@ proc init_stdlib*() =
   global_ns["$if_main".to_key()] = core_if_main.to_value()
   global_ns["$repl".to_key()] = NativeFn(core_repl).to_value()
   
-  # AOP - Aspect macro (native macro)
-  var aspect_macro_ref = new_ref(VkNativeMacro)
-  aspect_macro_ref.native_macro = aspect_macro
-  global_ns["aspect".to_key()] = aspect_macro_ref.to_ref_value()
-  
-  # Create Aspect class with apply method
-  let aspect_class = new_class("Aspect")
-  aspect_class.def_native_method("apply", aspect_apply)
-  aspect_class.def_native_method("apply-fn", aspect_apply_fn)
-  aspect_class.def_native_method("enable-interception", aspect_enable_interception)
-  aspect_class.def_native_method("disable-interception", aspect_disable_interception)
-  var aspect_class_ref = new_ref(VkClass)
-  aspect_class_ref.class = aspect_class
-  App.app.aspect_class = aspect_class_ref.to_ref_value()
-  App.app.gene_ns.ns["Aspect".to_key()] = App.app.aspect_class
-  global_ns["Aspect".to_key()] = App.app.aspect_class
+  stdlib_aspects.init_aspect_support()
 
   load_logging_config()
 
