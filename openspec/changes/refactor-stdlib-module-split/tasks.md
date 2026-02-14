@@ -5,7 +5,7 @@
 ## 2. Implementation
 - [x] 2.1 Extract `classes.nim` (Object/class hierarchy helpers, `init_basic_classes`, class setup utilities).
 - [x] 2.2 Extract `regex.nim` (regex cache/helpers and `init_regex_class`).
-- [ ] 2.3 Extract `json.nim` (JSON parse/stringify helpers and namespace setup).
+- [x] 2.3 Extract `json.nim` (JSON parse/stringify helpers and namespace setup).
 - [ ] 2.4 Extract `strings.nim` (`init_string_class` and string methods).
 - [ ] 2.5 Extract `collections.nim` (Array/Map/Set class initializers and methods).
 - [ ] 2.6 Extract `dates.nim` (Date/DateTime classes and date-related functions).
