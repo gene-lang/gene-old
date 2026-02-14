@@ -1,0 +1,13 @@
+## 1. Implementation
+- [ ] 1.1 Add contract metadata fields to function runtime types and parse `^pre`/`^post` in function construction.
+- [ ] 1.2 Add compiler support to emit precondition checks at function entry.
+- [ ] 1.3 Add compiler support to emit postcondition checks for explicit `return` and implicit function-end returns, binding `result`.
+- [ ] 1.4 Add runtime helper functions for contract gating/violations with detailed diagnostics.
+- [ ] 1.5 Add `--contracts=on|off` to `gene run` and `gene eval` and store setting on VM.
+- [ ] 1.6 Ensure method/constructor lowering preserves function properties needed for contracts.
+- [ ] 1.7 Add tests under `testsuite/contracts/` and wire category into `testsuite/run_tests.sh`.
+
+## 2. Validation
+- [ ] 2.1 Run targeted compile/runtime tests for contracts.
+- [ ] 2.2 Run `./testsuite/run_tests.sh`.
+- [ ] 2.3 Run `openspec validate add-function-contracts --strict`.
