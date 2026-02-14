@@ -22,8 +22,8 @@ proc init_collection_classes*(object_class: Class) =
       array_data(arr).add(value)
     return arr
 
-  array_class.def_native_method("add", vm_array_add)
-  array_class.def_native_method("append", vm_array_add)
+  array_class.def_native_method("add", vm_array_add, @[("value", "Any")], "Array")
+  array_class.def_native_method("append", vm_array_add, @[("value", "Any")], "Array")
 
   proc vm_array_size(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
     let arr = get_positional_arg(args, 0, has_keyword_args)
@@ -31,8 +31,28 @@ proc init_collection_classes*(object_class: Class) =
       return array_data(arr).len.to_value()
     return 0.to_value()
 
-  array_class.def_native_method("size", vm_array_size)
-  array_class.def_native_method("length", vm_array_size)
+  array_class.def_native_method("size", vm_array_size, @[], "Int")
+  array_class.def_native_method("length", vm_array_size, @[], "Int")
+
+  proc vm_array_first(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    let arr = get_positional_arg(args, 0, has_keyword_args)
+    if arr.kind != VkArray:
+      not_allowed("first must be called on an array")
+    if array_data(arr).len == 0:
+      return NIL
+    array_data(arr)[0]
+
+  proc vm_array_last(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    let arr = get_positional_arg(args, 0, has_keyword_args)
+    if arr.kind != VkArray:
+      not_allowed("last must be called on an array")
+    if array_data(arr).len == 0:
+      return NIL
+    let data = array_data(arr)
+    data[data.len - 1]
+
+  array_class.def_native_method("first", vm_array_first, @[], "Any")
+  array_class.def_native_method("last", vm_array_last, @[], "Any")
 
   proc vm_array_get(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
     let arr = get_positional_arg(args, 0, has_keyword_args)
@@ -263,6 +283,7 @@ proc init_collection_classes*(object_class: Class) =
   map_class.def_native_method("set", vm_map_set)
 
   map_class.def_native_method("contains", vm_map_contains)
+  map_class.def_native_method("has", vm_map_contains, @[("key", "Any")], "Bool")
 
   proc vm_map_size(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 1:
@@ -272,7 +293,7 @@ proc init_collection_classes*(object_class: Class) =
       not_allowed("size must be called on a map")
     map_data(map_val).len.to_value()
 
-  map_class.def_native_method("size", vm_map_size)
+  map_class.def_native_method("size", vm_map_size, @[], "Int")
 
   proc vm_map_keys(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 1:
@@ -286,7 +307,7 @@ proc init_collection_classes*(object_class: Class) =
       array_data(result_ref).add(key_val.str.to_value())
     result_ref
 
-  map_class.def_native_method("keys", vm_map_keys)
+  map_class.def_native_method("keys", vm_map_keys, @[], "Array")
 
   proc vm_map_values(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 1:
@@ -299,7 +320,7 @@ proc init_collection_classes*(object_class: Class) =
       array_data(result_ref).add(value)
     result_ref
 
-  map_class.def_native_method("values", vm_map_values)
+  map_class.def_native_method("values", vm_map_values, @[], "Array")
 
   proc vm_map_map(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 2:

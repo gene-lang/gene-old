@@ -208,6 +208,42 @@ proc object_to_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
   raise new_exception(types.Exception,
     "Type error: cannot convert " & actual_type & " to " & target_type)
 
+proc int_to_i_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
+                     arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  if get_positional_count(arg_count, has_keyword_args) == 0:
+    not_allowed("Int.to_i requires self")
+  let self_arg = get_positional_arg(args, 0, has_keyword_args)
+  if self_arg.kind != VkInt:
+    not_allowed("to_i must be called on an int")
+  self_arg
+
+proc int_to_f_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
+                     arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  if get_positional_count(arg_count, has_keyword_args) == 0:
+    not_allowed("Int.to_f requires self")
+  let self_arg = get_positional_arg(args, 0, has_keyword_args)
+  if self_arg.kind != VkInt:
+    not_allowed("to_f must be called on an int")
+  system.float64(self_arg.int64).to_value()
+
+proc float_to_i_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
+                       arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  if get_positional_count(arg_count, has_keyword_args) == 0:
+    not_allowed("Float.to_i requires self")
+  let self_arg = get_positional_arg(args, 0, has_keyword_args)
+  if self_arg.kind != VkFloat:
+    not_allowed("to_i must be called on a float")
+  system.int64(self_arg.float).to_value()
+
+proc float_to_f_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
+                       arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  if get_positional_count(arg_count, has_keyword_args) == 0:
+    not_allowed("Float.to_f requires self")
+  let self_arg = get_positional_arg(args, 0, has_keyword_args)
+  if self_arg.kind != VkFloat:
+    not_allowed("to_f must be called on a float")
+  self_arg
+
 proc init_basic_classes*(): Class =
   var r: ptr Reference
 
@@ -243,7 +279,9 @@ proc init_basic_classes*(): Class =
 
   let int_class = new_class("Int")
   int_class.parent = object_class
-  int_class.def_native_method("to_s", object_to_s_method)
+  int_class.def_native_method("to_s", object_to_s_method, @[], "String")
+  int_class.def_native_method("to_i", int_to_i_method, @[], "Int")
+  int_class.def_native_method("to_f", int_to_f_method, @[], "Float")
   r = new_ref(VkClass)
   r.class = int_class
   App.app.int_class = r.to_ref_value()
@@ -252,7 +290,9 @@ proc init_basic_classes*(): Class =
 
   let float_class = new_class("Float")
   float_class.parent = object_class
-  float_class.def_native_method("to_s", object_to_s_method)
+  float_class.def_native_method("to_s", object_to_s_method, @[], "String")
+  float_class.def_native_method("to_i", float_to_i_method, @[], "Int")
+  float_class.def_native_method("to_f", float_to_f_method, @[], "Float")
   r = new_ref(VkClass)
   r.class = float_class
   App.app.float_class = r.to_ref_value()

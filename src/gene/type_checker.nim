@@ -1081,6 +1081,100 @@ proc check_call(self: TypeChecker, callee_type: TypeExpr, args: seq[Value], prop
         self.warn("Warning: Type error: unexpected keyword argument '" & key_name & "' in " & context)
   return self.resolve_self(ct.ret)
 
+proc native_type_from_name(self: TypeChecker, type_name: string): TypeExpr =
+  let name = type_name.strip()
+  if name.len == 0 or name == "Any":
+    return ANY_TYPE
+  case name
+  of "Array":
+    return TypeExpr(kind: TkApplied, ctor: "Array", args: @[ANY_TYPE])
+  of "Map":
+    return TypeExpr(kind: TkApplied, ctor: "Map", args: @[ANY_TYPE, ANY_TYPE])
+  of "Option":
+    return TypeExpr(kind: TkApplied, ctor: "Option", args: @[ANY_TYPE])
+  of "Result":
+    return TypeExpr(kind: TkApplied, ctor: "Result", args: @[ANY_TYPE, ANY_TYPE])
+  else:
+    return TypeExpr(kind: TkNamed, name: name)
+
+proc runtime_class_for_type(self: TypeChecker, recv_type: TypeExpr): Class =
+  let rt = self.resolve(recv_type)
+  var class_name = ""
+  case rt.kind
+  of TkNamed:
+    class_name = rt.name
+  of TkApplied:
+    class_name = rt.ctor
+  else:
+    return nil
+
+  if class_name.len == 0:
+    return nil
+  if App.kind != VkApplication:
+    return nil
+
+  let class_key = class_name.to_key()
+  if App.app.gene_ns.kind == VkNamespace and App.app.gene_ns.ns.hasKey(class_key):
+    let class_value = App.app.gene_ns.ns[class_key]
+    if class_value.kind == VkClass:
+      return class_value.ref.class
+  if App.app.global_ns.kind == VkNamespace and App.app.global_ns.ns.hasKey(class_key):
+    let class_value = App.app.global_ns.ns[class_key]
+    if class_value.kind == VkClass:
+      return class_value.ref.class
+  return nil
+
+proc check_native_method_call(self: TypeChecker, recv_type: TypeExpr, method_name: string,
+                              args: seq[Value], props: Table[Key, Value], context: string): TypeExpr =
+  let runtime_class = self.runtime_class_for_type(recv_type)
+  if runtime_class.is_nil:
+    return ANY_TYPE
+
+  let runtime_method = runtime_class.get_method(method_name)
+  if runtime_method.is_nil:
+    return ANY_TYPE
+
+  if runtime_method.native_param_types.len == 0 and runtime_method.native_return_type.len == 0:
+    return ANY_TYPE
+
+  let expected_count = runtime_method.native_param_types.len
+  if args.len < expected_count:
+    let msg = "Type error: too few positional arguments for " & runtime_class.name & "." &
+      method_name & " (expected " & $expected_count & ", got " & $args.len & ") in " & context
+    if self.strict:
+      raise new_exception(types.Exception, msg)
+    else:
+      self.warn("Warning: " & msg)
+  elif args.len > expected_count:
+    let msg = "Type error: too many positional arguments for " & runtime_class.name & "." &
+      method_name & " (expected " & $expected_count & ", got " & $args.len & ") in " & context
+    if self.strict:
+      raise new_exception(types.Exception, msg)
+    else:
+      self.warn("Warning: " & msg)
+
+  let check_count = min(args.len, expected_count)
+  for i in 0..<check_count:
+    let arg_type = self.check_expr(args[i])
+    let param = runtime_method.native_param_types[i]
+    let expected_type = self.native_type_from_name(param[1])
+    let arg_context = context & " " & runtime_class.name & "." & method_name & " arg '" & param[0] & "'"
+    if self.strict:
+      self.unify(expected_type, arg_type, arg_context)
+    else:
+      try:
+        self.unify(expected_type, arg_type, arg_context)
+      except CatchableError as e:
+        self.warn("Warning: " & e.msg)
+
+  for _, value in props:
+    discard self.check_expr(value)
+
+  let return_name = runtime_method.native_return_type.strip()
+  if return_name.len == 0:
+    return ANY_TYPE
+  return self.resolve_self(self.native_type_from_name(return_name))
+
 proc check_method_call(self: TypeChecker, recv_type: TypeExpr, method_name: string, args: seq[Value], props: Table[Key, Value], context: string): TypeExpr =
   let rt = self.resolve(recv_type)
   if rt == nil or rt.kind == TkAny:
@@ -1099,7 +1193,7 @@ proc check_method_call(self: TypeChecker, recv_type: TypeExpr, method_name: stri
       params = params[1..^1]
     let fake = TypeExpr(kind: TkFn, params: params, ret: fn_t.ret, variadic: fn_t.variadic, kw_splat: fn_t.kw_splat, effects: fn_t.effects)
     return self.check_call(fake, args, props, context)
-  return ANY_TYPE
+  return self.check_native_method_call(rt, method_name, args, props, context)
 
 proc check_super_call(self: TypeChecker, gene: ptr Gene): TypeExpr =
   if self.current_class.len == 0:

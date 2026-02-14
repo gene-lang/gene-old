@@ -196,15 +196,25 @@ proc is_a*(self: Value, class: Class): bool {.inline.} =
     else:
       my_class = my_class.parent
 
-proc def_native_method*(self: Class, name: string, f: NativeFn) =
+proc def_native_method*(self: Class, name: string, f: NativeFn,
+                        params: openArray[(string, string)],
+                        returns: string = "Any") =
   let r = new_ref(VkNativeFn)
   r.native_fn = f
+  var native_params: seq[(string, string)] = @[]
+  for p in params:
+    native_params.add((p[0], p[1]))
   self.methods[name.to_key()] = Method(
     class: self,
     name: name,
     callable: r.to_ref_value(),
+    native_param_types: native_params,
+    native_return_type: returns,
   )
   self.version.inc()
+
+proc def_native_method*(self: Class, name: string, f: NativeFn) =
+  self.def_native_method(name, f, @[], "Any")
 
 proc def_member*(self: Class, name: string, value: Value) =
   self.members[name.to_key()] = value
@@ -252,6 +262,8 @@ proc new_method*(class: Class, name: string, fn: Function): Method =
     class: class,
     name: name,
     callable: r.to_ref_value(),
+    native_param_types: @[],
+    native_return_type: "",
   )
 
 proc clone*(self: Method): Method =
@@ -259,6 +271,9 @@ proc clone*(self: Method): Method =
     class: self.class,
     name: self.name,
     callable: self.callable,
+    is_macro: self.is_macro,
+    native_param_types: self.native_param_types,
+    native_return_type: self.native_return_type,
   )
 
 #################### Callable ######################

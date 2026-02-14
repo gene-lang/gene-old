@@ -1,0 +1,47 @@
+# Native method type metadata
+# Verifies native method return types are tracked in type checker flow.
+
+(fn expect_int [x: Int] x)
+(fn expect_string [x: String] x)
+(fn expect_float [x: Float] x)
+(fn expect_bool [x: Bool] x)
+(fn expect_array [x: (Array Any)] x)
+
+(var s "Gene")
+(var n (s .length))
+(println (expect_int n))
+# Expected: 4
+
+(var upper (s .to_upper))
+(println (expect_string upper))
+# Expected: GENE
+
+(var parsed ("3.5" .to_f))
+(println (expect_float parsed))
+# Expected: 3.5
+
+(var arr [1 2 3])
+(var arr2 (arr .add 4))
+(println (expect_int (arr2 .size)))
+# Expected: 4
+
+(println (arr .first))
+# Expected: 1
+
+(println (arr .last))
+# Expected: 4
+
+(var m {^a 1})
+(println (expect_bool (m .has "a")))
+# Expected: true
+
+(println (len (expect_array (m .keys))))
+# Expected: 1
+
+(var iv 10)
+(println (typeof (iv .to_f)))
+# Expected: Float
+
+(var fv 9.8)
+(println (typeof (fv .to_i)))
+# Expected: Int

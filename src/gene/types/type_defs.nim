@@ -445,6 +445,8 @@ type
     callable*: Value
     # public*: bool
     is_macro*: bool
+    native_param_types*: seq[(string, string)]  # (param_name, type_name) for native methods
+    native_return_type*: string                  # type name for native method return
 
   BoundMethod* = object
     self*: Value

@@ -59,7 +59,7 @@ proc init_string_class*(object_class: Class) =
 
   var append_fn = new_ref(VkNativeFn)
   append_fn.native_fn = string_append
-  string_class.def_native_method("append", append_fn.native_fn)
+  string_class.def_native_method("append", append_fn.native_fn, @[("value", "String")], "String")
 
   proc string_length(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
     if arg_count < 1:
@@ -73,8 +73,8 @@ proc init_string_class*(object_class: Class) =
 
   var length_fn = new_ref(VkNativeFn)
   length_fn.native_fn = string_length
-  string_class.def_native_method("length", length_fn.native_fn)
-  string_class.def_native_method("size", length_fn.native_fn)
+  string_class.def_native_method("length", length_fn.native_fn, @[], "Int")
+  string_class.def_native_method("size", length_fn.native_fn, @[], "Int")
 
   proc string_to_i(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
     if get_positional_count(arg_count, has_keyword_args) < 1:
@@ -90,7 +90,23 @@ proc init_string_class*(object_class: Class) =
     except ValueError:
       not_allowed("to_i requires a numeric string")
 
-  string_class.def_native_method("to_i", string_to_i)
+  string_class.def_native_method("to_i", string_to_i, @[], "Int")
+
+  proc string_to_f(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("String.to_f requires self argument")
+    let self_arg = get_positional_arg(args, 0, has_keyword_args)
+    if self_arg.kind != VkString:
+      not_allowed("to_f can only be called on a string")
+    let trimmed = self_arg.str.strip()
+    if trimmed.len == 0:
+      not_allowed("to_f requires a numeric string")
+    try:
+      return trimmed.parseFloat().to_value()
+    except ValueError:
+      not_allowed("to_f requires a numeric string")
+
+  string_class.def_native_method("to_f", string_to_f, @[], "Float")
 
   proc string_to_upper(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
     if arg_count < 1:
@@ -104,7 +120,7 @@ proc init_string_class*(object_class: Class) =
 
   var to_upper_fn = new_ref(VkNativeFn)
   to_upper_fn.native_fn = string_to_upper
-  string_class.def_native_method("to_upper", to_upper_fn.native_fn)
+  string_class.def_native_method("to_upper", to_upper_fn.native_fn, @[], "String")
 
   proc string_to_lower(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
     if arg_count < 1:
@@ -118,7 +134,7 @@ proc init_string_class*(object_class: Class) =
 
   var to_lower_fn = new_ref(VkNativeFn)
   to_lower_fn.native_fn = string_to_lower
-  string_class.def_native_method("to_lower", to_lower_fn.native_fn)
+  string_class.def_native_method("to_lower", to_lower_fn.native_fn, @[], "String")
   string_class.def_native_method("to_lowercase", to_lower_fn.native_fn)
 
   proc string_to_uppercase(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
