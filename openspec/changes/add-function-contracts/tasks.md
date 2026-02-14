@@ -10,4 +10,4 @@
 ## 2. Validation
 - [x] 2.1 Run targeted compile/runtime tests for contracts.
 - [x] 2.2 Run `./testsuite/run_tests.sh`.
-- [ ] 2.3 Run `openspec validate add-function-contracts --strict`.
+- [x] 2.3 Run `openspec validate add-function-contracts --strict`.
