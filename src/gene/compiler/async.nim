@@ -50,7 +50,12 @@ proc compile_spawn(self: Compiler, gene: ptr Gene) =
     # Treat presence with NIL/placeholder as true, otherwise use bool value
     return_value = (v == NIL or v == PLACEHOLDER) or v.to_bool()
 
-  let expr = gene.children[0]
+  # Preserve full spawn body. A single form is passed directly; multiple
+  # forms are wrapped as a stream so the worker executes them sequentially.
+  let expr = if gene.children.len == 1:
+    gene.children[0]
+  else:
+    new_stream_value(gene.children)
 
   # Pass the Gene AST as-is to the thread (it will compile locally)
   # This avoids sharing CompilationUnit refs across threads

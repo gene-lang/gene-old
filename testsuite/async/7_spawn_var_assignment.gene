@@ -1,0 +1,31 @@
+# Spawn thread variable assignment should persist across statements
+
+(var f1 (spawn ^^return
+  (var x 5)
+  (x = (x + 10))
+  x
+))
+(println (await f1))
+# Expected: 15
+
+(var f2 (spawn ^^return
+  (var x 0)
+  (x += 1)
+  (x += 1)
+  (x += 1)
+  x
+))
+(println (await f2))
+# Expected: 3
+
+(var f3 (spawn ^^return
+  (var sum 0)
+  (var i 1)
+  (while (i <= 100)
+    (sum = (sum + i))
+    (i = (i + 1))
+  )
+  sum
+))
+(println (await f3))
+# Expected: 5050
