@@ -2160,8 +2160,29 @@ proc check_complex_symbol(self: TypeChecker, sym: Value): TypeExpr =
       return ANY_TYPE
   return ANY_TYPE
 
+proc infer_map_value_type(self: TypeChecker, map_value: Value): TypeExpr =
+  var inferred: TypeExpr = nil
+  for _, item in map_data(map_value):
+    let item_type = self.resolve(self.check_expr(item))
+    if inferred == nil:
+      inferred = item_type
+    elif item_type.kind == TkVar or inferred.kind == TkVar:
+      # Avoid over-constraining unresolved type variables in map literals.
+      inferred = ANY_TYPE
+    else:
+      try:
+        self.unify(inferred, item_type, "map")
+      except CatchableError:
+        inferred = ANY_TYPE
+
+  if inferred == nil:
+    return ANY_TYPE
+  inferred
+
 proc check_expr(self: TypeChecker, v: Value): TypeExpr =
   case v.kind
+  of VkNil:
+    return TypeExpr(kind: TkNamed, name: "Nil")
   of VkInt:
     return TypeExpr(kind: TkNamed, name: "Int")
   of VkFloat:
@@ -2195,7 +2216,8 @@ proc check_expr(self: TypeChecker, v: Value): TypeExpr =
       elem_type = ANY_TYPE
     return TypeExpr(kind: TkApplied, ctor: "Array", args: @[elem_type])
   of VkMap:
-    return TypeExpr(kind: TkApplied, ctor: "Map", args: @[ANY_TYPE, ANY_TYPE])
+    let value_type = self.infer_map_value_type(v)
+    return TypeExpr(kind: TkApplied, ctor: "Map", args: @[TypeExpr(kind: TkNamed, name: "Symbol"), value_type])
   of VkGene:
     let gene = v.gene
     if gene == nil:
