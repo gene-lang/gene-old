@@ -77,6 +77,8 @@ include ./vm/exec_support
 include ./vm/entry
 include ./vm/runtime_helpers
 
+set_vm_exec_callable_hook(exec_callable)
+
 include "./stdlib"
 
 # Temporarily import http and sqlite modules until extension loading is fixed

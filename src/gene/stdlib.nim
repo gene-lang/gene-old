@@ -15,6 +15,7 @@ import ./stdlib/classes as stdlib_classes
 import ./stdlib/regex as stdlib_regex
 import ./stdlib/json as stdlib_json
 import ./stdlib/strings as stdlib_strings
+import ./stdlib/collections as stdlib_collections
 import ../genex/ai/ai
 
 # Note: Extensions register their poll handlers via register_scheduler_callback
@@ -3495,7 +3496,7 @@ proc init_gene_namespace*() =
 
   stdlib_classes.init_symbol_classes(object_class)
 
-  init_collection_classes(object_class)
+  stdlib_collections.init_collection_classes(object_class)
 
   init_date_classes(object_class)
 
@@ -3504,7 +3505,7 @@ proc init_gene_namespace*() =
 
   init_selector_class(object_class)
   
-  init_set_class(object_class)
+  stdlib_collections.init_set_class(object_class)
   init_gene_and_meta_classes(object_class)
 
   init_gene_core_functions()

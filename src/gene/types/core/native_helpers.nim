@@ -80,3 +80,15 @@ proc call_native_fn*(fn: NativeFn, vm: ptr VirtualMachine, args: openArray[Value
     return fn(vm, nil, 0, has_keyword_args)
   else:
     return fn(vm, cast[ptr UncheckedArray[Value]](args[0].unsafeAddr), args.len, has_keyword_args)
+
+type VmExecCallableHook* = proc(vm: ptr VirtualMachine, callable: Value, args: seq[Value]): Value {.nimcall.}
+
+var vm_exec_callable_hook*: VmExecCallableHook
+
+proc set_vm_exec_callable_hook*(hook: VmExecCallableHook) {.inline.} =
+  vm_exec_callable_hook = hook
+
+proc vm_exec_callable*(vm: ptr VirtualMachine, callable: Value, args: seq[Value]): Value {.inline.} =
+  if vm_exec_callable_hook.isNil:
+    not_allowed("VM callable hook is not initialized")
+  vm_exec_callable_hook(vm, callable, args)

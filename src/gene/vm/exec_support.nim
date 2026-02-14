@@ -210,7 +210,7 @@ proc exec_method_kw*(self: ptr VirtualMachine, fn: Value, instance: Value, args:
                      kw_pairs: seq[(Key, Value)]): Value {.exportc.} =
   return self.exec_method_kw_impl(fn, instance, args, kw_pairs, self.frame)
 
-proc exec_callable*(self: ptr VirtualMachine, callable: Value, args: seq[Value]): Value =
+proc exec_callable*(self: ptr VirtualMachine, callable: Value, args: seq[Value]): Value {.exportc.} =
   ## Execute a callable from native code while preserving VM state.
   ## This is safe to call from native functions/methods that need to invoke Gene callables.
   case callable.kind:
