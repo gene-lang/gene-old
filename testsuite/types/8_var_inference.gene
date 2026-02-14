@@ -1,0 +1,56 @@
+# Var type inference and annotation override behavior
+
+(fn expect_int [x: Int] x)
+(fn expect_float [x: Float] x)
+(fn expect_string [x: String] x)
+(fn expect_bool [x: Bool] x)
+(fn expect_nil [x: Nil] x)
+(fn expect_array_int [x: (Array Int)] x)
+(fn expect_map_symbol_int [x: (Map Symbol Int)] x)
+
+(var i 1)
+(println (expect_int i))
+# Expected: 1
+
+(var f 1.5)
+(println (expect_float f))
+# Expected: 1.5
+
+(var s "hello")
+(println (expect_string s))
+# Expected: hello
+
+(var b true)
+(println (expect_bool b))
+# Expected: true
+
+(var n nil)
+(println (expect_nil n))
+# Expected: nil
+
+(var arr [1 2 3])
+(println (len (expect_array_int arr)))
+# Expected: 3
+
+(var m {^a 1 ^b 2})
+(var checked_map (expect_map_symbol_int m))
+(println checked_map/a)
+# Expected: 1
+
+(fn returns_int [] -> Int 42)
+(var from_call (returns_int))
+(println (expect_int from_call))
+# Expected: 42
+
+(var dyn: Any 1)
+(dyn = "text")
+(println dyn)
+# Expected: text
+
+(var inferred 1)
+(inferred = "text")
+(try
+  (expect_int inferred)
+catch *
+  (println "type mismatch"))
+# Expected: type mismatch
