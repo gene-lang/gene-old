@@ -1,7 +1,7 @@
 {.push warning[UnusedImport]: off.}
 import os, tables
 import ./commands/base
-import ./commands/[run, eval, repl, help, parse, compile, gir, lsp, pipe]
+import ./commands/[run, eval, repl, help, parse, compile, gir, lsp, pipe, fmt]
 import ./gene/vm/thread
 import ./gene/types as gene_types
 import ./gene/extension/c_api  # Link C API for extensions
@@ -20,6 +20,7 @@ compile.init(CommandMgr)
 gir.init(CommandMgr)
 lsp.init(CommandMgr)
 pipe.init(CommandMgr)
+fmt.init(CommandMgr)
 
 proc main(): int =
   # Initialize thread pool for multi-threading support

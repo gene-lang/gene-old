@@ -17,6 +17,7 @@ proc handle*(cmd: string, args: seq[string]): CommandResult =
   output &= "Commands:\n"
   output &= "  run      Execute a Gene file\n"
   output &= "  eval     Evaluate Gene code\n"
+  output &= "  fmt      Format Gene source files\n"
   output &= "  pipe     Process stdin line-by-line\n"
   output &= "  repl     Start interactive REPL\n"
   output &= "  parse    Parse Gene code and output AST\n"
@@ -28,6 +29,7 @@ proc handle*(cmd: string, args: seq[string]): CommandResult =
   output &= "Examples:\n"
   output &= "  gene run script.gene    # Run a Gene file\n"
   output &= "  gene eval '(+ 1 2)'     # Evaluate an expression\n"
+  output &= "  gene fmt file.gene      # Format a Gene file\n"
   output &= "  gene repl               # Start interactive mode\n"
   output &= "  gene parse file.gene    # Parse and show AST\n"
   
