@@ -1,0 +1,6 @@
+# before
+(var x 1)
+
+# after x
+# between
+(var y {^a 1 ^b 2})

@@ -186,6 +186,21 @@ else
     run_category "Stdlib IO" "stdlib/io"
     # run_category "Stdlib Time" "stdlib/time"
 
+    # Run formatter tests (uses its own test script)
+    if [ -f "$SCRIPT_DIR/fmt/run_tests.sh" ]; then
+        echo -e "${BLUE}Testing Formatter Command:${NC}"
+        if "$SCRIPT_DIR/fmt/run_tests.sh" > /dev/null 2>&1; then
+            printf "  %-40s ${GREEN}✓ PASS${NC}\n" "fmt command suite"
+            PASSED=$((PASSED + 1))
+        else
+            printf "  %-40s ${RED}✗ FAIL${NC}\n" "fmt command suite"
+            echo "    Run 'testsuite/fmt/run_tests.sh' for details"
+            FAILED=$((FAILED + 1))
+        fi
+        TOTAL=$((TOTAL + 1))
+        echo
+    fi
+
     # Run pipe command tests (uses its own test script)
     if [ -f "$SCRIPT_DIR/pipe/run_tests.sh" ]; then
         echo -e "${BLUE}Testing Pipe Command:${NC}"
