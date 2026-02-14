@@ -8,7 +8,7 @@
 - [x] 2.3 Extract `json.nim` (JSON parse/stringify helpers and namespace setup).
 - [x] 2.4 Extract `strings.nim` (`init_string_class` and string methods).
 - [x] 2.5 Extract `collections.nim` (Array/Map/Set class initializers and methods).
-- [ ] 2.6 Extract `dates.nim` (Date/DateTime classes and date-related functions).
+- [x] 2.6 Extract `dates.nim` (Date/DateTime classes and date-related functions).
 - [ ] 2.7 Extract `selectors.nim` (`init_selector_class`).
 - [ ] 2.8 Extract `gene_meta.nim` (`init_gene_and_meta_classes`).
 - [ ] 2.9 Extract `aspects.nim` (AOP macro/application/interception setup).
