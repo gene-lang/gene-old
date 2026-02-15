@@ -30,7 +30,7 @@ task buildllm, "Build LLM runtime dependencies":
   exec "./tools/build_llama_runtime.sh"
 
 task buildwithllm, "Build Gene with LLM support":
-  exec "./tools/build_llama_runtime.sh"
+  # exec "./tools/build_llama_runtime.sh"
   exec "nim c -d:release -d:geneLLM --mm:orc --opt:speed -o:bin/gene src/gene.nim"
 
 task buildcext, "Build C extension example":
