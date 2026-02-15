@@ -47,12 +47,12 @@
 )
 
 # Function with parameters
-(fn add [a b]
+(fn add [a: Int b: Int] -> Int
   (a + b)
 )
 
 # Multi-expression function with return
-(fn calc [x y]
+(fn calc [x: Int y: Int] -> Int
   (var sum (x + y))
   (var product (x * y))
   (println "Sum:" sum "Product:" product)
@@ -60,7 +60,7 @@
 )
 
 # Recursive function
-(fn factorial [n]
+(fn factorial [n: Int] -> Int
   (if (n <= 1)
     1
   else
@@ -175,7 +175,7 @@ else
 # ===== 7. CLASSES & OOP =====
 # Basic class with constructor
 (class Point
-  (ctor [x y]
+  (ctor [x: Int y: Int]
     (/x = x)      # Use / for property access in constructor
     (/y = y)      # /y = self/y
   )
@@ -202,7 +202,7 @@ else
 
 # Nested class
 (class Outer
-  (ctor [data]
+  (ctor [data: Any]
     (/data = data)
   )
   (class Inner        # Outer is like a namespace
@@ -214,7 +214,7 @@ else
 
 # Class with macro constructor (receives unevaluated symbols)
 (class LazyPoint
-  (ctor! [x y]
+  (ctor! [x: Any y: Any]
     (/x = x)      # x and y are unevaluated arguments
     (/y = y)
   )
@@ -239,7 +239,7 @@ catch *
 # ===== 9. ASYNC PROGRAMMING =====
 (var result (await (async 42)))
 
-(fn read_file [filename]
+(fn read_file [filename: String] -> Any
   (gene/io/read_async filename)
 )
 
@@ -247,11 +247,11 @@ catch *
 
 # ===== 10. FUNCTIONAL PROGRAMMING =====
 # Lambda/anonymous function
-(var double (fn [x] (x * 2)))
+(var double (fn [x: Int] -> Int (x * 2)))
 (println "Double 5:" (double 5))
 
 # Function composition
-(fn quadruple [x]
+(fn quadruple [x: Int] -> Int
   (double (double x))
 )
 (println "Quadruple 3:" (quadruple 3))
@@ -314,13 +314,13 @@ catch *
   (ctor []
     (/memory = {})
   )
-  (method store [key value]
+  (method store [key: String value: Any]
     (/memory/key = value)
   )
-  (method recall [key]
+  (method recall [key: String] -> Any
     /memory/key
   )
-  (method add [x y]
+  (method add [x: Int y: Int] -> Int
     (var result (x + y))
     (.store "last" result)
     result
@@ -340,11 +340,11 @@ catch *
 
 # ===== 18. FINAL COMPLEX EXAMPLE =====
 (class API
-  (ctor [base_url]
+  (ctor [base_url: String]
     (/url = base_url)
     (/cache = {})
   )
-  (method request [endpoint]
+  (method request [endpoint: String] -> String
     (var cached = /cache/endpoint)
     (if cached
       cached

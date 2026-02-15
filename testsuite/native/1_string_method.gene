@@ -1,0 +1,18 @@
+# Native string/method/println interop coverage
+# Args: --native-code
+
+(fn shout [s: String] -> String
+  (println (s .length))
+  s/.to_upper
+)
+
+(fn str_len [s: String] -> Int
+  s/.length
+)
+
+(println (shout "gene"))
+(println (str_len "abcd"))
+
+# Expected: 4
+# Expected: GENE
+# Expected: 4
