@@ -1,0 +1,82 @@
+#!/usr/bin/env gene run
+# Gene Multithreaded Programming Examples
+
+# ===== 1. BASIC SPAWN =====
+(println "=== Basic Spawn ===")
+(spawn (println "  Hello from thread!"))
+(gene/sleep 0.2)
+
+# ===== 2. SPAWN WITH RETURN (arithmetic) =====
+(println "=== Spawn with Return ===")
+(var f1 (spawn ^^return (10 * 10)))
+(var f2 (spawn ^^return (20 * 20)))
+(var f3 (spawn ^^return (30 * 30)))
+(println "  10^2 =" (await f1))
+(println "  20^2 =" (await f2))
+(println "  30^2 =" (await f3))
+
+# ===== 3. SPAWN WITH LOOPS =====
+(println "=== Spawn with Loop ===")
+(var sum_future (spawn ^^return
+  (var sum 0)
+  (var i 1)
+  (while (i <= 100)
+    (sum = (sum + i))
+    (i = (i + 1))
+  )
+  sum
+))
+(println "  Sum 1..100 =" (await sum_future))
+
+# ===== 4. MULTIPLE FIRE-AND-FORGET =====
+(println "=== Multiple Fire-and-Forget ===")
+(spawn (println "  Worker A done"))
+(spawn (println "  Worker B done"))
+(spawn (println "  Worker C done"))
+(gene/sleep 0.3)
+
+# ===== 5. PARALLEL DATA PROCESSING =====
+(println "=== Parallel Data Processing ===")
+(var results [])
+
+# Each thread does independent computation
+(var r1 (spawn ^^return
+  (var product 1)
+  (var i 1)
+  (while (i <= 10)
+    (product = (product * i))
+    (i = (i + 1))
+  )
+  product
+))
+
+(var r2 (spawn ^^return
+  # Count multiples of 7 in 0..999, including 0.
+  (var count 0)
+  (var i 0)
+  (while (i < 1000)
+    (count = (count + 1))
+    (i = (i + 7))
+  )
+  count
+))
+
+(var r3 (spawn ^^return
+  # Compute fibonacci iteratively inline
+  (var a 0)
+  (var b 1)
+  (var i 0)
+  (while (i < 30)
+    (var temp (a + b))
+    (a = b)
+    (b = temp)
+    (i = (i + 1))
+  )
+  b
+))
+
+(println "  10! =" (await r1))
+(println "  Multiples of 7 in 0..999 =" (await r2))
+(println "  fib(31) =" (await r3))
+
+(println "=== ALL THREAD EXAMPLES DONE ===")
