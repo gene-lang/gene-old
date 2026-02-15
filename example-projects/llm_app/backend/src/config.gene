@@ -28,6 +28,11 @@
 ($ns/COMFYUI_URL = ($env .get "COMFYUI_URL" "http://127.0.0.1:8188"))
 (println "ComfyUI URL:" COMFYUI_URL)
 
+# HTTP concurrency configuration
+# Set CONCURRENT_MODE=true to enable concurrent HTTP worker mode.
+(var concurrent_mode_str (($env .get "CONCURRENT_MODE" "false") .to_lower))
+($ns/CONCURRENT_MODE = ((concurrent_mode_str == "true") || (concurrent_mode_str == "1") || (concurrent_mode_str == "yes")))
+
 # Apply minimum values
 (if (MODEL_CONTEXT < 256)
   ($ns/MODEL_CONTEXT = 256)

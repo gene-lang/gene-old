@@ -780,6 +780,9 @@ proc init_http_classes*() =
     let worker_handler_fn = new_ref(VkNativeFn)
     worker_handler_fn.native_fn = http_worker_handle_request
     App.app.global_ns.ref.ns["http_worker_handle_request".to_key()] = worker_handler_fn.to_ref_value()
+    # Worker thread execution frames resolve symbols from gene_ns by default,
+    # so the handler must also be available there in concurrent mode.
+    App.app.gene_ns.ref.ns["http_worker_handle_request".to_key()] = worker_handler_fn.to_ref_value()
 
   # Register HTTP poll handler with the scheduler (outside the VmCreatedCallback lambda)
   # This will be called by run_forever in the main scheduler loop
@@ -1303,7 +1306,13 @@ proc handle_request(req: asynchttpserver.Request) {.async, gcsafe.} =
         return
     # If we have a Gene function handler, add to pending requests
     elif gene_handler_global.kind != VkNil:
-      if concurrent_mode and http_gene_workers_initialized:
+      # SSE handlers need the live socket/client pointer from the original
+      # request object, which is not available in worker-thread literal dispatch.
+      let accepts_sse = req.headers.hasKey("Accept") and req.headers["Accept"].toLowerAscii().contains("text/event-stream")
+      let is_stream_path = req.url.path.toLowerAscii().endsWith("/stream")
+      let needs_main_thread = accepts_sse or is_stream_path
+
+      if concurrent_mode and http_gene_workers_initialized and not needs_main_thread:
         # CONCURRENT MODE: Dispatch to Gene worker thread for parallel processing
         let req_literal = server_request_to_literal(gene_req)
 
@@ -1574,9 +1583,6 @@ proc server_stream_close(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value]
 proc vm_respond_sse(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
   if get_positional_count(arg_count, has_keyword_args) < 1:
     raise new_exception(types.Exception, "respond_sse requires a request argument")
-
-  if concurrent_mode:
-    raise new_exception(types.Exception, "respond_sse is not supported in concurrent mode")
 
   let req_val = get_positional_arg(args, 0, has_keyword_args)
   let headers_val =

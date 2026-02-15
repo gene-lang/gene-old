@@ -4,7 +4,7 @@
 # Provides REST API endpoints for chat with a local LLM
 
 # Import modules
-(import PORT from "config")
+(import PORT CONCURRENT_MODE from "config")
 (import init_db from "db")
 (import init_llm from "llm")
 (import chat_id_from_path json_response from "helpers")
@@ -60,5 +60,15 @@
 (println "  POST /api/oneshot - One-shot LLM with tools (no history)")
 (println)
 
-(start_server PORT handle_request)
+(if CONCURRENT_MODE
+  (do
+    (println "HTTP mode: concurrent (^workers 4)")
+    (start_server PORT handle_request ^concurrent true ^workers 4)
+  )
+else
+  (do
+    (println "HTTP mode: single-threaded")
+    (start_server PORT handle_request)
+  )
+)
 (run_forever)
