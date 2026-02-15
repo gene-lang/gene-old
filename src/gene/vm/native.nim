@@ -54,6 +54,8 @@ proc native_trampoline*(
       scratch[i] = args[i].to_value()
     of CatFloat64:
       scratch[i] = cast[float64](args[i]).to_value()
+    of CatValue:
+      scratch[i] = Value(raw: cast[uint64](args[i]))
 
   var boxed: seq[Value]
   if n == 0:
@@ -78,7 +80,8 @@ proc native_trampoline*(
   of CrtFloat64:
     return cast[int64](result_val.to_float())
   of CrtValue:
-    return cast[int64](result_val)
+    retain(result_val)
+    return cast[int64](result_val.raw)
 
 proc try_native_call(self: ptr VirtualMachine, f: Function, args: seq[Value], out_value: var Value): bool =
   if self.effective_native_tier() == NctNever:
@@ -104,6 +107,7 @@ proc try_native_call(self: ptr VirtualMachine, f: Function, args: seq[Value], ou
     # Determine if return value is float (from HIR inference or explicit annotation)
     f.native_return_float = compiled.returnFloat
     f.native_return_string = compiled.returnString
+    f.native_return_value = compiled.returnValue
     f.native_descriptors = compiled.descriptors
 
   var ctx = NativeContext(
@@ -151,6 +155,8 @@ proc try_native_call(self: ptr VirtualMachine, f: Function, args: seq[Value], ou
   # Unbox result: if return type is float, bitcast int64 back to float64
   if f.native_return_float:
     out_value = cast[float64](result_i64).to_value()
+  elif f.native_return_value:
+    out_value = Value(raw: cast[uint64](result_i64))
   elif f.native_return_string:
     let payload = cast[uint64](result_i64) and PAYLOAD_MASK
     out_value = cast[Value](STRING_TAG or payload)

@@ -21,6 +21,7 @@ type
     message*: string
     returnFloat*: bool  # True if native function returns float64 (bitcast as int64)
     returnString*: bool # True if native function returns String* payload
+    returnValue*: bool  # True if native function returns boxed Value bits
     descriptors*: seq[CallDescriptor]
 
 when defined(posix):
@@ -107,6 +108,7 @@ proc compile_to_native*(f: Function): NativeCompileResult =
     result.code = code
     result.returnFloat = hir.returnType == HtF64
     result.returnString = hir.returnType == HtString
+    result.returnValue = hir.returnType in {HtValue, HtString}
     result.descriptors = hir.callDescriptors
   except CatchableError as e:
     if has_hir:

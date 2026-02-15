@@ -40,6 +40,12 @@ type
     # Abstract stack simulation
     stack: seq[StackSlot]
 
+    # Simplified Gene-call state (IkGeneStartDefault ... IkGeneEnd)
+    geneCallActive: bool
+    geneCallTarget: StackSlot
+    geneCallArgs: seq[StackSlot]
+    geneCallHasProps: bool
+
     # Map bytecode PC -> HIR block (for jump targets)
     pcToBlock: Table[int, HirBlockId]
 
@@ -72,6 +78,9 @@ proc typeIdToCallArg(tid: TypeId, outType: var CallArgType): bool =
   of BUILTIN_TYPE_FLOAT_ID:
     outType = CatFloat64
     return true
+  of BUILTIN_TYPE_STRING_ID, BUILTIN_TYPE_BOOL_ID:
+    outType = CatValue
+    return true
   else:
     return false
 
@@ -83,8 +92,24 @@ proc typeIdToCallReturn(tid: TypeId, outType: var CallReturnType): bool =
   of BUILTIN_TYPE_FLOAT_ID:
     outType = CrtFloat64
     return true
+  of BUILTIN_TYPE_STRING_ID, BUILTIN_TYPE_BOOL_ID:
+    outType = CrtValue
+    return true
   else:
     return false
+
+proc classValueToHirType(classValue: Value): HirType =
+  if classValue == NIL or classValue.kind != VkClass:
+    return HtValue
+  if classValue == App.app.int_class:
+    return HtI64
+  if classValue == App.app.float_class:
+    return HtF64
+  if classValue == App.app.string_class:
+    return HtString
+  if classValue == App.app.bool_class:
+    return HtBool
+  HtValue
 
 proc signatureFromMatcher(matcher: RootMatcher, dropFirst: bool,
                            argTypes: var seq[CallArgType],
@@ -224,6 +249,13 @@ proc emitConst(ctx: ConversionContext, val: Value, typ: HirType): HirReg =
   case typ
   of HtF64:
     ctx.builder.emitConstF64(val.to_float())
+  of HtBool:
+    ctx.builder.emitConstBool(val.to_bool())
+  of HtString:
+    if val.kind != VkString:
+      raise newException(ValueError, "Expected string constant")
+    let payload = cast[int64](cast[uint64](val) and PAYLOAD_MASK)
+    ctx.builder.emitConstI64(payload)
   else:
     ctx.builder.emitConstI64(val.to_int())
 
@@ -271,6 +303,122 @@ proc emitNe(ctx: ConversionContext, left, right: HirReg, typ: HirType): HirReg =
   if typ == HtF64: ctx.builder.emitNeF64(left, right)
   else: ctx.builder.emitNeI64(left, right)
 
+proc slotArgType(slot: StackSlot): CallArgType =
+  case slot.typ
+  of HtI64:
+    CatInt64
+  of HtF64:
+    CatFloat64
+  else:
+    CatValue
+
+proc ensureValueReg(ctx: ConversionContext, slot: StackSlot): HirReg =
+  case slot.typ
+  of HtValue:
+    slot.reg
+  of HtString:
+    ctx.builder.emitBoxString(slot.reg)
+  else:
+    raise newException(ValueError, "Cannot box HIR type to Value: " & $slot.typ)
+
+proc callReturnTypeToHir(ret: CallReturnType): HirType =
+  case ret
+  of CrtInt64: HtI64
+  of CrtFloat64: HtF64
+  of CrtValue: HtValue
+
+proc mapMethodParamToArgType(classValue: Value, fallback: StackSlot): CallArgType =
+  case classValueToHirType(classValue)
+  of HtI64:
+    CatInt64
+  of HtF64:
+    CatFloat64
+  else:
+    slotArgType(fallback)
+
+proc prepareCallRegs(ctx: ConversionContext, args: seq[StackSlot], argTypes: seq[CallArgType]): seq[HirReg] =
+  if args.len != argTypes.len:
+    raise newException(ValueError, "Argument count mismatch for native call")
+  result = newSeq[HirReg](args.len)
+  for i in 0..<args.len:
+    case argTypes[i]
+    of CatInt64:
+      if args[i].typ != HtI64:
+        raise newException(ValueError, "Argument type mismatch for CatInt64")
+      result[i] = args[i].reg
+    of CatFloat64:
+      if args[i].typ != HtF64:
+        raise newException(ValueError, "Argument type mismatch for CatFloat64")
+      result[i] = args[i].reg
+    of CatValue:
+      result[i] = ctx.ensureValueReg(args[i])
+
+proc pushCallResult(ctx: ConversionContext, reg: HirReg, rawType: HirType, desiredType: HirType) =
+  if desiredType == HtString and rawType == HtValue:
+    let unboxed = ctx.builder.emitUnboxString(reg)
+    ctx.push(unboxed, HtString)
+  elif desiredType == HtValue or desiredType == rawType:
+    ctx.push(reg, rawType)
+  else:
+    raise newException(ValueError, "Unsupported native call return conversion: " & $rawType & " -> " & $desiredType)
+
+proc resolveClassForType(typ: HirType): Class =
+  case typ
+  of HtString:
+    if App.app.string_class.kind == VkClass: App.app.string_class.ref.class else: nil
+  of HtI64:
+    if App.app.int_class.kind == VkClass: App.app.int_class.ref.class else: nil
+  of HtF64:
+    if App.app.float_class.kind == VkClass: App.app.float_class.ref.class else: nil
+  of HtBool:
+    if App.app.bool_class.kind == VkClass: App.app.bool_class.ref.class else: nil
+  else:
+    nil
+
+proc emitResolvedCall(ctx: ConversionContext,
+                      callable: Value,
+                      args: seq[StackSlot],
+                      argTypes: seq[CallArgType],
+                      retKind: CallReturnType,
+                      desiredType: HirType) =
+  let regs = ctx.prepareCallRegs(args, argTypes)
+  let rawType = callReturnTypeToHir(retKind)
+  let descIdx = ctx.getDescriptorIndex(callable, argTypes, retKind)
+  let resultReg = ctx.builder.emitCallVM(descIdx, regs, rawType)
+  ctx.pushCallResult(resultReg, rawType, desiredType)
+
+proc emitMethodCall(ctx: ConversionContext, obj: StackSlot, methodName: string, args: seq[StackSlot]) =
+  let cls = resolveClassForType(obj.typ)
+  if cls.is_nil:
+    raise newException(ValueError, "Method call receiver type not natively resolvable: " & $obj.typ)
+  let meth = cls.get_method(methodName)
+  if meth.is_nil:
+    raise newException(ValueError, "Method not found for native lowering: " & methodName)
+
+  let callable = meth.callable
+  var callArgs = newSeq[StackSlot](args.len + 1)
+  callArgs[0] = obj
+  for i in 0..<args.len:
+    callArgs[i + 1] = args[i]
+
+  var argTypes: seq[CallArgType] = @[slotArgType(obj)]
+  if meth.native_param_types.len == args.len:
+    for i, item in meth.native_param_types:
+      argTypes.add(mapMethodParamToArgType(item[1], args[i]))
+  else:
+    for arg in args:
+      argTypes.add(slotArgType(arg))
+
+  var desiredType = classValueToHirType(meth.native_return_type)
+  if desiredType == HtBool:
+    desiredType = HtValue
+
+  let retKind = case desiredType
+    of HtI64: CrtInt64
+    of HtF64: CrtFloat64
+    else: CrtValue
+  ctx.emitResolvedCall(callable, callArgs, argTypes, retKind, desiredType)
+
 proc emitCall(ctx: ConversionContext, fnSlot: StackSlot, args: seq[StackSlot]) =
   if fnSlot.fnName.len > 0 and fnSlot.fnName == ctx.fnName:
     let regs = args.mapIt(it.reg)
@@ -287,25 +435,14 @@ proc emitCall(ctx: ConversionContext, fnSlot: StackSlot, args: seq[StackSlot]) =
   var argTypes: seq[CallArgType] = @[]
   var returnType: CallReturnType
   if not callableSignature(callable, argTypes, returnType):
-    raise newException(ValueError, "Call target not eligible for native call: " & $callable.kind)
-  if argTypes.len != args.len:
-    raise newException(ValueError, "Argument count mismatch for native call")
-  for i in 0..<args.len:
-    case argTypes[i]
-    of CatInt64:
-      if args[i].typ != HtI64:
-        raise newException(ValueError, "Argument type mismatch for native call")
-    of CatFloat64:
-      if args[i].typ != HtF64:
-        raise newException(ValueError, "Argument type mismatch for native call")
+    argTypes = @[]
+    for arg in args:
+      argTypes.add(slotArgType(arg))
+    ctx.emitResolvedCall(callable, args, argTypes, CrtValue, HtValue)
+    return
 
-  let retType = case returnType
-    of CrtFloat64: HtF64
-    of CrtInt64: HtI64
-    of CrtValue: HtValue
-  let descIdx = ctx.getDescriptorIndex(callable, argTypes, returnType)
-  let resultReg = ctx.builder.emitCallVM(descIdx, args.mapIt(it.reg), retType)
-  ctx.push(resultReg, retType)
+  let desiredType = callReturnTypeToHir(returnType)
+  ctx.emitResolvedCall(callable, args, argTypes, returnType, desiredType)
 
 # ==================== Instruction Conversion ====================
 
@@ -456,6 +593,17 @@ proc convertInstruction(ctx: ConversionContext, pc: var int): bool =
     let callable = ctx.resolveSymbol(name)
     ctx.push(newHirReg(-1), HtValue, name, callable)
 
+  of IkResolveMethod:
+    let methodName = inst.arg0.str
+    let recv = ctx.peek()
+    let cls = resolveClassForType(recv.typ)
+    if cls.is_nil:
+      raise newException(ValueError, "Cannot resolve method for receiver type: " & $recv.typ)
+    let meth = cls.get_method(methodName)
+    if meth.is_nil:
+      raise newException(ValueError, "Method not found during native lowering: " & methodName)
+    ctx.push(newHirReg(-1), HtValue, methodName, meth.callable)
+
   of IkUnifiedCall0:
     let fnSlot = ctx.pop()
     ctx.emitCall(fnSlot, @[])
@@ -472,6 +620,97 @@ proc convertInstruction(ctx: ConversionContext, pc: var int): bool =
       args[i] = ctx.pop()
     let fnSlot = ctx.pop()
     ctx.emitCall(fnSlot, args)
+
+  of IkUnifiedMethodCall0:
+    let methodName = inst.arg0.str
+    let obj = ctx.pop()
+    ctx.emitMethodCall(obj, methodName, @[])
+
+  of IkUnifiedMethodCall1:
+    let methodName = inst.arg0.str
+    let arg = ctx.pop()
+    let obj = ctx.pop()
+    ctx.emitMethodCall(obj, methodName, @[arg])
+
+  of IkUnifiedMethodCall2:
+    let methodName = inst.arg0.str
+    let arg2 = ctx.pop()
+    let arg1 = ctx.pop()
+    let obj = ctx.pop()
+    ctx.emitMethodCall(obj, methodName, @[arg1, arg2])
+
+  of IkUnifiedMethodCall:
+    let methodName = inst.arg0.str
+    let totalArgs = inst.arg1.int
+    let argCount = if totalArgs > 0: totalArgs - 1 else: 0
+    var args = newSeq[StackSlot](argCount)
+    if argCount > 0:
+      for i in countdown(argCount - 1, 0):
+        args[i] = ctx.pop()
+    let obj = ctx.pop()
+    ctx.emitMethodCall(obj, methodName, args)
+
+  of IkGeneStartDefault:
+    if ctx.geneCallActive:
+      raise newException(ValueError, "Nested IkGeneStartDefault is not supported in native lowering")
+    ctx.geneCallActive = true
+    ctx.geneCallTarget = ctx.pop()
+    ctx.geneCallArgs = @[]
+    ctx.geneCallHasProps = false
+
+  of IkGeneAddChild, IkGeneAdd:
+    if not ctx.geneCallActive:
+      raise newException(ValueError, "IkGeneAddChild outside of IkGeneStartDefault")
+    ctx.geneCallArgs.add(ctx.pop())
+
+  of IkGeneSetProp:
+    if not ctx.geneCallActive:
+      raise newException(ValueError, "IkGeneSetProp outside of IkGeneStartDefault")
+    ctx.geneCallHasProps = true
+    discard ctx.pop() # pop property value expression
+
+  of IkGeneSetPropValue:
+    if not ctx.geneCallActive:
+      raise newException(ValueError, "IkGeneSetPropValue outside of IkGeneStartDefault")
+    ctx.geneCallHasProps = true
+
+  of IkGenePropsSpread:
+    if not ctx.geneCallActive:
+      raise newException(ValueError, "IkGenePropsSpread outside of IkGeneStartDefault")
+    ctx.geneCallHasProps = true
+    discard ctx.pop()
+
+  of IkGeneEnd:
+    if not ctx.geneCallActive:
+      raise newException(ValueError, "IkGeneEnd without IkGeneStartDefault")
+    if ctx.geneCallHasProps:
+      raise newException(ValueError, "Gene call properties are not supported by native lowering")
+    var loweredAsMethod = false
+    if ctx.geneCallTarget.fnName.len > 0 and ctx.geneCallArgs.len > 0:
+      let recv = ctx.geneCallArgs[0]
+      let cls = resolveClassForType(recv.typ)
+      if cls != nil:
+        let meth = cls.get_method(ctx.geneCallTarget.fnName)
+        if meth != nil and meth.callable == ctx.geneCallTarget.callable:
+          let restCount = ctx.geneCallArgs.len - 1
+          var restArgs = newSeq[StackSlot](restCount)
+          for i in 0..<restCount:
+            restArgs[i] = ctx.geneCallArgs[i + 1]
+          ctx.emitMethodCall(recv, ctx.geneCallTarget.fnName, restArgs)
+          loweredAsMethod = true
+    if not loweredAsMethod:
+      ctx.emitCall(ctx.geneCallTarget, ctx.geneCallArgs)
+    ctx.geneCallActive = false
+    ctx.geneCallArgs = @[]
+
+  of IkSwap:
+    let top = ctx.pop()
+    let second = ctx.pop()
+    ctx.stack.add(top)
+    ctx.stack.add(second)
+
+  of IkNoop:
+    discard
 
   of IkAdd:
     let right = ctx.pop()
@@ -581,6 +820,10 @@ proc convertInstruction(ctx: ConversionContext, pc: var int): bool =
     elif val.kind == VkFloat:
       let constReg = ctx.builder.emitConstF64(val.to_float())
       ctx.push(constReg, HtF64)
+    elif val.kind == VkString:
+      let payload = cast[int64](cast[uint64](val) and PAYLOAD_MASK)
+      let constReg = ctx.builder.emitConstI64(payload)
+      ctx.push(constReg, HtString)
     elif val == NIL:
       let constReg = ctx.builder.emitConstI64(0)
       ctx.push(constReg, HtI64)
@@ -593,7 +836,18 @@ proc convertInstruction(ctx: ConversionContext, pc: var int): bool =
   of IkEnd:
     if ctx.stack.len > 0:
       let retVal = ctx.pop()
-      ctx.builder.emitRet(retVal.reg)
+      var retReg = retVal.reg
+      if ctx.returnType == HtString:
+        case retVal.typ
+        of HtString:
+          retReg = ctx.builder.emitBoxString(retVal.reg)
+        of HtValue:
+          discard
+        else:
+          raise newException(ValueError, "String return requires HtString/HtValue, got " & $retVal.typ)
+      elif ctx.returnType == HtValue and retVal.typ == HtString:
+        retReg = ctx.builder.emitBoxString(retVal.reg)
+      ctx.builder.emitRet(retReg)
     return false
 
   else:
@@ -693,6 +947,10 @@ proc bytecodeToHir*(cu: CompilationUnit, fn: Function): HirFunction =
     scopeTracker: if fn != nil: fn.scope_tracker else: nil,
     varTypes: varTypes,
     stack: @[],
+    geneCallActive: false,
+    geneCallTarget: StackSlot(reg: newHirReg(-1), typ: HtValue, fnName: "", callable: NIL),
+    geneCallArgs: @[],
+    geneCallHasProps: false,
     pcToBlock: initTable[int, HirBlockId](),
     emittedBlocks: initTable[int, bool](),
     pendingBlocks: @[],
@@ -753,17 +1011,22 @@ proc isNativeEligible*(cu: CompilationUnit, fn: Function): bool =
       if inst.arg0.kind notin {VkInt, VkFloat}:
         return false
     of IkPushValue:
-      if inst.arg0.kind notin {VkInt, VkFloat}:
+      if inst.arg0.kind notin {VkInt, VkFloat, VkString} and inst.arg0 != NIL:
         return false
     of IkData:
-      if inst.arg0.kind notin {VkInt, VkFloat}:
+      if inst.arg0.kind notin {VkInt, VkFloat, VkString}:
         return false
-    of IkResolveSymbol, IkUnifiedCall0, IkUnifiedCall1, IkUnifiedCall:
+    of IkResolveSymbol, IkResolveMethod,
+       IkUnifiedCall0, IkUnifiedCall1, IkUnifiedCall,
+       IkUnifiedMethodCall0, IkUnifiedMethodCall1, IkUnifiedMethodCall2, IkUnifiedMethodCall:
+      discard
+    of IkGeneStartDefault, IkGeneAddChild, IkGeneAdd,
+       IkGeneSetProp, IkGeneSetPropValue, IkGenePropsSpread, IkGeneEnd:
       discard
     of IkStart, IkJumpIfFalse, IkJump, IkJumpIfMatchSuccess,
        IkAdd, IkSub, IkMul, IkDiv, IkNeg,
        IkLt, IkLe, IkGt, IkGe, IkEq, IkNe,
-       IkPop, IkScopeEnd, IkEnd, IkReturn, IkThrow:
+       IkPop, IkSwap, IkNoop, IkScopeEnd, IkEnd, IkReturn, IkThrow:
       discard
     else:
       return false

@@ -456,6 +456,7 @@ type
   CallArgType* = enum
     CatInt64
     CatFloat64
+    CatValue
 
   CallReturnType* = enum
     CrtInt64
@@ -484,6 +485,7 @@ type
     native_failed*: bool
     native_return_float*: bool  # True if native return value should be interpreted as float64
     native_return_string*: bool # True if native return value is a String* payload
+    native_return_value*: bool  # True if native return value is an already-boxed Value
     native_descriptors*: seq[CallDescriptor]
     pre_conditions*: seq[Value]
     post_conditions*: seq[Value]
