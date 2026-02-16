@@ -12,6 +12,7 @@ type
   Options = ref object
     debugging: bool
     print_result: bool
+    print_last: bool
     csv: bool
     gene: bool
     line: bool
@@ -39,6 +40,7 @@ proc init*(manager: CommandManager) =
   manager.add_help("  --csv: print result as CSV")
   manager.add_help("  --gene: print result as gene expression")
   manager.add_help("  --line: evaluate as a single line")
+  manager.add_help("  --print-last: print the result of the last expression")
 
 let short_no_val = {'d'}
 let long_no_val = @[
@@ -52,6 +54,7 @@ let long_no_val = @[
   "no-typecheck",
   "no-type-check",
   "native-code",
+  "print-last",
 ]
 
 proc parse_native_tier(value: string): NativeCompileTier =
@@ -106,6 +109,8 @@ proc parse_options(args: seq[string]): Options =
         result.compile = true
       of "no-typecheck", "no-type-check":
         result.type_check = false
+      of "print-last":
+        result.print_last = true
       of "native-code":
         result.native_code = true
         if result.native_tier == NctNever:
@@ -236,7 +241,8 @@ proc handle*(cmd: string, args: seq[string]): CommandResult =
         echo $value
     else:
       let value = VM.exec(code, "<eval>")
-      echo $value
+      if options.print_last:
+        echo $value
         
   except CatchableError as e:
     return handle_exec_error(e)
