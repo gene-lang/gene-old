@@ -370,7 +370,7 @@ proc init_collection_classes*(object_class: Class) =
     if map_val.kind != VkMap:
       not_allowed("map must be called on a map")
     let callback = get_positional_arg(args, 1, has_keyword_args)
-    var result_ref = new_map_value()
+    var result_ref = new_array_value()
     case callback.kind
     of VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock:
       for key, value in map_data(map_val):
@@ -378,12 +378,12 @@ proc init_collection_classes*(object_class: Class) =
         var mapped: Value
         {.cast(gcsafe).}:
           mapped = vm_exec_callable(vm, callback, @[key_val, value])
-        map_data(result_ref)[key] = mapped
+        array_data(result_ref).add(mapped)
     else:
       not_allowed("map callback must be callable, got " & $callback.kind)
     result_ref
 
-  map_class.def_native_method("map", vm_map_map, @[("callback", NIL)], App.app.map_class)
+  map_class.def_native_method("map", vm_map_map, @[("callback", NIL)], App.app.array_class)
 
   proc vm_map_filter(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 2:

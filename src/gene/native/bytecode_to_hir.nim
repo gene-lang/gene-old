@@ -439,11 +439,7 @@ proc emitCall(ctx: ConversionContext, fnSlot: StackSlot, args: seq[StackSlot]) =
   var argTypes: seq[CallArgType] = @[]
   var returnType: CallReturnType
   if not callableSignature(callable, argTypes, returnType):
-    argTypes = @[]
-    for arg in args:
-      argTypes.add(slotArgType(arg))
-    ctx.emitResolvedCall(callable, args, argTypes, CrtValue, HtValue)
-    return
+    raise newException(ValueError, "Unresolved or untyped call target for native lowering: " & fnSlot.fnName)
 
   let desiredType = callReturnTypeToHir(returnType)
   ctx.emitResolvedCall(callable, args, argTypes, returnType, desiredType)
