@@ -444,25 +444,50 @@ proc compile_container_assignment(self: Compiler, container_expr: Value, name_sy
     not_allowed("Container assignment target must resolve to a symbol")
   let name_str = name_sym.str
   let (is_index, index) = to_int(name_str)
+  let use_dynamic_member =
+    (not is_index) and
+    container_expr.kind == VkComplexSymbol and
+    container_expr.ref.csymbol.len > 1 and
+    self.scope_tracker.locate(name_sym.str.to_key()).local_index >= 0
+
   self.compile(container_expr)
-  if operator != "=":
-    self.emit(Instruction(kind: IkDup))
+  if operator == "=":
     if is_index:
-      self.emit(Instruction(kind: IkGetChild, arg0: index))
+      self.compile(rhs)
+      self.emit(Instruction(kind: IkSetChild, arg0: index))
+    elif use_dynamic_member:
+      self.compile(name_sym)
+      self.compile(rhs)
+      self.emit(Instruction(kind: IkSetMemberDynamic))
     else:
-      self.emit(Instruction(kind: IkGetMember, arg0: name_sym))
+      self.compile(rhs)
+      self.emit(Instruction(kind: IkSetMember, arg0: name_sym))
+    return
+
+  self.emit(Instruction(kind: IkDup))
+  if is_index:
+    self.emit(Instruction(kind: IkGetChild, arg0: index))
+  elif use_dynamic_member:
+    self.compile(name_sym)
+    self.emit(Instruction(kind: IkGetMemberOrNil))
+  else:
+    self.emit(Instruction(kind: IkGetMember, arg0: name_sym))
+
   self.compile(rhs)
   case operator:
-    of "=":
-      discard
     of "+=":
       self.emit(Instruction(kind: IkAdd))
     of "-=":
       self.emit(Instruction(kind: IkSub))
     else:
       not_allowed("Unsupported compound assignment operator: " & operator)
+
   if is_index:
     self.emit(Instruction(kind: IkSetChild, arg0: index))
+  elif use_dynamic_member:
+    self.compile(name_sym)
+    self.emit(Instruction(kind: IkSwap))
+    self.emit(Instruction(kind: IkSetMemberDynamic))
   else:
     self.emit(Instruction(kind: IkSetMember, arg0: name_sym))
 
@@ -545,6 +570,14 @@ proc compile_assignment(self: Compiler, gene: ptr Gene) =
   elif `type`.kind == VkComplexSymbol:
     let r = translate_symbol(`type`).ref
     let key = r.csymbol[0].to_key()
+    let last_segment = r.csymbol[^1]
+    let (last_is_int, last_index) = to_int(last_segment)
+    let use_dynamic_last_segment =
+      if last_is_int or r.csymbol.len <= 2:
+        false
+      else:
+        let found = self.scope_tracker.locate(last_segment.to_key())
+        found.local_index >= 0
     
     # Load the target object first (for both regular and compound assignment)
     if r.csymbol[0] == "SPECIAL_NS":
@@ -574,10 +607,11 @@ proc compile_assignment(self: Compiler, gene: ptr Gene) =
       self.emit(Instruction(kind: IkDup))
       
       # Get current value
-      let last_segment = r.csymbol[^1]
-      let (is_int, i) = to_int(last_segment)
-      if is_int:
-        self.emit(Instruction(kind: IkGetChild, arg0: i))
+      if last_is_int:
+        self.emit(Instruction(kind: IkGetChild, arg0: last_index))
+      elif use_dynamic_last_segment:
+        self.compile(last_segment.to_symbol_value())
+        self.emit(Instruction(kind: IkGetMemberOrNil))
       else:
         self.emit(Instruction(kind: IkGetMember, arg0: last_segment.to_key()))
       
@@ -595,21 +629,25 @@ proc compile_assignment(self: Compiler, gene: ptr Gene) =
       
       # Now stack should be: [target, new_value]
       # Set the property
-      let last_segment2 = r.csymbol[^1]
-      let (is_int2, i2) = to_int(last_segment2)
-      if is_int2:
-        self.emit(Instruction(kind: IkSetChild, arg0: i2))
+      if last_is_int:
+        self.emit(Instruction(kind: IkSetChild, arg0: last_index))
+      elif use_dynamic_last_segment:
+        self.compile(last_segment.to_symbol_value())
+        self.emit(Instruction(kind: IkSwap))
+        self.emit(Instruction(kind: IkSetMemberDynamic))
       else:
-        self.emit(Instruction(kind: IkSetMember, arg0: last_segment2.to_key()))
+        self.emit(Instruction(kind: IkSetMember, arg0: last_segment.to_key()))
     else:
       # Regular assignment
-      self.compile(gene.children[1])
-      
-      let last_segment = r.csymbol[^1]
-      let (is_int, i) = to_int(last_segment)
-      if is_int:
-        self.emit(Instruction(kind: IkSetChild, arg0: i))
+      if last_is_int:
+        self.compile(gene.children[1])
+        self.emit(Instruction(kind: IkSetChild, arg0: last_index))
+      elif use_dynamic_last_segment:
+        self.compile(last_segment.to_symbol_value())
+        self.compile(gene.children[1])
+        self.emit(Instruction(kind: IkSetMemberDynamic))
       else:
+        self.compile(gene.children[1])
         self.emit(Instruction(kind: IkSetMember, arg0: last_segment.to_key()))
   else:
     not_allowed($`type`)

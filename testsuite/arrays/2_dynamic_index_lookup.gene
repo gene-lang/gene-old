@@ -1,0 +1,12 @@
+# Regression: arr/index should resolve index variables for dynamic array access
+# Expected: 20
+# Expected: true
+# Expected: 30
+
+(var arr [10 20 30])
+(var idx 1)
+(var neg -1)
+
+(println arr/idx)
+(println (arr/idx > 0))
+(println arr/neg)

@@ -1,6 +1,37 @@
 ## The main exec* proc — the instruction dispatch loop.
 ## Included from vm.nim — shares its scope.
 
+proc resolve_local_lookup_value(self: ptr VirtualMachine, key: Key): Value {.inline.} =
+  if self == nil or self.frame == nil or self.frame.scope == nil or self.frame.scope.tracker == nil:
+    return VOID
+
+  let found = self.frame.scope.tracker.locate(key)
+  if found.local_index < 0:
+    return VOID
+
+  var scope = self.frame.scope
+  var depth = found.parent_index
+  while depth > 0 and scope != nil:
+    depth.dec()
+    scope = scope.parent
+
+  if scope == nil:
+    return VOID
+  let index = found.local_index.int
+  if index < 0 or index >= scope.members.len:
+    return VOID
+  scope.members[index]
+
+proc resolve_dynamic_selector_prop(self: ptr VirtualMachine, prop: Value): Value {.inline.} =
+  if prop.kind != VkSymbol and prop.kind != VkString:
+    return prop
+  let resolved = self.resolve_local_lookup_value(prop.str.to_key())
+  case resolved.kind
+  of VkInt, VkString, VkSymbol:
+    resolved
+  else:
+    prop
+
 proc exec*(self: ptr VirtualMachine): Value =
   let root_entry = self.exec_depth == 0
   self.exec_depth.inc()
@@ -808,7 +839,16 @@ proc exec*(self: ptr VirtualMachine): Value =
                 else:
                   not_allowed("Invalid property type: " & $prop.kind)
                   "".to_key()
-              let member = map_data(target).getOrDefault(key, VOID)
+              var member = map_data(target).getOrDefault(key, VOID)
+              if member == VOID and (prop.kind == VkString or prop.kind == VkSymbol):
+                let dynamic_prop = self.resolve_dynamic_selector_prop(prop)
+                if dynamic_prop != prop:
+                  let dynamic_key = case dynamic_prop.kind:
+                    of VkString, VkSymbol: dynamic_prop.str.to_key()
+                    of VkInt: ($dynamic_prop.int64).to_key()
+                    else:
+                      "".to_key()
+                  member = map_data(target).getOrDefault(dynamic_key, VOID)
               retain(member)
               self.frame.push(member)
             of VkGene:
@@ -923,8 +963,11 @@ proc exec*(self: ptr VirtualMachine): Value =
               retain(member)
               self.frame.push(member)
             of VkArray:
-              if prop.kind == VkInt:
-                let idx64 = prop.int64
+              var index_prop = prop
+              if index_prop.kind != VkInt:
+                index_prop = self.resolve_dynamic_selector_prop(index_prop)
+              if index_prop.kind == VkInt:
+                let idx64 = index_prop.int64
                 let arr = array_data(target)
                 let arr_len = arr.len.int64
                 var resolved = idx64
@@ -962,7 +1005,18 @@ proc exec*(self: ptr VirtualMachine): Value =
                 else:
                   not_allowed("Invalid property type: " & $prop.kind)
                   "".to_key()
-              let member = map_data(target).getOrDefault(key, default_val)
+              var member = map_data(target).getOrDefault(key, VOID)
+              if member == VOID and (prop.kind == VkString or prop.kind == VkSymbol):
+                let dynamic_prop = self.resolve_dynamic_selector_prop(prop)
+                if dynamic_prop != prop:
+                  let dynamic_key = case dynamic_prop.kind:
+                    of VkString, VkSymbol: dynamic_prop.str.to_key()
+                    of VkInt: ($dynamic_prop.int64).to_key()
+                    else:
+                      "".to_key()
+                  member = map_data(target).getOrDefault(dynamic_key, VOID)
+              if member == VOID:
+                member = default_val
               retain(member)
               self.frame.push(member)
             of VkGene:
@@ -1051,8 +1105,11 @@ proc exec*(self: ptr VirtualMachine): Value =
               retain(member)
               self.frame.push(member)
             of VkArray:
-              if prop.kind == VkInt:
-                let idx64 = prop.int64
+              var index_prop = prop
+              if index_prop.kind != VkInt:
+                index_prop = self.resolve_dynamic_selector_prop(index_prop)
+              if index_prop.kind == VkInt:
+                let idx64 = index_prop.int64
                 let arr = array_data(target)
                 let arr_len = arr.len.int64
                 var resolved = idx64
@@ -3440,9 +3497,6 @@ proc exec*(self: ptr VirtualMachine): Value =
         let flags = inst.arg1
         let has_container = (flags and 1) != 0
         let local_def = (flags and 2) != 0
-        if has_container:
-          let container_value = self.frame.pop()
-          target_ns = namespace_from_value(container_value)
         case name.kind
         of VkSymbol:
           class_name = name.str
@@ -3461,6 +3515,9 @@ proc exec*(self: ptr VirtualMachine): Value =
           not_allowed("Unsupported class name type: " & $name.kind)
 
         let parent_class = self.frame.pop()
+        if has_container:
+          let container_value = self.frame.pop()
+          target_ns = namespace_from_value(container_value)
         let class = new_class(class_name)
         if parent_class.kind == VkClass:
           class.parent = parent_class.ref.class

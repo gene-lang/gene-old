@@ -681,13 +681,29 @@ proc compile_gene(self: Compiler, input: Value) =
       if first_child.str in ["+", "-", "*", "/", "%", "**", "./", "<", "<=", ">", ">=", "==", "!=", "is"]:
         # Don't convert if the type is already an operator or special form
         if `type`.kind != VkSymbol or `type`.str notin ["var", "if", "fn", "do", "loop", "while", "for", "ns", "class", "try", "throw", "import", "export", "$", "$vm", "$vmstmt", ".", "->", "@"]:
-          # Convert infix to prefix notation and compile
-          # (6 / 2) becomes (/ 6 2)
-          # (i + 1) becomes (+ i 1)
-          let prefix_gene = new_gene()
-          prefix_gene.type = first_child  # operator becomes the type
-          prefix_gene.children = @[`type`] & gene.children[1..^1]  # value and rest of args
-          self.compile_gene(prefix_gene.to_gene_value())
+          # Convert infix chain to nested prefix notation.
+          # (a + b + c) becomes (+ (+ a b) c)
+          # (a + b * c) becomes (* (+ a b) c) (left-associative)
+          let infix_ops = ["+", "-", "*", "/", "%", "**", "./", "<", "<=", ">", ">=", "==", "!=", "is"]
+          var left_expr = `type`
+          var i = 0
+          while i < gene.children.len:
+            let op = gene.children[i]
+            var op_symbol: Value = NIL
+            if op.kind == VkSymbol and op.str in infix_ops:
+              op_symbol = op
+            elif op.kind == VkComplexSymbol and op.ref.csymbol.len >= 2 and op.ref.csymbol[0] == "." and op.ref.csymbol[1] == "":
+              op_symbol = "./".to_symbol_value()
+            else:
+              not_allowed("Invalid infix expression")
+            if i + 1 >= gene.children.len:
+              not_allowed("Incomplete infix expression")
+            let right_expr = gene.children[i + 1]
+            let nested = new_gene(op_symbol)
+            nested.children = @[left_expr, right_expr]
+            left_expr = nested.to_gene_value()
+            i += 2
+          self.compile(left_expr)
           return
       elif first_child.str == ".":
         # Dynamic method call: (obj . method_expr args...)
@@ -702,13 +718,27 @@ proc compile_gene(self: Compiler, input: Value) =
     elif first_child.kind == VkComplexSymbol and first_child.ref.csymbol.len >= 2 and first_child.ref.csymbol[0] == "." and first_child.ref.csymbol[1] == "":
       # Don't convert if the type is already an operator or special form
       if `type`.kind != VkSymbol or `type`.str notin ["var", "if", "fn", "do", "loop", "while", "for", "ns", "class", "try", "throw", "import", "export", "$", "$vm", "$vmstmt", ".", "->"]:
-        # Convert infix to prefix notation and compile
-        # (6 / 2) becomes (/ 6 2)
-        # (i + 1) becomes (+ i 1)
-        let prefix_gene = new_gene()
-        prefix_gene.type = first_child  # operator becomes the type
-        prefix_gene.children = @[`type`] & gene.children[1..^1]  # value and rest of args
-        self.compile_gene(prefix_gene.to_gene_value())
+        # Handle parser variant where ./ is emitted as a complex symbol operator.
+        let infix_ops = ["+", "-", "*", "/", "%", "**", "./", "<", "<=", ">", ">=", "==", "!=", "is"]
+        var left_expr = `type`
+        var i = 0
+        while i < gene.children.len:
+          let op = gene.children[i]
+          var op_symbol: Value = NIL
+          if op.kind == VkSymbol and op.str in infix_ops:
+            op_symbol = op
+          elif op.kind == VkComplexSymbol and op.ref.csymbol.len >= 2 and op.ref.csymbol[0] == "." and op.ref.csymbol[1] == "":
+            op_symbol = "./".to_symbol_value()
+          else:
+            not_allowed("Invalid infix expression")
+          if i + 1 >= gene.children.len:
+            not_allowed("Incomplete infix expression")
+          let right_expr = gene.children[i + 1]
+          let nested = new_gene(op_symbol)
+          nested.children = @[left_expr, right_expr]
+          left_expr = nested.to_gene_value()
+          i += 2
+        self.compile(left_expr)
         return
   
   # Check if type is an arithmetic operator

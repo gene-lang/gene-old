@@ -1,0 +1,28 @@
+# Regression: /data/key should resolve key as a variable in nested map access
+# Expected: Gene
+# Expected: Guoliang
+# Expected: 2
+
+(class KVStore
+  (ctor []
+    (/data = {})
+    (/count = 0)
+  )
+  (method set [key value]
+    (/data/key = value)
+    (/count += 1)
+  )
+  (method get [key]
+    /data/key
+  )
+  (method size _
+    /count
+  )
+)
+
+(var store (new KVStore))
+(store .set "lang" "Gene")
+(store .set "author" "Guoliang")
+(println (store .get "lang"))
+(println (store .get "author"))
+(println store/.size)

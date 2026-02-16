@@ -1,0 +1,29 @@
+# Regression: subclass should inherit methods (including namespaced parent classes)
+# Expected: 42
+# Expected: 42
+
+(class Shape
+  (method area _ 42)
+)
+
+(class Circle < Shape
+  (ctor [radius]
+    (/radius = radius)
+  )
+)
+
+(var c (new Circle 5))
+(println c/.area)
+
+(ns /Geometry)
+(class Geometry/Shape
+  (method area _ 42)
+)
+(class Geometry/Circle < Geometry/Shape
+  (ctor [radius]
+    (/radius = radius)
+  )
+)
+
+(var g (new Geometry/Circle 7))
+(println g/.area)

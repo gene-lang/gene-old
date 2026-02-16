@@ -1,0 +1,19 @@
+# Regression: infix chain lowering should not treat operator tokens as operands
+# Expected: 6
+# Expected: 24
+# Expected: 78.53975
+
+(println (1 + 2 + 3))
+(println (2 * 3 * 4))
+
+(class Circle
+  (ctor [radius]
+    (/radius = radius)
+  )
+  (method area _
+    (3.14159 * /radius * /radius)
+  )
+)
+
+(var c (new Circle 5))
+(println c/.area)
