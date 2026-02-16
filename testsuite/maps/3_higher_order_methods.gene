@@ -1,0 +1,24 @@
+# Map higher-order methods
+# Expected: 3
+# Expected: 10
+# Expected: 20
+# Expected: 30
+# Expected: 2
+# Expected: 2
+# Expected: 3
+# Expected: 6
+
+(var m {^a 1 ^b 2 ^c 3})
+
+(var mapped (m .map (fn [k v] (v * 10))))
+(println (mapped .size))
+(println mapped/a)
+(println mapped/b)
+(println mapped/c)
+
+(var filtered (m .filter (fn [k v] (v > 1))))
+(println (filtered .size))
+(println filtered/b)
+(println filtered/c)
+
+(println (m .reduce 0 (fn [acc k v] (acc + v))))

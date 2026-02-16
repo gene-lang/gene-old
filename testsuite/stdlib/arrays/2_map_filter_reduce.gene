@@ -1,0 +1,16 @@
+# Array higher-order methods
+# Expected: [2 4 6 8 10]
+# Expected: [3 4 5]
+# Expected: 15
+# Expected: 16
+
+(var arr [1 2 3 4 5])
+
+(fn double [x]
+  (x * 2)
+)
+
+(println (arr .map double))
+(println (arr .filter (fn [x] (x > 2))))
+(println (arr .reduce 0 (fn [acc x] (acc + x))))
+(println ([1 2 3] .reduce 10 (fn [acc x] (acc + x))))

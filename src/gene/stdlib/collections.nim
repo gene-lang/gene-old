@@ -189,6 +189,47 @@ proc init_collection_classes*(object_class: Class) =
 
   array_class.def_native_method("map", vm_array_map)
 
+  proc vm_array_filter(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 2:
+      not_allowed("Array.filter requires a predicate")
+    let arr = get_positional_arg(args, 0, has_keyword_args)
+    if arr.kind != VkArray:
+      not_allowed("filter must be called on an array")
+    let predicate = get_positional_arg(args, 1, has_keyword_args)
+    var result = new_array_value()
+    case predicate.kind
+    of VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock:
+      for item in array_data(arr):
+        var keep: Value
+        {.cast(gcsafe).}:
+          keep = vm_exec_callable(vm, predicate, @[item])
+        if keep.to_bool():
+          array_data(result).add(item)
+    else:
+      not_allowed("filter predicate must be callable, got " & $predicate.kind)
+    result
+
+  array_class.def_native_method("filter", vm_array_filter, @[("predicate", NIL)], App.app.array_class)
+
+  proc vm_array_reduce(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 3:
+      not_allowed("Array.reduce requires an initial value and a reducer function")
+    let arr = get_positional_arg(args, 0, has_keyword_args)
+    if arr.kind != VkArray:
+      not_allowed("reduce must be called on an array")
+    var accumulator = get_positional_arg(args, 1, has_keyword_args)
+    let reducer = get_positional_arg(args, 2, has_keyword_args)
+    case reducer.kind
+    of VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock:
+      for item in array_data(arr):
+        {.cast(gcsafe).}:
+          accumulator = vm_exec_callable(vm, reducer, @[accumulator, item])
+    else:
+      not_allowed("reduce reducer must be callable, got " & $reducer.kind)
+    accumulator
+
+  array_class.def_native_method("reduce", vm_array_reduce, @[("initial", NIL), ("reducer", NIL)], NIL)
+
   proc vm_array_join(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     let pos_count = get_positional_count(arg_count, has_keyword_args)
     if pos_count < 1:
@@ -329,25 +370,63 @@ proc init_collection_classes*(object_class: Class) =
     if map_val.kind != VkMap:
       not_allowed("map must be called on a map")
     let callback = get_positional_arg(args, 1, has_keyword_args)
-    var result_ref = new_array_value()
+    var result_ref = new_map_value()
     case callback.kind
-    of VkFunction:
+    of VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock:
       for key, value in map_data(map_val):
-        let key_val = cast[Value](key)
+        let key_val = cast[Value](key).str.to_value()
+        var mapped: Value
         {.cast(gcsafe).}:
-          let mapped = vm_exec_callable(vm, callback, @[key_val, value])
-          array_data(result_ref).add(mapped)
-    of VkNativeFn:
-      for key, value in map_data(map_val):
-        let key_val = cast[Value](key)
-        {.cast(gcsafe).}:
-          let mapped = call_native_fn(callback.ref.native_fn, vm, [key_val, value])
-          array_data(result_ref).add(mapped)
+          mapped = vm_exec_callable(vm, callback, @[key_val, value])
+        map_data(result_ref)[key] = mapped
     else:
-      not_allowed("map callback must be a function")
+      not_allowed("map callback must be callable, got " & $callback.kind)
     result_ref
 
-  map_class.def_native_method("map", vm_map_map)
+  map_class.def_native_method("map", vm_map_map, @[("callback", NIL)], App.app.map_class)
+
+  proc vm_map_filter(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 2:
+      not_allowed("Map.filter requires a predicate")
+    let map_val = get_positional_arg(args, 0, has_keyword_args)
+    if map_val.kind != VkMap:
+      not_allowed("filter must be called on a map")
+    let predicate = get_positional_arg(args, 1, has_keyword_args)
+    var result_ref = new_map_value()
+    case predicate.kind
+    of VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock:
+      for key, value in map_data(map_val):
+        let key_val = cast[Value](key).str.to_value()
+        var keep: Value
+        {.cast(gcsafe).}:
+          keep = vm_exec_callable(vm, predicate, @[key_val, value])
+        if keep.to_bool():
+          map_data(result_ref)[key] = value
+    else:
+      not_allowed("filter predicate must be callable, got " & $predicate.kind)
+    result_ref
+
+  map_class.def_native_method("filter", vm_map_filter, @[("predicate", NIL)], App.app.map_class)
+
+  proc vm_map_reduce(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 3:
+      not_allowed("Map.reduce requires an initial value and a reducer function")
+    let map_val = get_positional_arg(args, 0, has_keyword_args)
+    if map_val.kind != VkMap:
+      not_allowed("reduce must be called on a map")
+    var accumulator = get_positional_arg(args, 1, has_keyword_args)
+    let reducer = get_positional_arg(args, 2, has_keyword_args)
+    case reducer.kind
+    of VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock:
+      for key, value in map_data(map_val):
+        let key_val = cast[Value](key).str.to_value()
+        {.cast(gcsafe).}:
+          accumulator = vm_exec_callable(vm, reducer, @[accumulator, key_val, value])
+    else:
+      not_allowed("reduce reducer must be callable, got " & $reducer.kind)
+    accumulator
+
+  map_class.def_native_method("reduce", vm_map_reduce, @[("initial", NIL), ("reducer", NIL)], NIL)
 
   proc vm_map_each(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 2:
