@@ -5,6 +5,8 @@
 import math
 import ../types
 
+proc c_fmod(x, y: cdouble): cdouble {.importc: "fmod", header: "<math.h>".}
+
 # Fast integer arithmetic with overflow checking
 template add_int_fast*(a, b: int64): Value {.dirty.} =
   # Check for overflow
@@ -165,11 +167,11 @@ template mod_int_fast*(a, b: int64): Value {.dirty.} =
   else:
     (a mod b).to_value()
 
-template mod_float_fast*(a, b: float64): Value {.dirty.} =
+proc mod_float_fast*(a, b: float64): Value {.inline.} =
   if b == 0.0:
     NaN.to_value()
   else:
-    (a mod b).to_value()
+    c_fmod(a, b).to_value()
 
 # Bitwise operations (integers only)
 template and_int_fast*(a, b: int64): Value {.dirty.} =

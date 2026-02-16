@@ -12,6 +12,8 @@ import std/[tables, strformat]
 import ./hir
 import ./trampoline
 
+proc c_fmod(x, y: cdouble): cdouble {.importc: "fmod", header: "<math.h>".}
+
 type
   Arm64Reg* = enum
     X0 = 0, X1, X2, X3, X4, X5, X6, X7,
@@ -227,6 +229,16 @@ proc emitSdivRegReg*(buf: CodeBuffer, dst, src1, src2: Arm64Reg) =
   let instr = 0x9AC0_0C00'u32 or
     (uint32(ord(src2) and 0x1F) shl 16) or
     (uint32(ord(src1) and 0x1F) shl 5) or
+    uint32(ord(dst) and 0x1F)
+  buf.emitU32(instr)
+
+proc emitMsubRegRegReg*(buf: CodeBuffer, dst, mul1, mul2, subFrom: Arm64Reg) =
+  ## msub dst, mul1, mul2, subFrom
+  ## dst = subFrom - (mul1 * mul2)
+  let instr = 0x9B00_8000'u32 or
+    (uint32(ord(mul2) and 0x1F) shl 16) or
+    (uint32(ord(subFrom) and 0x1F) shl 10) or
+    (uint32(ord(mul1) and 0x1F) shl 5) or
     uint32(ord(dst) and 0x1F)
   buf.emitU32(instr)
 
@@ -450,6 +462,13 @@ proc genDivI64*(ctx: CodegenContext, op: HirOp) =
   ctx.buf.emitSdivRegReg(X0, X0, X1)
   ctx.storeReg(op.dest, X0)
 
+proc genModI64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadReg(X0, op.binLeft)
+  ctx.loadReg(X1, op.binRight)
+  ctx.buf.emitSdivRegReg(X2, X0, X1)
+  ctx.buf.emitMsubRegRegReg(X0, X2, X1, X0)
+  ctx.storeReg(op.dest, X0)
+
 proc genNegI64*(ctx: CodegenContext, op: HirOp) =
   ctx.loadReg(X0, op.unaryArg)
   ctx.buf.emitNegReg(X0, X0)
@@ -525,6 +544,13 @@ proc genDivF64*(ctx: CodegenContext, op: HirOp) =
   ctx.loadRegF64(D0, op.binLeft)
   ctx.loadRegF64(D1, op.binRight)
   ctx.buf.emitFdiv(D0, D0, D1)
+  ctx.storeRegF64(op.dest, D0)
+
+proc genModF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(D0, op.binLeft)
+  ctx.loadRegF64(D1, op.binRight)
+  ctx.buf.emitMovImm64(X8, cast[int64](cast[pointer](c_fmod)))
+  ctx.buf.emitBlr(X8)
   ctx.storeRegF64(op.dest, D0)
 
 proc genNegF64*(ctx: CodegenContext, op: HirOp) =
@@ -647,11 +673,13 @@ proc genOp*(ctx: CodegenContext, op: HirOp) =
   of HokSubI64: ctx.genSubI64(op)
   of HokMulI64: ctx.genMulI64(op)
   of HokDivI64: ctx.genDivI64(op)
+  of HokModI64: ctx.genModI64(op)
   of HokNegI64: ctx.genNegI64(op)
   of HokAddF64: ctx.genAddF64(op)
   of HokSubF64: ctx.genSubF64(op)
   of HokMulF64: ctx.genMulF64(op)
   of HokDivF64: ctx.genDivF64(op)
+  of HokModF64: ctx.genModF64(op)
   of HokNegF64: ctx.genNegF64(op)
   of HokLeI64: ctx.genLeI64(op)
   of HokLtI64: ctx.genLtI64(op)

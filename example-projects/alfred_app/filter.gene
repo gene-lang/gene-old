@@ -1,0 +1,53 @@
+#!/usr/bin/env gene run
+
+# filter.gene — Alfred Script Filter
+# Reads history, filters by query, outputs Alfred JSON
+# Called with: {query} from Alfred
+# Pre-requisite: ~/.gene-commander/history.json must exist (see wrapper)
+
+(var query (if ($args/.size > 0) $args/0 else ""))
+(var home $env/HOME)
+(var history_file (home .append "/.gene-commander/history.json"))
+
+# Load history
+(var raw (gene/io/read history_file))
+(var history (if (raw/.length > 2) (gene/json/parse raw) else []))
+
+# Filter by query
+(var query_lower (query .to_lower))
+(var matches [])
+(for entry in history
+  (var cmd entry/command)
+  (var cmd_lower (cmd .to_lower))
+  (var found (cmd_lower .find query_lower))
+  (if ((query_lower/.length == 0) || (found != nil))
+    (matches .add entry)))
+
+# Build Alfred JSON items
+(var items [])
+(var count 0)
+(for match in matches
+  (if (count < 20)
+    (do
+      (var subtitle "↩ Run again | Last: ")
+      (subtitle = (subtitle .append match/last_used))
+      (items .add {
+        ^title match/command
+        ^subtitle subtitle
+        ^arg match/command
+        ^icon {^path "icon.png"}
+      })
+      (count += 1))))
+
+# Always offer to run query as new command
+(if (query/.length > 0)
+  (items .add {
+    ^title query
+    ^subtitle "⚡ Run as new command"
+    ^arg query
+    ^icon {^path "icon.png"}
+  }))
+
+# Output Alfred JSON
+(var output {^items items})
+(print (gene/json/stringify output))

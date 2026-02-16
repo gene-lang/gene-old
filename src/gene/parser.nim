@@ -453,6 +453,14 @@ proc read_string_interpolation(self: var Parser): Value {.gcsafe.} =
     return gene.to_gene_value()
 
 proc read_unquoted(self: var Parser): Value =
+  # Standalone '%' and '%=' are operators, not unquote markers.
+  let ch = self.buf[self.bufpos]
+  if ch == '=':
+    self.bufpos.inc()
+    return "%=".to_symbol_value()
+  if ch == EndOfFile or ch in {' ', '\t', '\L', '\c', '(', ')', '[', ']', '{', '}'}:
+    return "%".to_symbol_value()
+
   # Special logic for %_
   var unquote_discard = false
   if self.buf[self.bufpos] == '_':

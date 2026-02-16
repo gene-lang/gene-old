@@ -652,6 +652,8 @@ type
     IkVarMulValue # variable * literal value
     IkDiv
     IkVarDivValue # variable / literal value
+    IkMod
+    IkVarModValue # variable % literal value
     IkPow
 
     IkLt

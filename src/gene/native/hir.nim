@@ -52,6 +52,7 @@ type
     HokSubI64       ## %r = sub.i64 %a, %b
     HokMulI64       ## %r = mul.i64 %a, %b
     HokDivI64       ## %r = div.i64 %a, %b
+    HokModI64       ## %r = mod.i64 %a, %b
     HokNegI64       ## %r = neg.i64 %a
 
     # Float arithmetic
@@ -59,6 +60,7 @@ type
     HokSubF64       ## %r = sub.f64 %a, %b
     HokMulF64       ## %r = mul.f64 %a, %b
     HokDivF64       ## %r = div.f64 %a, %b
+    HokModF64       ## %r = mod.f64 %a, %b
     HokNegF64       ## %r = neg.f64 %a
 
     # Integer comparisons (produce HtBool)
@@ -118,8 +120,8 @@ type
     of HokCopy, HokNegI64, HokNegF64, HokBoxI64, HokBoxF64, HokBoxBool, HokBoxString,
        HokUnboxI64, HokUnboxF64, HokUnboxBool, HokUnboxString:
       unaryArg*: HirReg
-    of HokAddI64, HokSubI64, HokMulI64, HokDivI64,
-       HokAddF64, HokSubF64, HokMulF64, HokDivF64,
+    of HokAddI64, HokSubI64, HokMulI64, HokDivI64, HokModI64,
+       HokAddF64, HokSubF64, HokMulF64, HokDivF64, HokModF64,
        HokLeI64, HokLtI64, HokGeI64, HokGtI64, HokEqI64, HokNeI64,
        HokLeF64, HokLtF64, HokGeF64, HokGtF64, HokEqF64, HokNeF64:
       binLeft*: HirReg
@@ -267,6 +269,10 @@ proc emitDivI64*(b: HirBuilder, left, right: HirReg): HirReg =
   result = b.allocReg()
   b.emit(HirOp(kind: HokDivI64, dest: result, destType: HtI64, binLeft: left, binRight: right))
 
+proc emitModI64*(b: HirBuilder, left, right: HirReg): HirReg =
+  result = b.allocReg()
+  b.emit(HirOp(kind: HokModI64, dest: result, destType: HtI64, binLeft: left, binRight: right))
+
 proc emitNegI64*(b: HirBuilder, value: HirReg): HirReg =
   result = b.allocReg()
   b.emit(HirOp(kind: HokNegI64, dest: result, destType: HtI64, unaryArg: value))
@@ -316,6 +322,10 @@ proc emitMulF64*(b: HirBuilder, left, right: HirReg): HirReg =
 proc emitDivF64*(b: HirBuilder, left, right: HirReg): HirReg =
   result = b.allocReg()
   b.emit(HirOp(kind: HokDivF64, dest: result, destType: HtF64, binLeft: left, binRight: right))
+
+proc emitModF64*(b: HirBuilder, left, right: HirReg): HirReg =
+  result = b.allocReg()
+  b.emit(HirOp(kind: HokModF64, dest: result, destType: HtF64, binLeft: left, binRight: right))
 
 proc emitNegF64*(b: HirBuilder, value: HirReg): HirReg =
   result = b.allocReg()
@@ -406,6 +416,8 @@ proc `$`*(op: HirOp): string =
     result = fmt"{op.dest} = mul.i64 {op.binLeft}, {op.binRight}"
   of HokDivI64:
     result = fmt"{op.dest} = div.i64 {op.binLeft}, {op.binRight}"
+  of HokModI64:
+    result = fmt"{op.dest} = mod.i64 {op.binLeft}, {op.binRight}"
   of HokNegI64:
     result = fmt"{op.dest} = neg.i64 {op.unaryArg}"
   of HokAddF64:
@@ -416,6 +428,8 @@ proc `$`*(op: HirOp): string =
     result = fmt"{op.dest} = mul.f64 {op.binLeft}, {op.binRight}"
   of HokDivF64:
     result = fmt"{op.dest} = div.f64 {op.binLeft}, {op.binRight}"
+  of HokModF64:
+    result = fmt"{op.dest} = mod.f64 {op.binLeft}, {op.binRight}"
   of HokNegF64:
     result = fmt"{op.dest} = neg.f64 {op.unaryArg}"
   of HokLeI64:

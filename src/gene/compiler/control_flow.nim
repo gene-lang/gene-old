@@ -479,6 +479,8 @@ proc compile_container_assignment(self: Compiler, container_expr: Value, name_sy
       self.emit(Instruction(kind: IkAdd))
     of "-=":
       self.emit(Instruction(kind: IkSub))
+    of "%=":
+      self.emit(Instruction(kind: IkMod))
     else:
       not_allowed("Unsupported compound assignment operator: " & operator)
 
@@ -526,6 +528,8 @@ proc compile_assignment(self: Compiler, gene: ptr Gene) =
           self.emit(Instruction(kind: IkAdd))
         of "-=":
           self.emit(Instruction(kind: IkSub))
+        of "%=":
+          self.emit(Instruction(kind: IkMod))
         else:
           not_allowed("Unsupported compound assignment operator: " & operator)
     else:
@@ -624,6 +628,8 @@ proc compile_assignment(self: Compiler, gene: ptr Gene) =
           self.emit(Instruction(kind: IkAdd))
         of "-=":
           self.emit(Instruction(kind: IkSub))
+        of "%=":
+          self.emit(Instruction(kind: IkMod))
         else:
           not_allowed("Unsupported compound assignment operator: " & operator)
       

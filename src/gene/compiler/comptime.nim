@@ -6,6 +6,8 @@ import tables, os, strutils
 import ../types
 from "../compiler/if" import normalize_if
 
+proc c_fmod(x, y: cdouble): cdouble {.importc: "fmod", header: "<math.h>".}
+
 type
   # Lightweight compile-time evaluator used to expand (comptime ...) blocks.
   ComptimeEnv* = object
@@ -81,6 +83,13 @@ proc comptime_div(a, b: Value): Value =
     return (to_float(a) / to_float(b)).to_value()
   not_allowed("comptime: / expects numbers")
 
+proc comptime_mod(a, b: Value): Value =
+  if is_small_int(a) and is_small_int(b):
+    return (to_int(a) mod to_int(b)).to_value()
+  if is_float(a) or is_float(b):
+    return c_fmod(to_float(a), to_float(b)).to_value()
+  not_allowed("comptime: % expects numbers")
+
 proc comptime_concat(a, b: Value): Value =
   if a.kind == VkString and b.kind == VkString:
     return new_str_value(a.str & b.str)
@@ -126,7 +135,7 @@ proc eval_comptime_operator(op: string, args: seq[Value], env: var ComptimeEnv):
     env.vars[args[0].str] = r.value
     result.value = r.value
     return
-  of "+=", "-=":
+  of "+=", "-=", "%=":
     if args.len != 2 or args[0].kind != VkSymbol:
       not_allowed("comptime: compound assignment expects a symbol and a value")
     let current =
@@ -136,7 +145,8 @@ proc eval_comptime_operator(op: string, args: seq[Value], env: var ComptimeEnv):
     merge_emitted(result.emitted, rhs.emitted)
     let new_val =
       if op == "+=": comptime_add(current, rhs.value)
-      else: comptime_sub(current, rhs.value)
+      elif op == "-=": comptime_sub(current, rhs.value)
+      else: comptime_mod(current, rhs.value)
     env.vars[args[0].str] = new_val
     result.value = new_val
     return
@@ -198,6 +208,11 @@ proc eval_comptime_operator(op: string, args: seq[Value], env: var ComptimeEnv):
     var acc = values[0]
     for i in 1..<values.len:
       acc = comptime_div(acc, values[i])
+    result.value = acc
+  of "%":
+    var acc = values[0]
+    for i in 1..<values.len:
+      acc = comptime_mod(acc, values[i])
     result.value = acc
   of "++":
     var acc = values[0]
@@ -339,7 +354,7 @@ proc eval_comptime_expr(expr: Value, env: var ComptimeEnv): ComptimeResult =
     # Infix notation: (x + y) => type=x, children=[+, y]
     if gene.children.len >= 1 and gene.children[0].kind == VkSymbol:
       let op = gene.children[0].str
-      if op in ["+", "-", "*", "/", "%", "**", "./", "<", "<=", ">", ">=", "==", "!=", "&&", "||", "++", "=", "+=", "-="]:
+      if op in ["+", "-", "*", "/", "%", "**", "./", "<", "<=", ">", ">=", "==", "!=", "&&", "||", "++", "=", "+=", "-=", "%="]:
         if gene.`type`.kind != VkSymbol or gene.`type`.str notin ["var", "if", "fn", "do", "loop", "while", "for", "ns", "class", "try", "throw", "import", "export", "interface", "comptime", "type", "object", "$", ".", "->", "@"]:
           let args = @[gene.`type`] & gene.children[1..^1]
           result = eval_comptime_operator(op, args, env)

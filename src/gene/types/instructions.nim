@@ -59,17 +59,16 @@ proc replace_traces_range*(self: CompilationUnit, start_pos, end_pos: int, repla
 
 proc `$`*(self: Instruction): string =
   case self.kind
-    of IkPushValue,
-      IkVar, IkVarResolve, IkVarAssign,
-      IkAddValue, IkVarAddValue, IkVarSubValue, IkVarMulValue, IkVarDivValue,
-      IkIncVar, IkDecVar,
-      IkLtValue, IkVarLtValue, IkVarLeValue, IkVarGtValue, IkVarGeValue, IkVarEqValue,
-      IkMapSetProp, IkMapSetPropValue,
-      IkResolveSymbol, IkResolveMethod,
-      IkExport,
-      IkSetMember, IkGetMember, IkGetMemberOrNil, IkGetMemberDefault,
-      IkSetChild, IkGetChild,
-      IkTailCall:
+    of IkPushValue, IkVar, IkVarResolve, IkVarAssign,
+       IkAddValue, IkVarAddValue, IkVarSubValue, IkVarMulValue, IkVarDivValue, IkVarModValue,
+       IkIncVar, IkDecVar,
+       IkLtValue, IkVarLtValue, IkVarLeValue, IkVarGtValue, IkVarGeValue, IkVarEqValue,
+       IkMapSetProp, IkMapSetPropValue,
+       IkResolveSymbol, IkResolveMethod,
+       IkExport,
+       IkSetMember, IkGetMember, IkGetMemberOrNil, IkGetMemberDefault,
+       IkSetChild, IkGetChild,
+       IkTailCall:
       if self.label.int > 0:
         result = fmt"{self.label.int32.to_hex()} {($self.kind)[2..^1]:<20} {$self.arg0}"
       else:

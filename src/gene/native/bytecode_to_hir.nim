@@ -275,6 +275,10 @@ proc emitDiv(ctx: ConversionContext, left, right: HirReg, typ: HirType): HirReg 
   if typ == HtF64: ctx.builder.emitDivF64(left, right)
   else: ctx.builder.emitDivI64(left, right)
 
+proc emitMod(ctx: ConversionContext, left, right: HirReg, typ: HirType): HirReg =
+  if typ == HtF64: ctx.builder.emitModF64(left, right)
+  else: ctx.builder.emitModI64(left, right)
+
 proc emitNeg(ctx: ConversionContext, value: HirReg, typ: HirType): HirReg =
   if typ == HtF64: ctx.builder.emitNegF64(value)
   else: ctx.builder.emitNegI64(value)
@@ -551,6 +555,16 @@ proc convertInstruction(ctx: ConversionContext, pc: var int): bool =
     ctx.push(resultReg, vt)
     pc += 1
 
+  of IkVarModValue:
+    let varIdx = inst.arg0.int64.int
+    let dataInst = ctx.cu.instructions[pc + 1]
+    let vt = ctx.varType(varIdx.int32)
+    let paramReg = newHirReg(varIdx.int32)
+    let constReg = ctx.emitConst(dataInst.arg0, vt)
+    let resultReg = ctx.emitMod(paramReg, constReg, vt)
+    ctx.push(resultReg, vt)
+    pc += 1
+
   of IkData:
     discard
 
@@ -752,6 +766,13 @@ proc convertInstruction(ctx: ConversionContext, pc: var int): bool =
     let left = ctx.pop()
     let t = if left.typ == HtF64 or right.typ == HtF64: HtF64 else: HtI64
     let resultReg = ctx.emitDiv(left.reg, right.reg, t)
+    ctx.push(resultReg, t)
+
+  of IkMod:
+    let right = ctx.pop()
+    let left = ctx.pop()
+    let t = if left.typ == HtF64 or right.typ == HtF64: HtF64 else: HtI64
+    let resultReg = ctx.emitMod(left.reg, right.reg, t)
     ctx.push(resultReg, t)
 
   of IkNeg:
@@ -995,7 +1016,7 @@ proc isNativeEligible*(cu: CompilationUnit, fn: Function): bool =
 
   for inst in cu.instructions:
     case inst.kind
-    of IkVarResolve, IkVarAddValue, IkVarSubValue, IkVarMulValue, IkVarDivValue,
+    of IkVarResolve, IkVarAddValue, IkVarSubValue, IkVarMulValue, IkVarDivValue, IkVarModValue,
          IkVarLtValue, IkVarLeValue, IkVarGtValue, IkVarGeValue, IkVarEqValue:
       if inst.arg1.int64 != 0:
         return false
@@ -1024,7 +1045,7 @@ proc isNativeEligible*(cu: CompilationUnit, fn: Function): bool =
        IkGeneSetProp, IkGeneSetPropValue, IkGenePropsSpread, IkGeneEnd:
       discard
     of IkStart, IkJumpIfFalse, IkJump, IkJumpIfMatchSuccess,
-       IkAdd, IkSub, IkMul, IkDiv, IkNeg,
+       IkAdd, IkSub, IkMul, IkDiv, IkMod, IkNeg,
        IkLt, IkLe, IkGt, IkGe, IkEq, IkNe,
        IkPop, IkSwap, IkNoop, IkScopeEnd, IkEnd, IkReturn, IkThrow:
       discard

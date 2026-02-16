@@ -151,6 +151,7 @@ else
 (println "10 - 4 =" (10 - 4))
 (println "6 * 7 =" (6 * 7))
 (println "15 / 3 =" (15 / 3))
+(println "10 % 3 =" (10 % 3))
 (println "2 + 3 * 4 =" (2 + (3 * 4)))  # Operator precedence
 
 # Comparison operators

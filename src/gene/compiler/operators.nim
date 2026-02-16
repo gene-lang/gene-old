@@ -852,6 +852,21 @@ proc compile_gene(self: Compiler, input: Value) =
           self.compile(gene.children[i])
           self.emit(Instruction(kind: IkDiv))
         return
+      of "%":
+        if gene.children.len == 0:
+          not_allowed("% requires at least one argument")
+        elif gene.children.len == 1:
+          not_allowed("% requires at least 2 arguments")
+        elif gene.children.len == 2:
+          if self.compile_var_op_literal(gene.children[0], gene.children[1], IkVarModValue):
+            return
+          # Fall through to regular compilation
+        # Multi-arg modulo
+        self.compile(gene.children[0])
+        for i in 1..<gene.children.len:
+          self.compile(gene.children[i])
+          self.emit(Instruction(kind: IkMod))
+        return
       of "<":
         # Binary less than
         if gene.children.len != 2:
@@ -953,7 +968,7 @@ proc compile_gene(self: Compiler, input: Value) =
     let first = gene.children[0]
     if first.kind == VkSymbol:
       case first.str:
-        of "=", "+=", "-=":
+        of "=", "+=", "-=", "%=":
           self.compile_assignment(gene)
           return
         of "?":

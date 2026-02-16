@@ -2252,6 +2252,29 @@ proc exec*(self: ptr VirtualMachine): Value =
           else:
             not_allowed("Cannot divide values of type: " & $first.kind)
 
+      of IkMod:
+        let second = self.frame.pop()
+        let first = self.frame.pop()
+        case first.kind:
+          of VkInt:
+            case second.kind:
+              of VkInt:
+                self.frame.push(mod_int_fast(first.int64, second.int64))
+              of VkFloat:
+                self.frame.push(mod_float_fast(first.int64.float64, second.float))
+              else:
+                not_allowed("Cannot modulo " & $first.kind & " by " & $second.kind)
+          of VkFloat:
+            case second.kind:
+              of VkInt:
+                self.frame.push(mod_float_fast(first.float, second.int64.float64))
+              of VkFloat:
+                self.frame.push(mod_float_fast(first.float, second.float))
+              else:
+                not_allowed("Cannot modulo " & $first.kind & " by " & $second.kind)
+          else:
+            not_allowed("Cannot modulo values of type: " & $first.kind)
+
       of IkNeg:
         # Unary negation
         let value = self.frame.pop()
@@ -2441,6 +2464,44 @@ proc exec*(self: ptr VirtualMachine): Value =
                 not_allowed("Cannot divide " & $var_value.kind & " by " & $literal_value.kind)
           else:
             not_allowed("Cannot divide variable of type: " & $var_value.kind)
+        {.pop.}
+
+      of IkVarModValue:
+        {.push checks: off}
+        # Get variable value based on parent index (stored in arg1)
+        let var_value = if inst.arg1 == 0:
+          self.frame.scope.members[inst.arg0.int64]
+        else:
+          var scope = self.frame.scope
+          for _ in 0..<inst.arg1:
+            scope = scope.parent
+          scope.members[inst.arg0.int64]
+
+        # Get literal value from next instruction
+        self.pc.inc()
+        inst = self.cu.instructions[self.pc].addr
+        let literal_value = inst.arg0
+
+        # Modulo variable by literal
+        case var_value.kind:
+          of VkInt:
+            case literal_value.kind:
+              of VkInt:
+                self.frame.push(mod_int_fast(var_value.int64, literal_value.int64))
+              of VkFloat:
+                self.frame.push(mod_float_fast(var_value.int64.float64, literal_value.float))
+              else:
+                not_allowed("Cannot modulo " & $var_value.kind & " by " & $literal_value.kind)
+          of VkFloat:
+            case literal_value.kind:
+              of VkInt:
+                self.frame.push(mod_float_fast(var_value.float, literal_value.int64.float64))
+              of VkFloat:
+                self.frame.push(mod_float_fast(var_value.float, literal_value.float))
+              else:
+                not_allowed("Cannot modulo " & $var_value.kind & " by " & $literal_value.kind)
+          else:
+            not_allowed("Cannot modulo variable of type: " & $var_value.kind)
         {.pop.}
 
       of IkLt:

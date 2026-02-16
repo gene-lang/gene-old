@@ -19,6 +19,8 @@ import std/[tables, strformat]
 import ./hir
 import ./trampoline
 
+proc c_fmod(x, y: cdouble): cdouble {.importc: "fmod", header: "<math.h>".}
+
 const
   STRING_TAG_U64 = 0xFFFD_0000_0000_0000'u64
   PAYLOAD_MASK_U64 = 0x0000_FFFF_FFFF_FFFF'u64
@@ -530,6 +532,13 @@ proc genDivI64*(ctx: CodegenContext, op: HirOp) =
   ctx.buf.emitIdivReg(RCX)
   ctx.storeReg(op.dest, RAX)
 
+proc genModI64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadReg(RAX, op.binLeft)
+  ctx.loadReg(RCX, op.binRight)
+  ctx.buf.emitCqo()
+  ctx.buf.emitIdivReg(RCX)
+  ctx.storeReg(op.dest, RDX)
+
 proc genNegI64*(ctx: CodegenContext, op: HirOp) =
   ctx.loadReg(RAX, op.unaryArg)
   ctx.buf.emitNegReg(RAX)
@@ -642,6 +651,13 @@ proc genDivF64*(ctx: CodegenContext, op: HirOp) =
   ctx.loadRegF64(XMM0, op.binLeft)
   ctx.loadRegF64(XMM1, op.binRight)
   ctx.buf.emitDivsd(XMM0, XMM1)
+  ctx.storeRegF64(op.dest, XMM0)
+
+proc genModF64*(ctx: CodegenContext, op: HirOp) =
+  ctx.loadRegF64(XMM0, op.binLeft)
+  ctx.loadRegF64(XMM1, op.binRight)
+  ctx.buf.emitMovRegImm64(RAX, cast[int64](cast[pointer](c_fmod)))
+  ctx.buf.emitCallReg(RAX)
   ctx.storeRegF64(op.dest, XMM0)
 
 proc genNegF64*(ctx: CodegenContext, op: HirOp) =
@@ -758,11 +774,13 @@ proc genOp*(ctx: CodegenContext, op: HirOp) =
   of HokSubI64: ctx.genSubI64(op)
   of HokMulI64: ctx.genMulI64(op)
   of HokDivI64: ctx.genDivI64(op)
+  of HokModI64: ctx.genModI64(op)
   of HokNegI64: ctx.genNegI64(op)
   of HokAddF64: ctx.genAddF64(op)
   of HokSubF64: ctx.genSubF64(op)
   of HokMulF64: ctx.genMulF64(op)
   of HokDivF64: ctx.genDivF64(op)
+  of HokModF64: ctx.genModF64(op)
   of HokNegF64: ctx.genNegF64(op)
   of HokLeI64: ctx.genLeI64(op)
   of HokLtI64: ctx.genLtI64(op)

@@ -1,0 +1,42 @@
+#!/usr/bin/env gene run
+
+# save_history.gene — Update command history
+# Called with command string as $args/0
+
+(var command $args/0)
+(var home $env/HOME)
+(var history_file (home .append "/.gene-commander/history.json"))
+
+# Load history
+(var raw (gene/io/read history_file))
+(var history (if (raw/.length > 2) (gene/json/parse raw) else []))
+
+# Get timestamp
+(var timestamp (gene/os/exec "date" []))
+(if (timestamp != nil)
+  (timestamp = (timestamp .trim))
+else
+  (timestamp = "unknown"))
+
+# Update or add entry
+(var found false)
+(var i 0)
+(while (i < history/.size)
+  (var entry (history .get i))
+  (if (entry/command == command)
+    (do
+      (entry/last_used = timestamp)
+      (entry/count = (entry/count + 1))
+      (found = true)))
+  (i += 1))
+
+(if (not found)
+  # Prepend new command (most recent first)
+  (var new_history [{^command command ^last_used timestamp ^count 1}])
+  (var j 0)
+  (while (j < history/.size)
+    (new_history .add (history .get j))
+    (j += 1))
+  (history = new_history))
+
+(gene/io/write history_file (gene/json/stringify history))

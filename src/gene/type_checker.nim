@@ -1840,7 +1840,7 @@ proc check_infix(self: TypeChecker, gene: ptr Gene): TypeExpr =
   let left_type = self.check_expr(gene.`type`)
   let right_type = self.check_expr(gene.children[1])
   case op.str
-  of "+", "-", "*", "/":
+  of "+", "-", "*", "/", "%":
     # numeric only (Int/Float)
     let left_res = self.resolve(left_type)
     let right_res = self.resolve(right_type)
@@ -1902,7 +1902,7 @@ proc check_infix(self: TypeChecker, gene: ptr Gene): TypeExpr =
       except CatchableError as e:
         self.warn("Warning: " & e.msg)
     return left_type
-  of "+=", "-=", "*=", "/=":
+  of "+=", "-=", "*=", "/=", "%=":
     # Compound assignment - type is same as left operand
     return left_type
   of "?":
@@ -2371,7 +2371,7 @@ proc check_expr(self: TypeChecker, v: Value): TypeExpr =
     # Infix operators
     if gene.children.len > 0 and gene.children[0].kind == VkSymbol:
       let op = gene.children[0].str
-      if op in ["=", "+", "-", "*", "/", "++", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "+=", "-=", "*=", "/=", "?", "is"]:
+      if op in ["=", "+", "-", "*", "/", "%", "++", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "+=", "-=", "*=", "/=", "%=", "?", "is"]:
         return self.check_infix(gene)
       if gene.children[0].str.startsWith("."):
         let method_name = gene.children[0].str[1..^1]
