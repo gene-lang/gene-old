@@ -1,4 +1,4 @@
-{.push warning[IgnoredSymbolInjection]: off.}
+{.push warning[IgnoredSymbolInjection]: off, warning[ResultShadowed]: off.}
 import tables, strutils
 import httpclient, uri
 import std/json

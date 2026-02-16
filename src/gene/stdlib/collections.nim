@@ -183,9 +183,9 @@ proc init_collection_classes*(object_class: Class) =
         mapped.add(mapped_value)
     else:
       not_allowed("map callback must be a function, got " & $callback.kind)
-    var result = new_array_value()
-    array_data(result) = mapped
-    result
+    var mapped_result = new_array_value()
+    array_data(mapped_result) = mapped
+    mapped_result
 
   array_class.def_native_method("map", vm_array_map)
 
@@ -196,7 +196,7 @@ proc init_collection_classes*(object_class: Class) =
     if arr.kind != VkArray:
       not_allowed("filter must be called on an array")
     let predicate = get_positional_arg(args, 1, has_keyword_args)
-    var result = new_array_value()
+    var filtered_result = new_array_value()
     case predicate.kind
     of VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock:
       for item in array_data(arr):
@@ -204,10 +204,10 @@ proc init_collection_classes*(object_class: Class) =
         {.cast(gcsafe).}:
           keep = vm_exec_callable(vm, predicate, @[item])
         if keep.to_bool():
-          array_data(result).add(item)
+          array_data(filtered_result).add(item)
     else:
       not_allowed("filter predicate must be callable, got " & $predicate.kind)
-    result
+    filtered_result
 
   array_class.def_native_method("filter", vm_array_filter, @[("predicate", NIL)], App.app.array_class)
 

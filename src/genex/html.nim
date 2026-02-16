@@ -1,3 +1,4 @@
+{.push warning[ResultShadowed]: off.}
 import tables, strutils, uri
 import ../gene/types
 

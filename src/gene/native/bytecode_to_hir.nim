@@ -9,7 +9,7 @@
 ## 3. Convert each bytecode instruction to equivalent HIR operations
 ## 4. Handle control flow by creating basic blocks at branch targets
 
-import std/[tables, strformat, strutils, sequtils]
+import std/[tables, strformat, sequtils]
 import ../types
 import ../types/core
 import ./hir

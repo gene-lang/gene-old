@@ -6,7 +6,6 @@ from ../types/runtime_types import coerce_value_to_type, emit_type_warning, runt
 import ../parser
 import ../compiler
 import ../repl_session
-import ../vm/async
 import ../vm/thread
 import ../logging_core
 import ./math as stdlib_math

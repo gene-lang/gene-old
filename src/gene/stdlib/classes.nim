@@ -2,7 +2,6 @@ import strutils, tables
 
 import ../types
 from ../types/runtime_types import coerce_value_to_type, emit_type_warning, runtime_type_name
-import ../compiler
 
 proc display_value*(val: Value; top_level: bool): string {.gcsafe.} =
   case val.kind

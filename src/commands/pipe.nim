@@ -260,15 +260,15 @@ Notes:
         VM.frame = new_frame(ns)
 
       VM.cu = compiled
-      let result = VM.exec()
+      let exec_result = VM.exec()
 
       # Print result if not nil (enables filtering)
-      if result.kind != VkNil:
+      if exec_result.kind != VkNil:
         # Output strings without quotes unless --quote-str is specified
-        if result.kind == VkString and not options.quote_str:
-          echo result.str
+        if exec_result.kind == VkString and not options.quote_str:
+          echo exec_result.str
         else:
-          echo $result
+          echo $exec_result
 
     except CatchableError as e:
       stderr.writeLine("Error at line ", line_num, ": ", e.msg)

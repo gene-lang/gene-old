@@ -21,21 +21,6 @@ proc exec_repl_compiled(vm: ptr VirtualMachine, compiled: CompilationUnit, scope
   vm.cu = compiled
   return vm.exec()
 
-  let new_repl_frame = new_frame()
-  new_repl_frame.kind = FkFunction
-  new_repl_frame.scope = scope
-  new_repl_frame.ns = ns
-  caller_frame.ref_count.inc()
-  new_repl_frame.caller_frame = caller_frame
-  new_repl_frame.caller_address = Address(cu: caller_cu, pc: caller_pc)
-  new_repl_frame.from_exec_function = true
-
-  vm.frame = new_repl_frame
-  vm.cu = compiled
-  vm.pc = 0
-
-  return vm.exec_continue()
-
 proc is_throw_form(input: string, filename: string): bool =
   var parser = new_parser()
   var stream = new_string_stream(input)
