@@ -23,6 +23,7 @@ Files live in `docs/` unless stated otherwise.
 - [arg_counter.md](arg_counter.md) — argument counting logic used by function matchers
 - [regex.md](regex.md) — Regexp literals and regex/string helper API
 - [http_server_and_client.md](http_server_and_client.md) — HTTP extensions and runtime hooks
+- [packaging.md](packaging.md) — proposed package/dependency install workflow (Git refs + native build)
 - [lsp.md](lsp.md) — Language Server Protocol implementation and editor integration
 
 ## Implementation Diaries
