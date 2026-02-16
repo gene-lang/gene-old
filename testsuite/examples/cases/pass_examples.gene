@@ -1,0 +1,25 @@
+(fn add [a b]
+  ^intent "Add two integers"
+  ^examples [[1 2] -> 3
+             [3 4] -> 7]
+  (a + b)
+)
+
+(fn positive_only [a]
+  ^examples [[1] -> _
+             [-1] throws GeneException]
+  (if (a <= 0)
+    (throw (new GeneException))
+  else
+    a)
+)
+
+(class Wallet
+  (method withdraw [amount]
+    ^intent "Withdraw when amount is positive"
+    (if (amount <= 0)
+      (throw (new GeneException))
+    else
+      amount)
+  )
+)

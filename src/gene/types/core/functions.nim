@@ -6,11 +6,13 @@
 proc new_fn*(name: string, matcher: RootMatcher, body: sink seq[Value]): Function =
   return Function(
     name: name,
+    intent: "",
     matcher: matcher,
     # matching_hint: matcher.hint,
     body: body,
     pre_conditions: @[],
     post_conditions: @[],
+    examples: @[],
   )
 
 proc anchor_module_paths(type_descs: var seq[TypeDesc], module_path: string) =
@@ -72,6 +74,8 @@ proc to_function*(node: Value, cu_type_descs: var seq[TypeDesc],
   let use_precomputed_type_ids = type_expectation_ids.len > 0 or return_type_id != NO_TYPE_ID
   let pre_key = "pre".to_key()
   let post_key = "post".to_key()
+  let examples_key = "examples".to_key()
+  let intent_key = "intent".to_key()
 
   # Extract type annotations as name -> TypeId mapping, and strip them from args
   proc strip_type_annotations(args: Value, type_id_map: var Table[string, TypeId],
@@ -246,6 +250,78 @@ proc to_function*(node: Value, cu_type_descs: var seq[TypeDesc],
     else:
       # Single expression shortcut: ^post (result > 0)
       result.post_conditions.add(post_exprs)
+  if node.gene.props.has_key(intent_key):
+    let intent_value = node.gene.props[intent_key]
+    if intent_value.kind != VkString:
+      let location = trace_location(node.gene.trace)
+      let prefix = if location.len > 0: location & ": " else: ""
+      let fn_name = if result.name.len > 0: result.name else: "<unnamed>"
+      raise new_exception(type_defs.Exception,
+        prefix & "Invalid ^intent for function " & fn_name & ": expected a string")
+    result.intent = intent_value.str
+  if node.gene.props.has_key(examples_key):
+    let examples_value = node.gene.props[examples_key]
+    let fn_name = if result.name.len > 0: result.name else: "<unnamed>"
+    let location = trace_location(node.gene.trace)
+    let prefix = if location.len > 0: location & ": " else: ""
+    template examples_error(msg: string) =
+      raise new_exception(type_defs.Exception,
+        prefix & "Invalid ^examples for function " & fn_name & ": " & msg)
+
+    if examples_value.kind != VkArray:
+      examples_error("expected an array of examples")
+
+    let tokens = array_data(examples_value)
+    var i = 0
+    while i < tokens.len:
+      let args_expr = tokens[i]
+      i.inc()
+      if args_expr.kind != VkArray:
+        examples_error("expected argument array, got " & $args_expr.kind)
+      if i >= tokens.len:
+        examples_error("missing operator after argument array")
+      let op_expr = tokens[i]
+      i.inc()
+      if op_expr.kind != VkSymbol:
+        examples_error("expected operator symbol ('->' or 'throws')")
+
+      var example = FunctionExample(
+        args: @[],
+        expectation_kind: FekReturn,
+        expected: NIL,
+        source: "",
+        trace: node.gene.trace,
+      )
+
+      for arg_expr in array_data(args_expr):
+        example.args.add(arg_expr)
+
+      case op_expr.str
+      of "->":
+        if i >= tokens.len:
+          examples_error("missing expected result after '->'")
+        let expected_expr = tokens[i]
+        i.inc()
+        if (expected_expr.kind == VkSymbol and expected_expr.str == "_") or expected_expr == PLACEHOLDER:
+          example.expectation_kind = FekAnyReturn
+          example.expected = NIL
+          example.source = $args_expr & " -> _"
+        else:
+          example.expectation_kind = FekReturn
+          example.expected = expected_expr
+          example.source = $args_expr & " -> " & $expected_expr
+      of "throws":
+        if i >= tokens.len:
+          examples_error("missing exception type after 'throws'")
+        let expected_expr = tokens[i]
+        i.inc()
+        example.expectation_kind = FekThrows
+        example.expected = expected_expr
+        example.source = $args_expr & " throws " & $expected_expr
+      else:
+        examples_error("unsupported operator '" & op_expr.str & "'; expected '->' or 'throws'")
+
+      result.examples.add(example)
 
 # compile method is defined in compiler.nim
 

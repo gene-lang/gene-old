@@ -468,11 +468,24 @@ type
     argTypes*: seq[CallArgType]
     returnType*: CallReturnType
 
+  FunctionExampleKind* = enum
+    FekReturn
+    FekAnyReturn
+    FekThrows
+
+  FunctionExample* = object
+    args*: seq[Value]
+    expectation_kind*: FunctionExampleKind
+    expected*: Value
+    source*: string
+    trace*: SourceTrace
+
   Function* = ref object
     async*: bool
     is_generator*: bool  # True for generator functions
     is_macro_like*: bool  # True for macro-like functions (defined with (fn f!))
     name*: string
+    intent*: string
     ns*: Namespace  # the namespace of the module wherein this is defined.
     scope_tracker*: ScopeTracker  # the root scope tracker of the function
     parent_scope*: Scope  # this could be nil if parent scope is empty.
@@ -489,6 +502,7 @@ type
     native_descriptors*: seq[CallDescriptor]
     pre_conditions*: seq[Value]
     post_conditions*: seq[Value]
+    examples*: seq[FunctionExample]
     # ret*: Expr
 
   Block* = ref object

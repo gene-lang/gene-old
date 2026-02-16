@@ -1,0 +1,21 @@
+# Expected: Add two integers
+# Expected: [[1 2] -> 3 [2 3] -> 5]
+# Expected: Withdraw money
+
+(fn add [a b]
+  ^intent "Add two integers"
+  ^examples [[1 2] -> 3
+             [2 3] -> 5]
+  (a + b)
+)
+
+(class Wallet
+  (method withdraw [amount]
+    ^intent "Withdraw money"
+    amount
+  )
+)
+
+(println (function_intent add))
+(println (function_examples add))
+(println (Wallet .method_intent "withdraw"))

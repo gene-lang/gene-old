@@ -409,6 +409,19 @@ proc init_class_class*(object_class: Class) =
     if self_arg.kind != VkClass:
       not_allowed("Class.name must be called on a class")
     self_arg.ref.class.name.to_value()
+  class.def_native_method "method_intent", proc(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 2:
+      not_allowed("Class.method_intent requires class and method name")
+    let self_arg = get_positional_arg(args, 0, has_keyword_args)
+    if self_arg.kind != VkClass:
+      not_allowed("Class.method_intent must be called on a class")
+    let method_name_val = get_positional_arg(args, 1, has_keyword_args)
+    if method_name_val.kind notin {VkSymbol, VkString}:
+      not_allowed("Class.method_intent requires method name symbol/string")
+    let method_obj = self_arg.ref.class.get_method(method_name_val.str.to_key())
+    if method_obj == nil or method_obj.callable.kind != VkFunction or method_obj.callable.ref.fn == nil:
+      return NIL
+    method_obj.callable.ref.fn.intent.to_value()
 
   r = new_ref(VkClass)
   r.class = class

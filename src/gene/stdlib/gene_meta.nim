@@ -52,6 +52,61 @@ proc init_gene_and_meta_classes*(object_class: Class) =
 
   let function_class = new_class("Function")
   function_class.parent = object_class
+
+  proc function_intent_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
+                              arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("Function.intent requires self")
+    let fn_val = get_positional_arg(args, 0, has_keyword_args)
+    if fn_val.kind != VkFunction:
+      not_allowed("Function.intent must be called on a function")
+    let fn_obj = fn_val.ref.fn
+    if fn_obj == nil:
+      return NIL
+    fn_obj.intent.to_value()
+
+  proc function_examples_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
+                                arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("Function.examples requires self")
+    let fn_val = get_positional_arg(args, 0, has_keyword_args)
+    if fn_val.kind != VkFunction:
+      not_allowed("Function.examples must be called on a function")
+    let fn_obj = fn_val.ref.fn
+    if fn_obj == nil:
+      return new_array_value()
+
+    let out_arr = new_array_value()
+    for example in fn_obj.examples:
+      let arg_arr = new_array_value()
+      for arg_expr in example.args:
+        array_data(arg_arr).add(arg_expr)
+      array_data(out_arr).add(arg_arr)
+      case example.expectation_kind
+      of FekThrows:
+        array_data(out_arr).add("throws".to_symbol_value())
+        array_data(out_arr).add(example.expected)
+      of FekAnyReturn:
+        array_data(out_arr).add("->".to_symbol_value())
+        array_data(out_arr).add("_".to_symbol_value())
+      of FekReturn:
+        array_data(out_arr).add("->".to_symbol_value())
+        array_data(out_arr).add(example.expected)
+    out_arr
+
+  function_class.def_native_method("intent", function_intent_method)
+  function_class.def_native_method("examples", function_examples_method)
+
+  let function_intent_fn = new_ref(VkNativeFn)
+  function_intent_fn.native_fn = function_intent_method
+  App.app.gene_ns.ns["function_intent".to_key()] = function_intent_fn.to_ref_value()
+  App.app.global_ns.ns["function_intent".to_key()] = function_intent_fn.to_ref_value()
+
+  let function_examples_fn = new_ref(VkNativeFn)
+  function_examples_fn.native_fn = function_examples_method
+  App.app.gene_ns.ns["function_examples".to_key()] = function_examples_fn.to_ref_value()
+  App.app.global_ns.ns["function_examples".to_key()] = function_examples_fn.to_ref_value()
+
   r = new_ref(VkClass)
   r.class = function_class
   App.app.function_class = r.to_ref_value()

@@ -216,6 +216,21 @@ else
         TOTAL=$((TOTAL + 1))
         echo
     fi
+
+    # Run examples command tests (uses its own test script)
+    if [ -f "$SCRIPT_DIR/examples/run_tests.sh" ]; then
+        echo -e "${BLUE}Testing Examples Command:${NC}"
+        if "$SCRIPT_DIR/examples/run_tests.sh" > /dev/null 2>&1; then
+            printf "  %-40s ${GREEN}✓ PASS${NC}\n" "run-examples command suite"
+            PASSED=$((PASSED + 1))
+        else
+            printf "  %-40s ${RED}✗ FAIL${NC}\n" "run-examples command suite"
+            echo "    Run 'testsuite/examples/run_tests.sh' for details"
+            FAILED=$((FAILED + 1))
+        fi
+        TOTAL=$((TOTAL + 1))
+        echo
+    fi
 fi
 
 # Summary

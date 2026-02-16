@@ -1,0 +1,4 @@
+(fn bad [a]
+  ^examples [a -> 1]
+  a
+)

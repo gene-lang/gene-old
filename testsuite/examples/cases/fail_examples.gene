@@ -1,0 +1,4 @@
+(fn add [a b]
+  ^examples [[1 2] -> 4]
+  (a + b)
+)
