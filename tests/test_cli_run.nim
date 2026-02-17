@@ -1,4 +1,5 @@
 import unittest, os, streams
+import std/tempfiles
 
 import gene/gir
 import commands/run as run_command
@@ -81,3 +82,58 @@ suite "Run CLI":
     let cache_after = getFileInfo(gir_path).lastWriteTime
 
     check cache_after == cache_before
+
+  test "run resolves package imports from lockfile deps graph":
+    let root = createTempDir("gene_run_pkg_lock_", "")
+    let app_src = root / "src" / "index.gene"
+    let dep_root = root / ".gene" / "deps" / "x" / "core" / "1.0.0"
+    let lock_path = root / "package.gene.lock"
+
+    createDir(root / "src")
+    createDir(dep_root / "src")
+    writeFile(root / "package.gene", """
+^name "x/app"
+^version "0.1.0"
+^dependencies [
+  ($dep "x/core" "*" ^path "./vendor/core")
+]
+""")
+    writeFile(app_src, """
+(import version from "index" ^pkg "x/core")
+(version)
+""")
+    writeFile(dep_root / "package.gene", """
+^name "x/core"
+^version "1.0.0"
+^dependencies []
+""")
+    writeFile(dep_root / "src" / "index.gene", """
+(fn version [] 42)
+""")
+    writeFile(lock_path, """
+{
+  ^lock_version 1
+  ^root_dependencies {
+    ^x/core "x/core@1.0.0"
+  }
+  ^packages {
+    ^x/core@1.0.0 {
+      ^name "x/core"
+      ^resolved "1.0.0"
+      ^node_id "x/core@1.0.0"
+      ^dir ".gene/deps/x/core/1.0.0"
+      ^source {^type "path" ^path "./vendor/core"}
+      ^sha256 "dummy"
+      ^singleton false
+      ^dependencies {}
+    }
+  }
+}
+""")
+
+    defer:
+      if dirExists(root):
+        removeDir(root)
+
+    let result = run_command.handle("run", @[app_src])
+    check result.success

@@ -3,6 +3,7 @@ import tables, strutils, hashes, os, streams
 import ../types
 import ../compiler
 import ../gir
+import ../parser
 when not defined(noExtensions):
   import ./extension
 
@@ -11,6 +12,14 @@ type
     name*: string
     alias*: string
     children*: seq[string]  # For nested imports like n/[a b]
+
+  LockPackageNode = object
+    rel_dir: string
+    dependencies: Table[string, string]
+
+  LockGraph = object
+    root_dependencies: Table[string, string]
+    packages: Table[string, LockPackageNode]
 
 # Forward declarations
 proc workspace_src_paths(): seq[string]
@@ -129,6 +138,180 @@ proc find_package_root*(start_path: string): string =
     if parent.len == 0 or parent == dir:
       break
     dir = parent
+  return ""
+
+proc key_to_symbol_name(k: Key): string =
+  get_symbol(symbol_index(k))
+
+proc map_lookup(map_val: Value, key: string): Value =
+  if map_val.kind != VkMap:
+    return NIL
+  map_data(map_val).getOrDefault(key.to_key(), NIL)
+
+proc value_as_string(v: Value): string =
+  case v.kind
+  of VkString, VkSymbol:
+    v.str
+  else:
+    ""
+
+proc package_manifest_name(root: string): string =
+  let manifest_path = joinPath(root, "package.gene")
+  if not fileExists(manifest_path):
+    return ""
+  try:
+    let forms = read_all(readFile(manifest_path))
+    if forms.len == 0:
+      return ""
+    if forms.len == 1 and forms[0].kind == VkMap:
+      return value_as_string(map_lookup(forms[0], "name"))
+    var i = 0
+    while i + 1 < forms.len:
+      let key_node = forms[i]
+      if key_node.kind == VkSymbol and (key_node.str == "name" or key_node.str == "^name"):
+        return value_as_string(forms[i + 1])
+      inc(i)
+  except CatchableError:
+    discard
+  return ""
+
+proc package_root_matches_name(root: string, package_name: string): bool =
+  root.len > 0 and package_manifest_name(root) == package_name
+
+proc package_name_parts(package_name: string): tuple[parent: string, pkg: string] =
+  let parts = package_name.split("/")
+  if parts.len < 2:
+    return ("", "")
+  (parts[0], parts[1])
+
+proc path_within(base_path: string, candidate_path: string): bool =
+  let base_abs = absolutePath(base_path)
+  let cand_abs = absolutePath(candidate_path)
+  let rel = relativePath(cand_abs, base_abs)
+  rel == "." or (not rel.startsWith("..") and rel != "..")
+
+proc find_deps_root(start_path: string): string =
+  var dir = absolutePath(start_path)
+  while true:
+    let deps_root = joinPath(dir, ".gene", "deps")
+    if dirExists(deps_root):
+      return deps_root
+    let parent = parentDir(dir)
+    if parent.len == 0 or parent == dir:
+      break
+    dir = parent
+  return ""
+
+proc init_lock_graph(): LockGraph =
+  LockGraph(
+    root_dependencies: initTable[string, string](),
+    packages: initTable[string, LockPackageNode]()
+  )
+
+proc parse_lock_graph(lock_path: string): LockGraph =
+  result = init_lock_graph()
+  if not fileExists(lock_path):
+    return
+  try:
+    let forms = read_all(readFile(lock_path))
+    if forms.len == 0 or forms[0].kind != VkMap:
+      return
+    let root_map = forms[0]
+
+    let root_deps = map_lookup(root_map, "root_dependencies")
+    if root_deps.kind == VkMap:
+      for k, v in map_data(root_deps):
+        let dep_name = key_to_symbol_name(k)
+        let node_id = value_as_string(v)
+        if dep_name.len > 0 and node_id.len > 0:
+          result.root_dependencies[dep_name] = node_id
+
+    let packages = map_lookup(root_map, "packages")
+    if packages.kind != VkMap:
+      return
+
+    for k, v in map_data(packages):
+      if v.kind != VkMap:
+        continue
+      let node_id = key_to_symbol_name(k)
+      if node_id.len == 0:
+        continue
+      var node = LockPackageNode(
+        rel_dir: value_as_string(map_lookup(v, "dir")),
+        dependencies: initTable[string, string]()
+      )
+      let deps = map_lookup(v, "dependencies")
+      if deps.kind == VkMap:
+        for dep_key, dep_val in map_data(deps):
+          let dep_name = key_to_symbol_name(dep_key)
+          let dep_node_id = value_as_string(dep_val)
+          if dep_name.len > 0 and dep_node_id.len > 0:
+            node.dependencies[dep_name] = dep_node_id
+      result.packages[node_id] = node
+  except CatchableError:
+    discard
+
+proc resolve_package_from_lock(package_name: string, importer_root: string, importer_dir: string): string =
+  if importer_root.len == 0:
+    return ""
+
+  let lock_path = joinPath(importer_root, "package.gene.lock")
+  let lock = parse_lock_graph(lock_path)
+  if lock.root_dependencies.len == 0 and lock.packages.len == 0:
+    return ""
+
+  let importer_abs = absolutePath(importer_dir)
+  var importer_node_id = ""
+  var best_match_len = -1
+  for node_id, node in lock.packages:
+    if node.rel_dir.len == 0:
+      continue
+    let node_abs = absolutePath(joinPath(importer_root, node.rel_dir))
+    if path_within(node_abs, importer_abs):
+      if node_abs.len > best_match_len:
+        best_match_len = node_abs.len
+        importer_node_id = node_id
+
+  var dep_node_id = ""
+  if importer_node_id.len > 0 and lock.packages.hasKey(importer_node_id):
+    dep_node_id = lock.packages[importer_node_id].dependencies.getOrDefault(package_name, "")
+  if dep_node_id.len == 0:
+    dep_node_id = lock.root_dependencies.getOrDefault(package_name, "")
+  if dep_node_id.len == 0 or not lock.packages.hasKey(dep_node_id):
+    return ""
+
+  let dep_node = lock.packages[dep_node_id]
+  if dep_node.rel_dir.len == 0:
+    return ""
+  let dep_root = absolutePath(joinPath(importer_root, dep_node.rel_dir))
+  if not fileExists(joinPath(dep_root, "package.gene")):
+    return ""
+  if not package_root_matches_name(dep_root, package_name):
+    return ""
+  dep_root
+
+proc resolve_package_from_deps(package_name: string, importer_dir: string): string =
+  let deps_root = find_deps_root(importer_dir)
+  if deps_root.len == 0:
+    return ""
+
+  let (parent_name, pkg_name) = package_name_parts(package_name)
+  if parent_name.len == 0 or pkg_name.len == 0:
+    return ""
+  let pkg_base = joinPath(deps_root, parent_name, pkg_name)
+  if not dirExists(pkg_base):
+    return ""
+
+  var matches: seq[string] = @[]
+  for kind, path in walkDir(pkg_base):
+    if kind != pcDir:
+      continue
+    let candidate_root = absolutePath(path)
+    if package_root_matches_name(candidate_root, package_name):
+      matches.add(candidate_root)
+
+  if matches.len == 1:
+    return matches[0]
   return ""
 
 proc resolve_package_entrypoint(root: string): tuple[path: string, is_gir: bool] =
@@ -270,7 +453,8 @@ proc workspace_src_paths(): seq[string] =
 
 proc locate_package_root(package_name, importer_dir: string, override_path: string): string =
   ## Locate package root by name or explicit override.
-  let importer_root = find_package_root(importer_dir)
+  let importer_base = if importer_dir.len > 0: absolutePath(importer_dir) else: getCurrentDir()
+  let importer_root = find_package_root(importer_base)
 
   if override_path.len > 0:
     let base_path =
@@ -279,16 +463,24 @@ proc locate_package_root(package_name, importer_dir: string, override_path: stri
       elif importer_root.len > 0:
         joinPath(importer_root, override_path)
       else:
-        joinPath(importer_dir, override_path)
+        joinPath(importer_base, override_path)
     let root = find_package_root(base_path)
     if root.len == 0:
       not_allowed("Package path override '" & override_path & "' does not contain package.gene")
     return root
 
+  let locked_root = resolve_package_from_lock(package_name, importer_root, importer_base)
+  if locked_root.len > 0:
+    return locked_root
+
+  let materialized_dep_root = resolve_package_from_deps(package_name, importer_base)
+  if materialized_dep_root.len > 0:
+    return materialized_dep_root
+
   let name_path = package_name.replace("/", $DirSep)
   # Walk search paths from importer_dir plus ancestors.
-  var bases = package_search_paths(importer_dir)
-  var walk_dir = importer_dir
+  var bases = package_search_paths(importer_base)
+  var walk_dir = importer_base
   while walk_dir.len > 0:
     let parent = parentDir(walk_dir)
     if parent.len == 0 or parent == walk_dir:
@@ -301,25 +493,24 @@ proc locate_package_root(package_name, importer_dir: string, override_path: stri
     let candidate_full = joinPath(base_abs, name_path)
     if dirExists(candidate_full) or fileExists(candidate_full):
       let root = find_package_root(candidate_full)
-      if root.len > 0:
+      if package_root_matches_name(root, package_name):
         return root
 
     let last_part = package_name.split("/")[^1]
     let candidate_short = joinPath(base_abs, last_part)
     if dirExists(candidate_short) or fileExists(candidate_short):
       let root = find_package_root(candidate_short)
-      if root.len > 0:
+      if package_root_matches_name(root, package_name):
         return root
 
   # Fallback: try sibling of the current package root using the final segment.
   if importer_root.len > 0:
     let last_part = package_name.split("/")[^1]
     let sibling = joinPath(parentDir(importer_root), last_part)
-    let root = find_package_root(sibling)
-    if root.len > 0:
-      return root
-  when not defined(release):
-    echo "locate_package_root failed for ", package_name, " (importer_dir=", importer_dir, ")"
+    if dirExists(sibling) or fileExists(sibling):
+      let root = find_package_root(sibling)
+      if package_root_matches_name(root, package_name):
+        return root
   return ""
 
 proc find_native_build(pkg_root: string, resolved_path: string): string =
@@ -728,7 +919,9 @@ proc handle_import*(vm: ptr VirtualMachine, import_gene: ptr Gene): tuple[path: 
 
   # Determine importer directory
   let importer_module = current_module_path(vm)
-  let importer_dir = if importer_module.len > 0: parentDir(importer_module) else: getCurrentDir()
+  let importer_dir =
+    if importer_module.len > 0: absolutePath(parentDir(importer_module))
+    else: getCurrentDir()
 
   var resolved_path = raw_module_path
   var is_gir = false
