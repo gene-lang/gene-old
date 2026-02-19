@@ -1,4 +1,4 @@
-import std/[unittest, strutils]
+import std/[unittest]
 import ../src/types
 import ../src/parser
 import ../src/ir
@@ -16,6 +16,12 @@ proc hasOpcode(code: seq[AirInst]; op: AirOpcode): bool =
     if inst.op == op:
       return true
   false
+
+proc findOpcode(code: seq[AirInst]; op: AirOpcode): int =
+  for i, inst in code:
+    if inst.op == op:
+      return i
+  -1
 
 suite "Compiler - Literals":
   test "compile nil":
@@ -118,6 +124,16 @@ suite "Compiler - Arithmetic":
     let code = mainFnCode(m)
     check code.hasOpcode(OpCmpLt)
 
+  test "infix precedence lowering":
+    let m = compile("(5 + 3 * 2 ** 2)")
+    let code = mainFnCode(m)
+    let powAt = findOpcode(code, OpPow)
+    let mulAt = findOpcode(code, OpMul)
+    let addAt = findOpcode(code, OpAdd)
+    check powAt >= 0
+    check mulAt > powAt
+    check addAt > mulAt
+
 suite "Compiler - Comparisons":
   test "equal":
     let m = compile("(== 1 1)")
@@ -199,6 +215,12 @@ suite "Compiler - Loops":
     check code.hasOpcode(OpIterHasNext)
     check code.hasOpcode(OpIterNext)
 
+  test "while loop":
+    let m = compile("(var x 3) (while (x > 0) (x -= 1))")
+    let code = mainFnCode(m)
+    check code.hasOpcode(OpBrFalse)
+    check code.hasOpcode(OpJump)
+
 suite "Compiler - Functions":
   test "named function":
     let m = compile("(fn add [a b] (+ a b))")
@@ -230,6 +252,32 @@ suite "Compiler - Functions":
   test "function with no params":
     let m = compile("(fn greet [] 42)")
     check m.functions[1].arity == 0
+
+  test "generator function (fn*)":
+    let m = compile("(fn* range [n] (yield n))")
+    check m.functions.len >= 2
+    check FFlagGenerator in m.functions[1].flags
+
+  test "keyword/default/variadic params metadata":
+    let m = compile("(fn f [a = 1 ^b ^^c ^!d rest...] a)")
+    let fnMeta = m.functions[1]
+    check fnMeta.params.len == 5
+    check fnMeta.params[0].name == "a"
+    check fnMeta.params[0].hasDefault == true
+    check fnMeta.params[0].defaultValue.toDebugString() == "1"
+    check fnMeta.params[1].name == "b"
+    check fnMeta.params[1].isKeyword == true
+    check fnMeta.params[1].hasDefault == false
+    check fnMeta.params[2].name == "c"
+    check fnMeta.params[2].isKeyword == true
+    check fnMeta.params[2].hasDefault == true
+    check fnMeta.params[2].defaultValue.toDebugString() == "true"
+    check fnMeta.params[3].name == "d"
+    check fnMeta.params[3].isKeyword == true
+    check fnMeta.params[3].hasDefault == true
+    check fnMeta.params[3].defaultValue.toDebugString() == "nil"
+    check fnMeta.params[4].name == "rest"
+    check fnMeta.params[4].isVariadic == true
 
 suite "Compiler - Classes":
   test "simple class":
@@ -298,6 +346,12 @@ suite "Compiler - Try/Catch":
     check code.hasOpcode(OpFinallyBegin)
     check code.hasOpcode(OpFinallyEnd)
 
+  test "catch wildcard underscore":
+    let m = compile("(try (throw \"x\") catch _ 42)")
+    let code = mainFnCode(m)
+    check code.hasOpcode(OpCatchBegin)
+    check code.hasOpcode(OpCatchEnd)
+
 suite "Compiler - Async/Await":
   test "async block":
     let m = compile("(async 42)")
@@ -341,6 +395,14 @@ suite "Compiler - Collections":
     let code = mainFnCode(m)
     check code.hasOpcode(OpArrSpread)
 
+suite "Compiler - Case":
+  test "case compiles comparisons and branches":
+    let m = compile("(case x when 1 10 when 2 20 else 30)")
+    let code = mainFnCode(m)
+    check code.hasOpcode(OpCmpEq)
+    check code.hasOpcode(OpBrFalse)
+    check code.hasOpcode(OpJump)
+
 suite "Compiler - Module structure":
   test "main function is at index 0":
     let m = compile("42")
@@ -379,6 +441,11 @@ suite "Compiler - Member access":
     # Method fn is the last one added
     let methodFn = m.functions[^1]
     check methodFn.code.hasOpcode(OpLoadSelf)
+
+  test "nil-safe member access":
+    let m = compile("user?/profile?/email")
+    let code = mainFnCode(m)
+    check code.hasOpcode(OpGetMemberNil)
 
 suite "Compiler - Capabilities and Quotas":
   test "capabilities block":
@@ -420,3 +487,24 @@ suite "Compiler - Tool calls":
     let m = compile("(tool_unwrap fut)")
     let code = mainFnCode(m)
     check code.hasOpcode(OpToolResultUnwrap)
+
+suite "Compiler - Modules and AOP":
+  test "file import emits OpImport with path constant":
+    let m = compile("(import * as Utils \"./utils\")")
+    let code = mainFnCode(m)
+    var got = false
+    for inst in code:
+      if inst.op == OpImport and inst.mode == 1'u8:
+        got = true
+        check int(inst.c) >= 0
+    check got == true
+
+  test "keyword call emits OpCallKw":
+    let m = compile("(f ^a 1 2)")
+    let code = mainFnCode(m)
+    check code.hasOpcode(OpCallKw)
+
+  test "aspect defines callable bundle":
+    let m = compile("(aspect X [cls m1] (before m1 [a...] nil))")
+    check m.functions.len >= 2
+    check m.functions[1].name == "X"

@@ -1,7 +1,6 @@
-import std/[unittest, strutils, tables, sets]
+import std/[unittest, os, tables]
 import ../src/types
 import ../src/parser
-import ../src/ir
 import ../src/compiler
 import ../src/vm
 import ../src/ffi
@@ -13,14 +12,12 @@ proc run(source: string): Value =
   registerDefaultNatives(vm)
   vm.runModule(module)
 
-proc runVm(source: string): (var Vm, Value) =
-  ## Returns the VM and result for inspection
-  let prog = parseProgram(source)
-  let module = compileProgram(prog)
+proc runWithPath(source: string; sourcePath: string): Value =
+  let prog = parseProgram(source, sourcePath)
+  let module = compileProgram(prog, sourcePath)
   var vm = newVm()
   registerDefaultNatives(vm)
-  let result = vm.runModule(module)
-  (vm, result)
+  vm.runModule(module)
 
 suite "VM - Primitives":
   test "nil value":
@@ -102,6 +99,10 @@ suite "VM - Arithmetic":
   test "mixed int/float addition":
     let r = run("(+ 1 2.5)")
     check abs(asFloat(r) - 3.5) < 0.001
+
+  test "infix precedence":
+    let r = run("(5 + 3 * 2 ** 2)")
+    check asInt(r) == 17
 
 suite "VM - Comparisons":
   test "equal integers":
@@ -245,6 +246,28 @@ suite "VM - Loops":
     """)
     check asInt(r) == 15
 
+  test "while loop":
+    let r = run("""
+      (var x 3)
+      (while (x > 0)
+        (x -= 1))
+      x
+    """)
+    check asInt(r) == 0
+
+suite "VM - Case":
+  test "case when else":
+    let r = run("""
+      (var value 2)
+      (case value
+        when 1 "one"
+        when 2 "two"
+        else "other")
+    """)
+    let s = asStringObj(r)
+    check s != nil
+    check s.value == "two"
+
 suite "VM - Functions":
   test "simple function call":
     let r = run("""
@@ -293,6 +316,43 @@ suite "VM - Functions":
       (apply double 21)
     """)
     check asInt(r) == 42
+
+  test "default positional parameter":
+    let r = run("""
+      (fn add [a = 1 b] (a + b))
+      (add 4)
+    """)
+    check asInt(r) == 5
+
+  test "keyword parameters and call shorthands":
+    let r = run("""
+      (fn choose [^^a b]
+        (if a b))
+      (var x (choose 4))
+      (var y (choose ^!a 4))
+      [x y]
+    """)
+    let arr = asArrayObj(r)
+    check arr != nil
+    check arr.items.len == 2
+    check asInt(arr.items[0]) == 4
+    check isNil(arr.items[1])
+
+  test "variadic parameter collects rest":
+    let r = run("""
+      (fn collect [head tail...]
+        [head tail])
+      (collect 1 2 3 4)
+    """)
+    let outArr = asArrayObj(r)
+    check outArr != nil
+    check outArr.items.len == 2
+    check asInt(outArr.items[0]) == 1
+    let rest = asArrayObj(outArr.items[1])
+    check rest != nil
+    check rest.items.len == 3
+    check asInt(rest.items[0]) == 2
+    check asInt(rest.items[2]) == 4
 
 suite "VM - Closures":
   test "simple closure":
@@ -349,6 +409,44 @@ suite "VM - Arrays":
     let arr = asArrayObj(r)
     check arr != nil
     check arr.items.len == 0
+
+  test "array .push and .pop":
+    let r = run("""
+      (var arr [1 2])
+      (arr .push 3)
+      (var popped (arr .pop))
+      [arr popped]
+    """)
+    let outArr = asArrayObj(r)
+    check outArr != nil
+    let arr = asArrayObj(outArr.items[0])
+    check arr != nil
+    check arr.items.len == 2
+    check asInt(arr.items[0]) == 1
+    check asInt(arr.items[1]) == 2
+    check asInt(outArr.items[1]) == 3
+
+  test "array .map/.filter/.reduce":
+    let r = run("""
+      (var arr [1 2 3])
+      (var mapped (arr .map (fn [x] (x * 2))))
+      (var filtered (arr .filter (fn [x] (x > 1))))
+      (var reduced (arr .reduce 0 (fn [acc x] (acc + x))))
+      [mapped filtered reduced]
+    """)
+    let outArr = asArrayObj(r)
+    check outArr != nil
+    let mapped = asArrayObj(outArr.items[0])
+    let filtered = asArrayObj(outArr.items[1])
+    check mapped != nil
+    check filtered != nil
+    check mapped.items.len == 3
+    check asInt(mapped.items[0]) == 2
+    check asInt(mapped.items[2]) == 6
+    check filtered.items.len == 2
+    check asInt(filtered.items[0]) == 2
+    check asInt(filtered.items[1]) == 3
+    check asInt(outArr.items[2]) == 6
 
 suite "VM - Maps":
   test "map literal":
@@ -592,6 +690,32 @@ suite "VM - String operations":
     """)
     check asInt(r) == 5
 
+  test "hash interpolation":
+    let r = run("""
+      (var name "Gene")
+      "Hello, #{name}!"
+    """)
+    let s = asStringObj(r)
+    check s != nil
+    check s.value == "Hello, Gene!"
+
+suite "VM - Nil-safe navigation":
+  test "nil-safe chain returns nil":
+    let r = run("""
+      (var user nil)
+      user?/profile?/email
+    """)
+    check isNil(r)
+
+  test "nil-safe chain returns value":
+    let r = run("""
+      (var user {^profile {^email "u@example.com"}})
+      user?/profile?/email
+    """)
+    let s = asStringObj(r)
+    check s != nil
+    check s.value == "u@example.com"
+
 suite "VM - Multiple expressions":
   test "last expression is result":
     let r = run("1\n2\n3")
@@ -629,6 +753,51 @@ suite "VM - Capabilities":
         false)
     """)
     check asBool(r) == false
+
+suite "VM - Modules":
+  test "file import with relative path and cache":
+    let root = getTempDir() / "genex_vm_modules_test"
+    defer:
+      if dirExists(root):
+        removeDir(root)
+    if dirExists(root):
+      removeDir(root)
+    createDir(root)
+
+    let subPath = root / "sub.gene"
+    let utilsPath = root / "utils.gene"
+    let mainPath = root / "main.gene"
+
+    writeFile(subPath, "(var n 7)\n")
+    writeFile(utilsPath, """
+      (import * as Sub "./sub")
+      (var answer (Sub/n + 35))
+      (fn inc [x] (x + 1))
+    """)
+
+    let mainSrc = """
+      (import * as Utils "./utils")
+      (import * as Utils2 "./utils")
+      [Utils/answer (Utils/inc 9) Utils2/answer]
+    """
+    writeFile(mainPath, mainSrc)
+
+    let r = runWithPath(mainSrc, mainPath)
+    let arr = asArrayObj(r)
+    check arr != nil
+    check arr.items.len == 3
+    check asInt(arr.items[0]) == 42
+    check asInt(arr.items[1]) == 10
+    check asInt(arr.items[2]) == 42
+
+suite "VM - AOP bundles":
+  test "aspect bundle is callable":
+    let r = run("""
+      (aspect X [cls m1]
+        (before m1 [a...] nil))
+      (X 1 2)
+    """)
+    check isNil(r)
 
 suite "VM - Quotes":
   test "quote returns gene value":

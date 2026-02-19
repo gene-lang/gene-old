@@ -17,7 +17,7 @@
 
 # Basic generator
 (println "--- Basic Generator ---")
-(fn gen3 []
+(fn* gen3 []
   (yield 1)
   (yield 2)
   (yield 3))
@@ -29,7 +29,7 @@
 
 # Generator with loop
 (println "--- Generator with Loop ---")
-(fn range [n]
+(fn* range [n]
   (var i 0)
   (loop
     (if (i >= n) (break))
@@ -58,7 +58,7 @@
 
 # Generator with parameters
 (println "--- Generator with Parameters ---")
-(fn range_from [start end_val]
+(fn* range_from [start end_val]
   (var i start)
   (loop
     (if (i >= end_val) (break))

@@ -1,4 +1,4 @@
-import std/[unittest, strutils, tables]
+import std/[unittest, tables]
 import ../src/types
 import ../src/parser
 
@@ -200,6 +200,34 @@ suite "Parser - Maps":
     check node.entries[0].key.text == "a"
     check node.entries[0].value.kind == AkNil
 
+  test "parse nested map shorthand":
+    let node = parseOne("{^a^b 1}")
+    check node.kind == AkMap
+    check node.entries.len == 1
+    check node.entries[0].key.kind == AkKeyword
+    check node.entries[0].key.text == "a"
+    check node.entries[0].value.kind == AkMap
+    check node.entries[0].value.entries.len == 1
+    check node.entries[0].value.entries[0].key.kind == AkKeyword
+    check node.entries[0].value.entries[0].key.text == "b"
+    check node.entries[0].value.entries[0].value.kind == AkInt
+    check node.entries[0].value.entries[0].value.intVal == 1
+
+  test "parse nested map shorthand with implicit true":
+    let node = parseOne("{^a^^b}")
+    check node.kind == AkMap
+    check node.entries.len == 1
+    check node.entries[0].value.kind == AkMap
+    check node.entries[0].value.entries[0].value.kind == AkBool
+    check node.entries[0].value.entries[0].value.boolVal == true
+
+  test "parse nested map shorthand with implicit nil":
+    let node = parseOne("{^a^!b}")
+    check node.kind == AkMap
+    check node.entries.len == 1
+    check node.entries[0].value.kind == AkMap
+    check node.entries[0].value.entries[0].value.kind == AkNil
+
 suite "Parser - Comments":
   test "skip line comment":
     let prog = parseProgram("# this is a comment\n42")
@@ -231,6 +259,15 @@ suite "Parser - String Interpolation":
     check node.kind == AkString
     check node.text == "just text"
 
+  test "hash interpolation":
+    let node = parseOne("\"hello #{name}\"")
+    check node.kind == AkInterpolatedString
+    check node.parts.len == 2
+    check node.parts[0].kind == AkString
+    check node.parts[0].text == "hello "
+    check node.parts[1].kind == AkSymbol
+    check node.parts[1].text == "name"
+
 suite "Parser - Program":
   test "parse multiple expressions":
     let prog = parseProgram("1 2 3")
@@ -250,9 +287,26 @@ suite "Parser - Program":
 suite "Parser - Semicolons":
   test "semicolon chains":
     let node = parseOne("(a; b)")
-    # (a; b) = ((a) b) which is a list with list[a] as head
+    check astToString(node) == "((a) b)"
+
+  test "semicolon chains (three segments)":
+    let node = parseOne("(a; b; c)")
+    check astToString(node) == "(((a) b) c)"
+
+  test "semicolon chains with props":
+    let node = parseOne("(a ^x 1; b ^y 2; c)")
+    check astToString(node) == "(((a ^x 1) b ^y 2) c)"
+
+suite "Parser - Parser Macro":
+  test "#@ parser macro":
+    let node = parseOne("#@f x")
     check node.kind == AkList
-    check node.items.len == 2
+    check astToString(node) == "(f x)"
+
+  test "#@ parser macro in list":
+    let node = parseOne("(x ^a #@f 1 ^b 2 c)")
+    check node.kind == AkList
+    check astToString(node) == "(x ^a (f 1) ^b 2 c)"
 
 suite "Parser - Spread operator":
   test "spread in array":

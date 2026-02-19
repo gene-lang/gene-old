@@ -93,6 +93,32 @@
 (assert_eq (times3 4) 12 "closure times3(4) = 12")
 (assert_eq (times5 4) 20 "closure times5(4) = 20")
 
+# Parameter styles
+(println "--- Params ---")
+(fn add_def [a = 1 b]
+  (a + b))
+(assert_eq (add_def 4) 5 "default positional param")
+
+(fn choose [^^a b]
+  (if a b))
+(assert_eq (choose 4) 4 "keyword bool shorthand default true")
+(assert_eq (choose ^!a 4) nil "keyword bool shorthand override nil")
+
+(fn collect [head tail...]
+  [head tail])
+(var collected (collect 1 2 3 4))
+(assert_eq collected/0 1 "variadic keeps head")
+(assert_eq (len collected/1) 3 "variadic captures rest as array")
+
+# Generator function form
+(println "--- fn* ---")
+(fn* one_plus [x]
+  (yield x)
+  (yield (x + 1)))
+(var gg (one_plus 10))
+(assert_eq (resume gg) 10 "fn* first yield")
+(assert_eq (resume gg) 11 "fn* second yield")
+
 # Summary
 (println "")
 (println "=== Results ===")

@@ -1,0 +1,3 @@
+(import * as Sub "./module_sub")
+(var answer (Sub/n + 35))
+(fn inc [x] (x + 1))

@@ -52,6 +52,18 @@
 (assert_eq combined/0 1 "spread[0] = 1")
 (assert_eq combined/3 4 "spread[3] = 4")
 
+# Array methods
+(println "--- Array Methods ---")
+(var m_arr [1 2 3])
+(assert_eq (m_arr .push 4) 4 "arr.push returns new length")
+(assert_eq (m_arr .pop) 4 "arr.pop returns last element")
+(var mapped (m_arr .map (fn [x] (x * 2))))
+(assert_eq mapped/0 2 "arr.map first value")
+(assert_eq mapped/2 6 "arr.map third value")
+(var filtered (m_arr .filter (fn [x] (x > 1))))
+(assert_eq (len filtered) 2 "arr.filter keeps two values")
+(assert_eq (m_arr .reduce 0 (fn [acc x] (acc + x))) 6 "arr.reduce sums")
+
 # Maps
 (println "--- Maps ---")
 (var m {^a 1 ^b 2 ^c 3})
@@ -73,6 +85,11 @@
 (var config {^db {^host "localhost" ^port 5432}})
 (assert_eq config/db/host "localhost" "nested map config/db/host")
 (assert_eq config/db/port 5432 "nested map config/db/port")
+
+# Nil-safe navigation
+(assert_eq config?/db?/host "localhost" "nil-safe path returns value")
+(var nil_cfg nil)
+(assert_eq nil_cfg?/db?/host nil "nil-safe path returns nil")
 
 # Gene values (quoted)
 (println "--- Gene Values ---")

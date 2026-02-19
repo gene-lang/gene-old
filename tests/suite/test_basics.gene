@@ -65,6 +65,8 @@
 (assert_eq (10 - 3) 7 "infix 10 - 3 = 7")
 (assert_eq (4 * 5) 20 "infix 4 * 5 = 20")
 (assert_eq (10 % 3) 1 "infix 10 % 3 = 1")
+(assert_eq (5 + 3 * 2) 11 "precedence: 5 + 3 * 2 = 11")
+(assert_eq (5 + 3 * 2 ** 2) 17 "precedence: 5 + 3 * 2 ** 2 = 17")
 
 # Comparisons
 (println "--- Comparisons ---")
@@ -97,6 +99,8 @@
 (assert_eq (to_i "123") 123 "to_i parses integer")
 (assert_eq (len "hello") 5 "len of string")
 (assert_eq (append "a" "b" "c") "abc" "append strings")
+(var who "Gene")
+(assert_eq "Hello, #{who}!" "Hello, Gene!" "hash interpolation")
 
 # Summary
 (println "")

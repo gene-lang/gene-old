@@ -110,8 +110,25 @@
 (loop
   (n += 1)
   (factorial *= n)
-  (if (n >= 5) (break)))
+(if (n >= 5) (break)))
 (assert_eq factorial 120 "loop factorial(5) = 120")
+
+# While loop
+(println "--- While ---")
+(var wx 4)
+(while (wx > 0)
+  (wx -= 1))
+(assert_eq wx 0 "while loop decrements to zero")
+
+# Case/when/else
+(println "--- Case ---")
+(var cval 2)
+(var case_res
+  (case cval
+    when 1 "one"
+    when 2 "two"
+    else "other"))
+(assert_eq case_res "two" "case chooses matching branch")
 
 # Summary
 (println "")
