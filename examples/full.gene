@@ -344,6 +344,7 @@ else
 
 (x ^a 1 b c) # = (x b ^a 1 c) = (x b c ^a 1)
 (x ^a 1 b ^c 2) # => Invalid code, properties can not be split by children
+# #@ is a parser macro
 (x ^a #@f 1 ^b 2 c) # = (x ^a (f 1) ^b 2 c)
 
 # =============================================================================
@@ -542,9 +543,12 @@ catch _
 # before/before_filter/around/after advices
 (fn f [a b] ...)
 (before f [a b] ...)
-(afound f [a b target]
+(around f [a b target]
   (a += 1)
   (target a b)
+)
+(after f [a b result]
+  (result + 1)
 )
 
 # AOP on classes/methods
@@ -886,3 +890,12 @@ catch _
 # /prop     — self/prop inside methods
 
 (println "=== Gene Complete Feature Reference ===")
+
+# =============================================================================
+# 30. MISCALLANEOUS
+# =============================================================================
+
+# This is handled by the parser
+(a; b)          # = ((a) b)
+(a; b; c)       # = (((a) b) c)
+(a ^x 1; b ^y 2; c)       # = (((a ^x 1) b ^y 2) c)
