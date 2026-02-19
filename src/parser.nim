@@ -1,4 +1,4 @@
-import std/[strutils, parseutils, sequtils, tables]
+import std/[strutils, parseutils, sequtils, tables, unicode]
 import ./types
 
 type
@@ -9,6 +9,7 @@ type
     AkBool
     AkInt
     AkFloat
+    AkChar
     AkString
     AkInterpolatedString
     AkSymbol
@@ -32,6 +33,8 @@ type
       intVal*: int64
     of AkFloat:
       floatVal*: float64
+    of AkChar:
+      charVal*: uint32
     of AkString, AkSymbol, AkKeyword:
       text*: string
     of AkInterpolatedString:
@@ -116,6 +119,103 @@ proc skipWhitespaceAndComments(r: var Reader) =
     break
 
 proc parseExpr(r: var Reader): AstNode
+
+proc isValidUnicodeScalar(codepoint: uint32): bool {.inline.} =
+  codepoint <= 0x10FFFF'u32 and not (codepoint >= 0xD800'u32 and codepoint <= 0xDFFF'u32)
+
+proc hexDigitValue(ch: char): int {.inline.} =
+  if ch >= '0' and ch <= '9':
+    return ord(ch) - ord('0')
+  if ch >= 'a' and ch <= 'f':
+    return ord(ch) - ord('a') + 10
+  if ch >= 'A' and ch <= 'F':
+    return ord(ch) - ord('A') + 10
+  -1
+
+proc isSingleQuoteCharCandidate(r: Reader): bool =
+  if r.peek() != '\'':
+    return false
+
+  var i = r.pos + 1
+  var escaped = false
+  while i < r.source.len:
+    let ch = r.source[i]
+    if escaped:
+      escaped = false
+      inc(i)
+      continue
+
+    if ch == '\\':
+      escaped = true
+      inc(i)
+      continue
+
+    if ch == '\'':
+      return true
+
+    if ch.isSpaceAscii or ch in {'(', ')', '[', ']', '{', '}', '"', '`', ';', '#'}:
+      return false
+
+    inc(i)
+
+  false
+
+proc readCharLiteral(r: var Reader): AstNode =
+  let line = r.line
+  let col = r.col
+  discard r.advance() # opening apostrophe
+
+  if r.atEnd:
+    raise r.fail("unterminated char literal")
+  if r.peek() == '\'':
+    raise r.fail("empty char literal")
+
+  var codepoint: uint32
+  if r.peek() == '\\':
+    discard r.advance() # backslash
+    if r.atEnd:
+      raise r.fail("unterminated char escape")
+    let esc = r.advance()
+    case esc
+    of 'n':
+      codepoint = uint32(ord('\n'))
+    of 'r':
+      codepoint = uint32(ord('\r'))
+    of 't':
+      codepoint = uint32(ord('\t'))
+    of '\\':
+      codepoint = uint32(ord('\\'))
+    of '\'':
+      codepoint = uint32(ord('\''))
+    of 'u':
+      var val = 0
+      for _ in 0..<4:
+        if r.atEnd:
+          raise r.fail("unterminated unicode char escape")
+        let digit = hexDigitValue(r.advance())
+        if digit < 0:
+          raise r.fail("invalid unicode escape in char literal")
+        val = (val shl 4) or digit
+      codepoint = uint32(val)
+    else:
+      raise r.fail("invalid char escape '\\" & $esc & "'")
+  else:
+    var idx = r.pos
+    var runeVal: Rune
+    fastRuneAt(r.source, idx, runeVal, true)
+    let consumed = idx - r.pos
+    for _ in 0..<consumed:
+      discard r.advance()
+    codepoint = uint32(int32(runeVal))
+
+  if not isValidUnicodeScalar(codepoint):
+    raise r.fail("invalid unicode scalar in char literal")
+  if r.atEnd or r.peek() != '\'':
+    raise r.fail("char literal must contain exactly one codepoint")
+  discard r.advance() # closing apostrophe
+
+  result = newNode(AkChar, line, col)
+  result.charVal = codepoint
 
 proc mkKeywordNode(line, col: int; name: string): AstNode =
   result = newNode(AkKeyword, line, col)
@@ -595,7 +695,12 @@ proc parseExpr(r: var Reader): AstNode =
     readString(r)
   of '^':
     parseKeyword(r)
-  of '\'', '`':
+  of '\'':
+    if isSingleQuoteCharCandidate(r):
+      readCharLiteral(r)
+    else:
+      parseQuote(r)
+  of '`':
     parseQuote(r)
   else:
     parseAtom(r)
@@ -633,6 +738,24 @@ proc astToString*(n: AstNode): string =
     $n.intVal
   of AkFloat:
     $n.floatVal
+  of AkChar:
+    let cp = n.charVal
+    if cp == uint32(ord('\n')):
+      "'\\n'"
+    elif cp == uint32(ord('\r')):
+      "'\\r'"
+    elif cp == uint32(ord('\t')):
+      "'\\t'"
+    elif cp == uint32(ord('\\')):
+      "'\\\\'"
+    elif cp == uint32(ord('\'')):
+      "'\\''"
+    elif cp >= 0x20'u32 and cp <= 0x7E'u32:
+      "'" & $char(cp) & "'"
+    elif cp <= 0xFFFF'u32:
+      "'\\u" & cp.toHex(4).toLowerAscii() & "'"
+    else:
+      "'" & Rune(int32(cp)).toUTF8() & "'"
   of AkString:
     "\"" & n.text & "\""
   of AkSymbol:
@@ -692,6 +815,8 @@ proc quotedAstToValue*(node: AstNode): Value =
     valueInt(node.intVal)
   of AkFloat:
     valueFloat(node.floatVal)
+  of AkChar:
+    valueChar(node.charVal)
   of AkString:
     newStringValue(node.text)
   of AkSymbol:

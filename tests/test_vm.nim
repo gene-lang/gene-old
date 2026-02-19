@@ -58,6 +58,21 @@ suite "VM - Primitives":
     check s != nil
     check s.value == "hello"
 
+  test "ascii char value":
+    let r = run("'a'")
+    check isChar(r)
+    check asCharCode(r) == uint32(ord('a'))
+
+  test "unicode char value":
+    let r = run("'中'")
+    check isChar(r)
+    check asCharCode(r) == 0x4E2D'u32
+
+  test "escaped char value":
+    let r = run("'\\n'")
+    check isChar(r)
+    check asCharCode(r) == uint32(ord('\n'))
+
 suite "VM - Arithmetic":
   test "integer addition":
     let r = run("(+ 1 2)")
@@ -134,6 +149,12 @@ suite "VM - Comparisons":
 
   test "not equal strings":
     check asBool(run("(!= \"hello\" \"world\")")) == true
+
+  test "equal chars":
+    check asBool(run("(== 'a' 'a')")) == true
+
+  test "not equal chars":
+    check asBool(run("(== 'a' 'b')")) == false
 
 suite "VM - Boolean Logic":
   test "and true true":
@@ -764,6 +785,12 @@ suite "VM - Native functions":
     check s != nil
     check s.value == "hello world"
 
+  test "str converts char to one-codepoint string":
+    let r = run("(str '中')")
+    let s = asStringObj(r)
+    check s != nil
+    check s.value == "中"
+
 suite "VM - typeof":
   test "typeof int":
     let r = run("(typeof 42)")
@@ -785,6 +812,10 @@ suite "VM - typeof":
     let r = run("(typeof [1 2])")
     check asSymbolName(r) == "array"
 
+  test "typeof char":
+    let r = run("(typeof 'a')")
+    check asSymbolName(r) == "char"
+
 suite "VM - String operations":
   test "string concatenation via append":
     let r = run("(append \"hello\" \" world\")")
@@ -798,6 +829,29 @@ suite "VM - String operations":
       s/.length
     """)
     check asInt(r) == 5
+
+  test "string indexing returns char":
+    let r = run("""
+      (var s "hello")
+      s/0
+    """)
+    check isChar(r)
+    check asCharCode(r) == uint32(ord('h'))
+
+  test "unicode string indexing is codepoint-aware":
+    let r = run("""
+      (var s "a中文")
+      [s/0 s/1 s/2]
+    """)
+    let arr = asArrayObj(r)
+    check arr != nil
+    check arr.items.len == 3
+    check isChar(arr.items[0])
+    check isChar(arr.items[1])
+    check isChar(arr.items[2])
+    check asCharCode(arr.items[0]) == uint32(ord('a'))
+    check asCharCode(arr.items[1]) == 0x4E2D'u32
+    check asCharCode(arr.items[2]) == 0x6587'u32
 
   test "hash interpolation":
     let r = run("""

@@ -1626,6 +1626,8 @@ proc encodeValue(v: Value; ctx: var ObjEncodeCtx): JsonNode =
     %*{"t": "bool", "v": asBool(v)}
   of VkInt:
     %*{"t": "int", "v": asInt(v)}
+  of VkChar:
+    %*{"t": "char", "v": asCharCode(v)}
   of VkNumber:
     %*{"t": "num", "v": asFloat(v)}
   of VkSymbol:
@@ -1717,6 +1719,8 @@ proc decodeValue(vm: var Vm; node: JsonNode; ctx: var ObjDecodeCtx): Value =
     valueBool(node["v"].getBool())
   of "int":
     valueInt(node["v"].getBiggestInt())
+  of "char":
+    valueChar(uint32(node["v"].getInt()))
   of "num":
     valueFloat(node["v"].getFloat())
   of "sym":
@@ -2756,20 +2760,29 @@ proc executeFunction(
       of OpGetChild:
         let target = popValue(frame)
         let idx = int(inst.b)
-        let arr = asArrayObj(target)
-        if arr != nil:
-          pushValue(frame, arrayGet(target, idx))
+        let strObj = asStringObj(target)
+        if strObj != nil:
+          pushValue(frame, stringCodepointAt(strObj.value, idx))
         else:
-          let gene = asGeneObj(target)
-          if gene != nil and idx >= 0 and idx < gene.children.len:
-            pushValue(frame, gene.children[idx])
+          let arr = asArrayObj(target)
+          if arr != nil:
+            pushValue(frame, arrayGet(target, idx))
           else:
-            pushValue(frame, mapGet(target, valueInt(idx)))
+            let gene = asGeneObj(target)
+            if gene != nil and idx >= 0 and idx < gene.children.len:
+              pushValue(frame, gene.children[idx])
+            else:
+              pushValue(frame, mapGet(target, valueInt(idx)))
       of OpGetChildDynamic:
         let key = popValue(frame)
         let target = popValue(frame)
         if isInt(key):
-          pushValue(frame, arrayGet(target, int(asInt(key))))
+          let idx = int(asInt(key))
+          let strObj = asStringObj(target)
+          if strObj != nil:
+            pushValue(frame, stringCodepointAt(strObj.value, idx))
+          else:
+            pushValue(frame, arrayGet(target, idx))
         else:
           pushValue(frame, mapGet(target, key))
 

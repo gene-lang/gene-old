@@ -1,4 +1,4 @@
-import std/[math, strutils, tables, sequtils]
+import std/[math, strutils, tables, sequtils, unicode]
 
 const
   QNaNMask* = 0x7FF8000000000000'u64
@@ -17,6 +17,7 @@ type
     VkNil
     VkBool
     VkInt
+    VkChar
     VkSymbol
     VkPointer
     VkUnknown
@@ -26,6 +27,7 @@ type
     ItBool = 1
     ItInt = 2
     ItSymbol = 3
+    ItChar = 4
 
   HeapKind* = enum
     HkString
@@ -170,6 +172,9 @@ proc valueBool*(b: bool): Value {.inline.} =
 proc valueInt*(i: int64): Value {.inline.} =
   packImmediate(ItInt, cast[uint64](i) and PayloadMask)
 
+proc valueChar*(codepoint: uint32): Value {.inline.} =
+  packImmediate(ItChar, uint64(codepoint))
+
 proc valueSymbolId*(id: int): Value {.inline.} =
   packImmediate(ItSymbol, uint64(id))
 
@@ -187,12 +192,14 @@ proc valueKind*(v: Value): ValueKind {.inline.} =
   of ItNil: VkNil
   of ItBool: VkBool
   of ItInt: VkInt
+  of ItChar: VkChar
   of ItSymbol: VkSymbol
 
 proc isNumber*(v: Value): bool {.inline.} = valueKind(v) == VkNumber
 proc isNil*(v: Value): bool {.inline.} = valueKind(v) == VkNil
 proc isBool*(v: Value): bool {.inline.} = valueKind(v) == VkBool
 proc isInt*(v: Value): bool {.inline.} = valueKind(v) == VkInt
+proc isChar*(v: Value): bool {.inline.} = valueKind(v) == VkChar
 proc isSymbol*(v: Value): bool {.inline.} = valueKind(v) == VkSymbol
 proc isPointer*(v: Value): bool {.inline.} = valueKind(v) == VkPointer
 
@@ -209,12 +216,19 @@ proc asInt*(v: Value): int64 =
     payload = payload or (not int64(PayloadMask))
   payload
 
+proc asCharCode*(v: Value): uint32 =
+  if not isChar(v):
+    return 0'u32
+  uint32(v.raw and PayloadMask)
+
 proc asFloat*(v: Value): float64 =
   case valueKind(v)
   of VkNumber:
     cast[float64](v.raw)
   of VkInt:
     asInt(v).float64
+  of VkChar:
+    asCharCode(v).float64
   of VkBool:
     (if asBool(v): 1.0 else: 0.0)
   else:
@@ -239,6 +253,8 @@ proc isTruthy*(v: Value): bool =
     asBool(v)
   of VkInt:
     asInt(v) != 0
+  of VkChar:
+    asCharCode(v) != 0'u32
   of VkNumber:
     let n = asFloat(v)
     (not n.isNaN) and n != 0.0
@@ -456,12 +472,37 @@ proc asErrorObj*(v: Value): ErrorObj =
 
 proc toDebugString*(v: Value; maxDepth = 4): string
 
+proc charToString*(codepoint: uint32): string =
+  Rune(int32(codepoint)).toUTF8()
+
+proc charToLiteral*(codepoint: uint32): string =
+  case codepoint
+  of uint32(ord('\n')):
+    "'\\n'"
+  of uint32(ord('\r')):
+    "'\\r'"
+  of uint32(ord('\t')):
+    "'\\t'"
+  of uint32(ord('\\')):
+    "'\\\\'"
+  of uint32(ord('\'')):
+    "'\\''"
+  else:
+    if codepoint >= 0x20'u32 and codepoint <= 0x7E'u32:
+      "'" & $char(codepoint) & "'"
+    elif codepoint <= 0xFFFF'u32:
+      "'\\u" & codepoint.toHex(4).toLowerAscii() & "'"
+    else:
+      "'" & charToString(codepoint) & "'"
+
 proc keyFromValue*(key: Value): string =
   case valueKind(key)
   of VkSymbol:
     asSymbolName(key)
   of VkInt:
     $asInt(key)
+  of VkChar:
+    charToString(asCharCode(key))
   of VkNumber:
     $asFloat(key)
   of VkPointer:
@@ -491,6 +532,19 @@ proc mapSet*(mapValue: Value; key: Value; val: Value) =
   if mapObj == nil:
     return
   mapObj.entries[keyFromValue(key)] = val
+
+proc stringCodepointAt*(s: string; idx: int): Value =
+  if idx < 0:
+    return valueNil()
+  var pos = 0
+  var runeIndex = 0
+  while pos < s.len:
+    var r: Rune
+    fastRuneAt(s, pos, r, true)
+    if runeIndex == idx:
+      return valueChar(uint32(int32(r)))
+    inc(runeIndex)
+  valueNil()
 
 proc arrayGet*(arrayValue: Value; idx: int): Value =
   let arr = asArrayObj(arrayValue)
@@ -528,7 +582,7 @@ proc getMember*(target: Value; name: string): Value =
     of HkString:
       let s = asStringObj(target).value
       case name
-      of "length": valueInt(s.len)
+      of "length": valueInt(s.runeLen())
       else: valueNil()
     of HkArray:
       let arr = asArrayObj(target)
@@ -641,6 +695,7 @@ proc inferTypeName*(v: Value): string =
   of VkNil: "Nil"
   of VkBool: "Bool"
   of VkInt: "Int"
+  of VkChar: "Char"
   of VkNumber: "Float"
   of VkSymbol: "Symbol"
   of VkPointer:
@@ -669,6 +724,8 @@ proc valueEq*(a, b: Value): bool =
 
   let ka = valueKind(a)
   let kb = valueKind(b)
+  if ka == VkChar and kb == VkChar:
+    return asCharCode(a) == asCharCode(b)
   if (ka == VkNumber or ka == VkInt) and (kb == VkNumber or kb == VkInt):
     return asFloat(a) == asFloat(b)
 
@@ -752,6 +809,8 @@ proc toDebugString*(v: Value; maxDepth = 4): string =
     if asBool(v): "true" else: "false"
   of VkInt:
     $asInt(v)
+  of VkChar:
+    charToLiteral(asCharCode(v))
   of VkNumber:
     let n = asFloat(v)
     if n.isNaN: "nan" else: $n
@@ -764,6 +823,8 @@ proc toDebugString*(v: Value; maxDepth = 4): string =
 
 proc asString*(v: Value): string =
   case valueKind(v)
+  of VkChar:
+    charToString(asCharCode(v))
   of VkPointer:
     let obj = asHeapObject(v)
     if obj != nil and obj.kind == HkString:

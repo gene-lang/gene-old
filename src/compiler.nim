@@ -1686,6 +1686,8 @@ proc compileExpr(ctx: FnContext; node: AstNode) =
     discard ctx.emitConst(valueInt(node.intVal))
   of AkFloat:
     discard ctx.emitConst(valueFloat(node.floatVal))
+  of AkChar:
+    discard ctx.emitConst(valueChar(node.charVal))
   of AkString:
     discard ctx.emitConst(newStringValue(node.text))
   of AkSymbol:

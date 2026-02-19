@@ -72,7 +72,7 @@ proc nativeStr(vm: var Vm; args: seq[Value]): Value =
   discard vm
   if args.len == 0:
     return newStringValue("")
-  newStringValue(args[0].toDebugString())
+  newStringValue(args[0].asString())
 
 proc nativeAppend(vm: var Vm; args: seq[Value]): Value =
   discard vm

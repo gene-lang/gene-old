@@ -67,6 +67,41 @@ suite "Parser - Primitives":
     check node.kind == AkSymbol
     check node.text == "foo-bar_baz"
 
+suite "Parser - Chars":
+  test "parse ascii char":
+    let node = parseOne("'a'")
+    check node.kind == AkChar
+    check node.charVal == uint32(ord('a'))
+
+  test "parse unicode char":
+    let node = parseOne("'中'")
+    check node.kind == AkChar
+    check node.charVal == 0x4E2D'u32
+
+  test "parse escaped newline char":
+    let node = parseOne("'\\n'")
+    check node.kind == AkChar
+    check node.charVal == uint32(ord('\n'))
+
+  test "parse escaped tab char":
+    let node = parseOne("'\\t'")
+    check node.kind == AkChar
+    check node.charVal == uint32(ord('\t'))
+
+  test "parse escaped backslash char":
+    let node = parseOne("'\\\\'")
+    check node.kind == AkChar
+    check node.charVal == uint32(ord('\\'))
+
+  test "parse unicode escape char":
+    let node = parseOne("'\\u4e2d'")
+    check node.kind == AkChar
+    check node.charVal == 0x4E2D'u32
+
+  test "reject multi-codepoint char literal":
+    expect ParseError:
+      discard parseOne("'ab'")
+
 suite "Parser - Keywords":
   test "parse keyword":
     let node = parseOne("^name")
