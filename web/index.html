@@ -253,8 +253,8 @@
   ^closure (add10 7)
   ^first arr/0
   ^map_value m/lang
-  ^point p/.to_s
-  ^distance p/.length
+  ^point (p .to_s)
+  ^distance (p .length)
 })
 
 result`,
@@ -271,13 +271,13 @@ result`,
   (ctor [start]
     (/value = start))
   (method inc []
-    (/value += 1)
+    (/value = (/value + 1))
     /value)
   (method read []
     /value))
 
 (var c (new Counter 9))
-{^first c/.inc ^second c/.inc ^current c/.read}`
+{^first (c .inc) ^second (c .inc) ^current (c .read)}`
     };
 
     const editor = document.getElementById("editor");
