@@ -21,7 +21,7 @@ task wasm, "Build Gene WASM playground module":
     echo "  ./emsdk activate latest"
     echo "  source ./emsdk_env.sh"
     quit("emcc is required for `nimble wasm`.", QuitFailure)
-  exec "GENE_PROFILE=wasm-emscripten nim c -d:release --cpu:wasm32 --os:standalone --gc:orc --threads:off --cc:clang --clang.exe:emcc --clang.linkerexe:emcc --passL:'-sWASM=1 -sALLOW_MEMORY_GROWTH=1 -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=web -sEXPORTED_FUNCTIONS=[\"_gene_eval\"] -sEXPORTED_RUNTIME_METHODS=[\"cwrap\"]' -o:web/gene_wasm.js src/gene_wasm.nim"
+  exec "GENE_PROFILE=wasm-emscripten nim c -d:release -d:emscripten --cpu:wasm32 --os:linux --mm:orc --threads:off --cc:clang --clang.exe:emcc --clang.linkerexe:emcc --passL:'--no-entry -sWASM=1 -sALLOW_MEMORY_GROWTH=1 -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=web -sEXPORTED_FUNCTIONS=[\"_gene_eval\"] -sEXPORTED_RUNTIME_METHODS=[\"cwrap\"]' -o:web/gene_wasm.js src/gene_wasm.nim"
 
 task test, "Run unit tests":
   exec "nim c -r tests/test_parser.nim"
