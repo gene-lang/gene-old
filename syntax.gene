@@ -1,0 +1,363 @@
+#!/usr/bin/env gene run
+# Gene Programming Language - Complete Syntax Reference
+
+# ===== THE GENE DATA TYPE (Central to the Language!) =====
+# The Gene data structure is unique and fundamental to the language.
+# It combines THREE components: Type, Properties, and Children
+#
+# Syntax: ( type  ^prop1 val1 ^prop2 val2  child1 child2 ... )
+#          └type┘└─────properties────────┘└──children─────┘
+#
+# Example: (Person ^name "Alice" ^age 30 child1 child2)
+#   - Type: Person
+#   - Properties: {^name "Alice" ^age 30}
+#   - Children: [child1 child2]
+
+# Create a Gene value using the ` (quote) prefix
+# This prevents evaluation, preserving the structure as data
+(var p
+  `(Person ^name "Alice" ^age 30
+    child1 child2 (Person ^name "Bob" ^age 25)))
+(println "Gene value:" p)
+(println "  type    =" p/.type)
+(println "  props   =" p/.props)
+(println "  children=" p/.children)
+
+# More complex example - a quoted if expression
+(var expr `(if (x > 0) "positive" else "non-positive"))
+(println "If expression:" expr)
+(println "  type    =" expr/.type)       # => if
+(println "  children=" expr/.children)   # => [(x > 0) "positive" ...]
+
+# Gene is homoiconic - code IS data
+# This makes metaprogramming natural
+
+# ===== 1. VARIABLES & ASSIGNMENT =====
+(var x 10)                    # Declaration
+(x = 20)                      # Assignment
+(var name "Gene")             # String
+(var pi 3.14159)              # Float
+(var flag true)               # Boolean
+(var nothing)                 # nil
+
+# ===== 2. FUNCTIONS =====
+# Basic function with no parameters
+(fn hello []
+  (println "Hello from function!")
+)
+
+# Function with parameters
+(fn add [a: Int b: Int] -> Int
+  (a + b)
+)
+
+# Multi-expression function with return
+(fn calc [x: Int y: Int] -> Int
+  (var sum (x + y))
+  (var product (x * y))
+  (println "Sum:" sum "Product:" product)
+  sum                          # Returns last expression
+)
+
+# Recursive function
+(fn factorial [n: Int] -> Int
+  (if (n <= 1)
+    1
+  else
+    (n * (factorial (n - 1)))
+  )
+)
+
+# ===== 3. CONTROL FLOW =====
+# Basic if
+(if true
+  (println "If works")
+)
+
+# If-else
+(if (x > 5)
+  (println "x is greater than 5")
+elif (x == 5)
+  (println "x is equal to 5")
+else
+  (println "x is less than 5")
+)
+
+# Nested if with complex conditions
+(var a 5)
+(var b 10)
+(if ((a < b) && (b > 0))
+  (println "Both conditions are true")
+)
+
+# Loop with break
+(var count 0)
+(loop
+  (count += 1)
+  (if (count >= 3)
+    (break)
+  )
+)
+
+# ===== 4. DATA STRUCTURES =====
+# Arrays
+(var arr [1 2 3 4 5])
+(println "Array:" arr)
+(println "First element:" arr/0)
+(println "Last element:" arr/4)
+
+# Array modification
+(arr/0 = 10)
+(println "Modified first element:" arr/0)
+
+# Mixed type array
+(var mixed [1 "hello" true])
+
+# Nested arrays
+(var nested [[1 2] [3 4]])
+(println "nested/0/0 =" nested/0/0)
+
+# Array spread
+(var a [1 2])
+(var b [3 4])
+(var combined [a... b...])
+
+# Empty array
+(var empty [])
+
+# Maps (keyword keys with ^ prefix)
+(var m {^a 1 ^b 2 ^c 3})
+(println "Map:" m)
+(println "m/a =" m/a)
+
+# Map modification
+(m/a = 10)
+(println "Modified m/a =" m/a)
+
+# Mixed value types
+(var mixed_map {^num 42 ^str "hello" ^bool true})
+
+# Nested maps
+(var nested_map {^outer {^inner 123}})
+(println "nested/outer/inner =" nested_map/outer/inner)
+
+# Empty map
+(var empty_map {})
+(empty_map/new = "value")
+
+# ===== 5. ARITHMETIC & LOGIC =====
+# Arithmetic operators
+(println "5 + 3 =" (5 + 3))
+(println "10 - 4 =" (10 - 4))
+(println "6 * 7 =" (6 * 7))
+(println "15 / 3 =" (15 / 3))
+(println "10 % 3 =" (10 % 3))
+(println "2 + 3 * 4 =" (2 + (3 * 4)))  # Operator precedence
+
+# Comparison operators
+(println "10 > 5 =" (10 > 5))
+(println "10 <= 10 =" (10 <= 10))
+(println "x == 20 =" (x == 20))
+(println "x != 5 =" (x != 5))
+
+# Boolean operators
+(println "true && false =" (true && false))
+(println "true || false =" (true || false))
+# (println "!true =" (! true))
+
+# ===== 6. STRINGS =====
+(var s "Hello, Gene!")
+(println "String length:" s/.length)  # s/.length = (s .length)
+(println "Uppercase:" s/.to_upper)
+(println "String to int:" ("42" .to_i))
+(println "String to int with spaces:" ("  -7  " .to_i))
+(println "String append:" ("hello" .append " world"))
+
+# ===== 7. CLASSES & OOP =====
+# Basic class with constructor
+(class Point
+  (ctor [x: Int y: Int]
+    (/x = x)      # Use / for property access in constructor
+    (/y = y)      # /y = self/y
+  )
+  (method get_x _
+    /x
+  )
+  (method get_y _
+    /y
+  )
+  (method distance _
+    (sqrt ((/x * /x) + (/y * /y)))
+  )
+)
+
+# Class instantiation and method calls
+(var p (new Point 3 4))
+(println "Point x:" p/.get_x)
+(println "Point y:" p/.get_y)
+(println "Distance from origin:" p/.distance)
+
+# Class with inheritance
+(class Animal)
+(class Dog < Animal)
+
+# Nested class
+(class Outer
+  (ctor [data: Any]
+    (/data = data)
+  )
+  (class Inner        # Outer is like a namespace
+    (method get_data _
+      Outer/data
+    )
+  )
+)
+
+# Class with macro constructor (receives unevaluated symbols)
+(class LazyPoint
+  (ctor! [x: Any y: Any]
+    (/x = x)      # x and y are unevaluated arguments
+    (/y = y)
+  )
+  (method get_x _
+    /x
+  )
+)
+
+# ===== 8. EXCEPTION HANDLING =====
+(try
+  (1 / 0)
+catch *
+  (println "Caught division by zero error:" $ex)  # $ex is the exception object
+)
+
+# (try
+#   ("abc" .to_i)
+# catch *
+#   (println "Conversion failed")
+# )
+
+# ===== 9. ASYNC PROGRAMMING =====
+(var result (await (async 42)))
+
+(fn read_file [filename: String] -> Any
+  (gene/io/read_async filename)
+)
+
+(var sum_result (await (read_file "tests/fixtures/test.txt")))
+
+# ===== 10. FUNCTIONAL PROGRAMMING =====
+# Lambda/anonymous function
+(var double (fn [x: Int] -> Int (x * 2)))
+(println "Double 5:" (double 5))
+
+# Function composition
+(fn quadruple [x: Int] -> Int
+  (double (double x))
+)
+(println "Quadruple 3:" (quadruple 3))
+
+# ===== 11. SYMBOLS & KEYWORDS =====
+(var status `success)   # `success = (quote success)
+(var error `error)
+(println "Status == `success:" (status == `success))
+
+# ===== 12. MACROS & METAPROGRAMMING =====
+# Macro-like function with unevaluated arguments
+(fn debug! [expr]
+  (println "DEBUG:" expr)
+  ($caller_eval expr)  # Evaluate the expression in the caller's context.
+)
+
+# (debug! (5 + 3))                # Prints "DEBUG: (5 + 3)", returns 8
+
+# ===== 13. COMPLEX NESTED STRUCTURES =====
+(var data =
+  [{^type "user" ^id 123 ^name "Alice" ^verified true}
+   {^type "post" ^id 456 ^title "Introduction" ^comments 5}
+   {^type "comment" ^id 789 ^author "Bob" ^text "Great post!"}]
+)
+
+# Process nested data
+(for item in data
+  (if (item/type == "user")
+    (println "User:" item/name)
+  elif (item/type == "post")
+    (println "Post:" item/title)
+  elif (item/type == "comment")
+    (println "Comment by" item/author)
+  )
+)
+
+# ===== 14. IO OPERATIONS =====
+(print "Basic print...")
+(println "With newline")
+
+# Environment variables
+(println "HOME:" $env/HOME)
+(println "Program:" $program)
+
+# ===== 15. COLLECTION PROCESSING =====
+(var items =
+  [{^name "apple" ^price 0.5 ^quantity 10}
+   {^name "banana" ^price 0.3 ^quantity 5}])
+
+(var total 0)
+(for item in items
+  (var cost (item/price * item/quantity))
+  (total += cost)
+  (println item/name ": $" cost)
+)
+(println "Total cost:" total)
+
+# ===== 16. COMPREHENSIVE CLASS EXAMPLE =====
+(class Calculator
+  (ctor []
+    (/memory = {})
+  )
+  (method store [key: String value: Any]
+    (/memory/key = value)
+  )
+  (method recall [key: String] -> Any
+    /memory/key
+  )
+  (method add [x: Int y: Int] -> Int
+    (var result (x + y))
+    (.store "last" result)
+    result
+  )
+)
+
+(var calc (new Calculator))
+(println "Calculator add 5 + 3:" (calc .add 5 3))
+(calc .store "pi" 3.14159)
+(println "Calculator recall pi:" (calc .recall "pi"))
+(println "Calculator recall last:" (calc .recall "last"))
+
+# ===== 17. METHOD CALLS AND ACCESSORS =====
+# Different method call forms
+(calc .add 1 2)               # Method call with explicit receiver
+(calc/value = 0)              # Property access and assignment
+
+# ===== 18. FINAL COMPLEX EXAMPLE =====
+(class API
+  (ctor [base_url: String]
+    (/url = base_url)
+    (/cache = {})
+  )
+  (method request [endpoint: String] -> String
+    (var cached = /cache/endpoint)
+    (if cached
+      cached
+    else
+      (var result (/url .append endpoint))
+      (/cache/endpoint = result)
+      result
+    )
+  )
+)
+
+(var api (new API "https://api.example.com"))
+(println "API request result:" (api .request "/users"))
+
+(println "=== ALL SYNTAX PATTERNS DEMONSTRATED ===")
