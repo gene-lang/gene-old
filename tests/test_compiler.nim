@@ -569,3 +569,9 @@ suite "Compiler - Modules and AOP":
         found = true
         break
     check found == true
+
+  test "native/load compiles as native call symbol":
+    let m = compile("(native/load \"./ext\")")
+    let code = mainFnCode(m)
+    check code.hasOpcode(OpLoadGlobal)
+    check code.hasOpcode(OpCall)

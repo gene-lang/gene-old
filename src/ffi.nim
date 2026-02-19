@@ -1,7 +1,12 @@
-import std/[strutils, math, random, tables, times]
+import std/[strutils, math, random, tables, times, sets]
 import ./types
 import ./vm
 import ./ir
+
+when not defined(gene_wasm):
+  import std/[os]
+  import std/[dynlib]
+  import ./native_abi
 
 type
   NativeSignature* = object
@@ -10,6 +15,33 @@ type
     capabilities*: seq[string]
 
   NimNativeFn* = NativeProc
+
+when not defined(gene_wasm):
+  var gLoadedLibs: seq[LibHandle] = @[]
+
+proc hasFfiCapability(vm: Vm): bool =
+  var active = vm.rootCapabilities
+  if vm.capabilityStack.len > 0:
+    active = vm.capabilityStack[^1]
+  if "cap.ffi.call" in active:
+    return true
+  for cap in active:
+    if cap == "cap.ffi.*" or cap.startsWith("cap.ffi.call:"):
+      return true
+  false
+
+when not defined(gene_wasm):
+  proc registerNativeFromExtension(reg: ptr AirNativeRegistration; userData: pointer): int32 {.cdecl.} =
+    if reg == nil or reg.name == nil or reg.fn == nil or userData == nil:
+      return -1
+    let vmPtr = cast[ptr Vm](userData)
+    if vmPtr == nil:
+      return -1
+    let name = $reg.name
+    if name.len == 0:
+      return -1
+    registerExternalNative(vmPtr[], name, int(reg.arity), reg.fn, @["cap.ffi.call"], reg.caps_mask)
+    0
 
 proc registerNativeFn*(vm: var Vm; name: string; sig: NativeSignature; fn: NimNativeFn) =
   registerNative(vm, name, sig.arity, fn, sig.capabilities, sig.isMacro)
@@ -172,6 +204,48 @@ proc nativeCheckpointLoad(vm: var Vm; args: seq[Value]): Value =
     return valueBool(false)
   valueBool(loadVmCheckpoint(vm, args[0].asString()))
 
+proc nativeLoad(vm: var Vm; args: seq[Value]): Value =
+  if args.len == 0:
+    return valueBool(false)
+
+  if not hasFfiCapability(vm):
+    return valueBool(false)
+
+  let requested = args[0].asString()
+  if requested.len == 0:
+    return valueBool(false)
+
+  when defined(gene_wasm):
+    discard vm
+    discard requested
+    valueBool(false)
+  else:
+    let extPath =
+      if isAbsolute(requested):
+        requested
+      else:
+        absolutePath(requested)
+    let handle = loadLib(extPath)
+    if handle == nil:
+      return valueBool(false)
+
+    let initFn = cast[GeneExtensionInitFn](symAddr(handle, "gene_extension_init"))
+    if initFn == nil:
+      unloadLib(handle)
+      return valueBool(false)
+
+    var host = GeneHostApi(
+      abi_version: GeneAbiVersion,
+      user_data: cast[pointer](addr vm),
+      register_native: registerNativeFromExtension
+    )
+    if initFn(addr host) != 0'i32:
+      unloadLib(handle)
+      return valueBool(false)
+
+    gLoadedLibs.add(handle)
+    valueBool(true)
+
 proc toolEchoHandler(vm: var Vm; req: ToolCallRequest): ToolCallResult =
   discard vm
   ToolCallResult(ok: true, value: req.args, error: valueNil())
@@ -209,6 +283,7 @@ proc registerDefaultNatives*(vm: var Vm) =
   registerNativeFn(vm, "quota_limit", NativeSignature(arity: 2, isMacro: false, capabilities: @[]), nativeQuotaLimit)
   registerNativeFn(vm, "checkpoint_save", NativeSignature(arity: 1, isMacro: false, capabilities: @["cap.state.checkpoint"]), nativeCheckpointSave)
   registerNativeFn(vm, "checkpoint_load", NativeSignature(arity: 1, isMacro: false, capabilities: @["cap.state.checkpoint"]), nativeCheckpointLoad)
+  registerNativeFn(vm, "native/load", NativeSignature(arity: 1, isMacro: false, capabilities: @["cap.ffi.call"]), nativeLoad)
 
   registerTool(vm, ToolSchema(
     name: "tool/echo",

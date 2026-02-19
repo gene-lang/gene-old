@@ -1600,6 +1600,15 @@ proc compileSpecialForm(ctx: FnContext; node: AstNode): bool =
     else:
       ctx.emit(OpConstNil)
     true
+  of "native/load":
+    if items.len > 1:
+      let sid = runtimeSym(ctx.m, "native/load")
+      ctx.emit(OpLoadGlobal, b = sid.uint32)
+      compileExpr(ctx, items[1])
+      ctx.emit(OpCall, c = 1)
+    else:
+      ctx.emit(OpConstNil)
+    true
   of "task_spawn":
     if items.len < 2:
       ctx.emit(OpConstNil)

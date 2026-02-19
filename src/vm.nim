@@ -4,6 +4,28 @@ import ./ir
 import ./parser
 import ./compiler
 import ./air_verify
+import ./native_abi
+when defined(gene_wasm):
+  import ./wasm_host_abi
+
+when not defined(gene_wasm):
+  type
+    ThreadResultKind = enum
+      TrNil
+      TrBool
+      TrInt
+      TrFloat
+      TrUnsupported
+
+    ThreadThunk = object
+      modulePtr: pointer
+      fnIndex: int32
+      argCount: int32
+      argsRaw: array[8, uint64]
+      ok: int32
+      resultKind: ThreadResultKind
+      intVal: int64
+      floatVal: float64
 
 type
   VmRuntimeError* = object of CatchableError
@@ -32,29 +54,13 @@ type
     fnValue*: Value
     args*: seq[Value]
 
-  ThreadResultKind = enum
-    TrNil
-    TrBool
-    TrInt
-    TrFloat
-    TrUnsupported
-
-  ThreadThunk = object
-    modulePtr: pointer
-    fnIndex: int32
-    argCount: int32
-    argsRaw: array[8, uint64]
-    ok: int32
-    resultKind: ThreadResultKind
-    intVal: int64
-    floatVal: float64
-
   VmThreadHandle = ref object
     id*: int
-    worker*: Thread[ptr ThreadThunk]
-    payload*: ptr ThreadThunk
-    moduleRef*: AirModule
     joined*: bool
+    when not defined(gene_wasm):
+      worker*: Thread[ptr ThreadThunk]
+      payload*: ptr ThreadThunk
+      moduleRef*: AirModule
 
   ToolCallRequest* = object
     toolName*: string
@@ -109,6 +115,19 @@ type
     caps*: seq[string]
     isMacro*: bool
     callback*: NativeProc
+    externalFn*: AirNativeFn
+    externalCapsMask*: uint64
+    isExternal*: bool
+
+  VmStepState* = enum
+    VssPending
+    VssDone
+    VssError
+
+  VmStepResult* = object
+    state*: VmStepState
+    value*: Value
+    taskId*: int
 
   ExceptionHandler = object
     catchIp: int
@@ -157,6 +176,9 @@ type
     namespaceStack*: seq[Value]
     moduleCache*: OrderedTable[string, Value]
     moduleLoading*: HashSet[string]
+    stepDone*: bool
+    stepResult*: Value
+    stepError*: Value
 
 proc newVm*(): Vm =
   Vm(
@@ -196,7 +218,10 @@ proc newVm*(): Vm =
     capabilityStack: @[],
     namespaceStack: @[],
     moduleCache: initOrderedTable[string, Value](),
-    moduleLoading: initHashSet[string]()
+    moduleLoading: initHashSet[string](),
+    stepDone: false,
+    stepResult: valueNil(),
+    stepError: valueNil()
   )
 
 proc replayKindName(kind: ReplayEventKind): string =
@@ -392,6 +417,24 @@ proc getConstPath(module: AirModule; idx: int): string =
 
   v.asString()
 
+proc runtimeFileExists(path: string): bool =
+  when defined(gene_wasm):
+    hostFileExists(path)
+  else:
+    fileExists(path)
+
+proc runtimeReadTextFile(path: string): string =
+  when defined(gene_wasm):
+    hostReadTextFile(path)
+  else:
+    readFile(path)
+
+proc runtimeWriteTextFile(path: string; content: string) =
+  when defined(gene_wasm):
+    discard hostWriteTextFile(path, content)
+  else:
+    writeFile(path, content)
+
 proc resolveImportPath(baseSourcePath, requested: string): string =
   if requested.len == 0:
     return ""
@@ -412,7 +455,7 @@ proc resolveImportPath(baseSourcePath, requested: string): string =
     candidates.add(candidate / "index.gene")
 
   for c in candidates:
-    if fileExists(c):
+    if runtimeFileExists(c):
       return absolutePath(c)
 
   absolutePath(candidates[0])
@@ -435,7 +478,7 @@ proc runImportedModule(vm: var Vm; modulePath: string): Value =
   if modulePath in vm.moduleLoading:
     raiseVmValue(vmRuntimeError(vm, "circular import: " & modulePath, "AIR.IMPORT.CYCLE"))
 
-  if not fileExists(modulePath):
+  if not runtimeFileExists(modulePath):
     raiseVmValue(vmRuntimeError(vm, "import not found: " & modulePath, "AIR.IMPORT.NOT_FOUND"))
 
   vm.moduleLoading.incl(modulePath)
@@ -443,7 +486,7 @@ proc runImportedModule(vm: var Vm; modulePath: string): Value =
   vm.moduleCache[modulePath] = nsValue
 
   try:
-    let src = readFile(modulePath)
+    let src = runtimeReadTextFile(modulePath)
     let ast = parseProgram(src, modulePath)
     let importedModule = compileProgram(ast, modulePath)
     let issues = verifyAirModule(importedModule)
@@ -582,154 +625,164 @@ proc cloneFunctionWithoutAround(fnObj: FunctionObj): Value =
   dst.flags = fnObj.flags
   outFn
 
-proc isThreadValueSupported(v: Value): bool =
-  valueKind(v) in {VkNil, VkBool, VkInt, VkNumber}
+when not defined(gene_wasm):
+  proc isThreadValueSupported(v: Value): bool =
+    valueKind(v) in {VkNil, VkBool, VkInt, VkNumber}
 
-proc packThreadResult(payload: ptr ThreadThunk; v: Value) =
-  if payload == nil:
-    return
-  case valueKind(v)
-  of VkNil:
-    payload.resultKind = TrNil
-  of VkBool:
-    payload.resultKind = TrBool
-    payload.intVal = if asBool(v): 1 else: 0
-  of VkInt:
-    payload.resultKind = TrInt
-    payload.intVal = asInt(v)
-  of VkNumber:
-    payload.resultKind = TrFloat
-    payload.floatVal = asFloat(v)
-  else:
+  proc packThreadResult(payload: ptr ThreadThunk; v: Value) =
+    if payload == nil:
+      return
+    case valueKind(v)
+    of VkNil:
+      payload.resultKind = TrNil
+    of VkBool:
+      payload.resultKind = TrBool
+      payload.intVal = if asBool(v): 1 else: 0
+    of VkInt:
+      payload.resultKind = TrInt
+      payload.intVal = asInt(v)
+    of VkNumber:
+      payload.resultKind = TrFloat
+      payload.floatVal = asFloat(v)
+    else:
+      payload.resultKind = TrUnsupported
+
+  proc unpackThreadResult(payload: ptr ThreadThunk): Value =
+    if payload == nil:
+      return valueNil()
+    case payload.resultKind
+    of TrNil:
+      valueNil()
+    of TrBool:
+      valueBool(payload.intVal != 0)
+    of TrInt:
+      valueInt(payload.intVal)
+    of TrFloat:
+      valueFloat(payload.floatVal)
+    of TrUnsupported:
+      valueNil()
+
+  proc threadWorker(payload: ptr ThreadThunk) {.thread.} =
+    if payload == nil:
+      return
+
+    payload.ok = 0
     payload.resultKind = TrUnsupported
 
-proc unpackThreadResult(payload: ptr ThreadThunk): Value =
-  if payload == nil:
-    return valueNil()
-  case payload.resultKind
-  of TrNil:
-    valueNil()
-  of TrBool:
-    valueBool(payload.intVal != 0)
-  of TrInt:
-    valueInt(payload.intVal)
-  of TrFloat:
-    valueFloat(payload.floatVal)
-  of TrUnsupported:
-    valueNil()
+    let module = cast[AirModule](payload.modulePtr)
+    if module == nil:
+      return
+    let fnIndex = int(payload.fnIndex)
+    if fnIndex < 0 or fnIndex >= module.functions.len:
+      return
 
-proc threadWorker(payload: ptr ThreadThunk) {.thread.} =
-  if payload == nil:
-    return
+    var localVm = newVm()
+    localVm.module = module
+    discard ensureLoadedModule(localVm, module)
 
-  payload.ok = 0
-  payload.resultKind = TrUnsupported
+    let meta = module.functions[fnIndex]
+    let fnVal = newFunctionValue(meta.name, fnIndex, meta.arity, 0)
+    let fnObj = asFunctionObj(fnVal)
+    for p in meta.params:
+      fnObj.paramNames.add(p.name)
+      fnObj.paramTypes.add(p.typeAnn)
 
-  let module = cast[AirModule](payload.modulePtr)
-  if module == nil:
-    return
-  let fnIndex = int(payload.fnIndex)
-  if fnIndex < 0 or fnIndex >= module.functions.len:
-    return
+    var args: seq[Value] = @[]
+    for i in 0..<int(payload.argCount):
+      args.add(Value(raw: payload.argsRaw[i]))
 
-  var localVm = newVm()
-  localVm.module = module
-  discard ensureLoadedModule(localVm, module)
+    try:
+      let invokeG = cast[
+        proc(
+          vm: var Vm;
+          callee: Value;
+          args: seq[Value];
+          selfValue: Value;
+          kwargs: Value
+        ): Value {.nimcall, gcsafe.}
+      ](invokeValue)
+      let outVal = invokeG(localVm, fnVal, args, valueNil(), valueNil())
+      packThreadResult(payload, outVal)
+      payload.ok = 1
+    except VmThrow:
+      payload.ok = 0
 
-  let meta = module.functions[fnIndex]
-  let fnVal = newFunctionValue(meta.name, fnIndex, meta.arity, 0)
-  let fnObj = asFunctionObj(fnVal)
-  for p in meta.params:
-    fnObj.paramNames.add(p.name)
-    fnObj.paramTypes.add(p.typeAnn)
+  proc spawnThreadNow(vm: var Vm; fnValue: Value; args: seq[Value]): int =
+    let fnObj = asFunctionObj(fnValue)
+    if fnObj == nil:
+      raiseVmValue(vmRuntimeError(vm, "thread/spawn requires a function", "AIR.THREAD.BAD_CALL"))
+    if fnObj.name == "<lambda>":
+      raiseVmValue(vmRuntimeError(vm, "thread/spawn requires a named function", "AIR.THREAD.BAD_CALL"))
+    if fnObj.upvalueNames.len > 0:
+      raiseVmValue(vmRuntimeError(vm, "thread/spawn does not support closures with captures", "AIR.THREAD.UNSUPPORTED_CLOSURE"))
 
-  var args: seq[Value] = @[]
-  for i in 0..<int(payload.argCount):
-    args.add(Value(raw: payload.argsRaw[i]))
+    if args.len > 8:
+      raiseVmValue(vmRuntimeError(vm, "thread/spawn supports at most 8 arguments", "AIR.THREAD.BAD_ARITY"))
+    for a in args:
+      if not isThreadValueSupported(a):
+        raiseVmValue(vmRuntimeError(vm, "thread/spawn only supports nil/bool/int/float args", "AIR.THREAD.BAD_ARG"))
 
-  try:
-    let invokeG = cast[
-      proc(
-        vm: var Vm;
-        callee: Value;
-        args: seq[Value];
-        selfValue: Value;
-        kwargs: Value
-      ): Value {.nimcall, gcsafe.}
-    ](invokeValue)
-    let outVal = invokeG(localVm, fnVal, args, valueNil(), valueNil())
-    packThreadResult(payload, outVal)
-    payload.ok = 1
-  except VmThrow:
+    var targetModule = vm.module
+    if fnObj.moduleId >= 0 and fnObj.moduleId < vm.loadedModules.len:
+      targetModule = vm.loadedModules[fnObj.moduleId]
+    if targetModule == nil:
+      raiseVmValue(vmRuntimeError(vm, "thread/spawn missing function module", "AIR.THREAD.MODULE_MISSING"))
+
+    let payload = cast[ptr ThreadThunk](allocShared0(sizeof(ThreadThunk)))
+    payload.modulePtr = cast[pointer](targetModule)
+    payload.fnIndex = fnObj.fnIndex.int32
+    payload.argCount = args.len.int32
     payload.ok = 0
+    payload.resultKind = TrUnsupported
+    for i in 0..<args.len:
+      payload.argsRaw[i] = args[i].raw
 
-proc spawnThreadNow(vm: var Vm; fnValue: Value; args: seq[Value]): int =
-  let fnObj = asFunctionObj(fnValue)
-  if fnObj == nil:
-    raiseVmValue(vmRuntimeError(vm, "thread/spawn requires a function", "AIR.THREAD.BAD_CALL"))
-  if fnObj.name == "<lambda>":
-    raiseVmValue(vmRuntimeError(vm, "thread/spawn requires a named function", "AIR.THREAD.BAD_CALL"))
-  if fnObj.upvalueNames.len > 0:
-    raiseVmValue(vmRuntimeError(vm, "thread/spawn does not support closures with captures", "AIR.THREAD.UNSUPPORTED_CLOSURE"))
+    let tid = vm.nextThreadId
+    inc(vm.nextThreadId)
 
-  if args.len > 8:
-    raiseVmValue(vmRuntimeError(vm, "thread/spawn supports at most 8 arguments", "AIR.THREAD.BAD_ARITY"))
-  for a in args:
-    if not isThreadValueSupported(a):
-      raiseVmValue(vmRuntimeError(vm, "thread/spawn only supports nil/bool/int/float args", "AIR.THREAD.BAD_ARG"))
+    var handle = VmThreadHandle(
+      id: tid,
+      payload: payload,
+      moduleRef: targetModule,
+      joined: false
+    )
+    createThread(handle.worker, threadWorker, payload)
+    vm.threadHandles[tid] = handle
+    tid
 
-  var targetModule = vm.module
-  if fnObj.moduleId >= 0 and fnObj.moduleId < vm.loadedModules.len:
-    targetModule = vm.loadedModules[fnObj.moduleId]
-  if targetModule == nil:
-    raiseVmValue(vmRuntimeError(vm, "thread/spawn missing function module", "AIR.THREAD.MODULE_MISSING"))
+  proc joinThreadNow(vm: var Vm; threadId: int): Value =
+    if threadId <= 0 or not vm.threadHandles.hasKey(threadId):
+      return valueNil()
 
-  let payload = cast[ptr ThreadThunk](allocShared0(sizeof(ThreadThunk)))
-  payload.modulePtr = cast[pointer](targetModule)
-  payload.fnIndex = fnObj.fnIndex.int32
-  payload.argCount = args.len.int32
-  payload.ok = 0
-  payload.resultKind = TrUnsupported
-  for i in 0..<args.len:
-    payload.argsRaw[i] = args[i].raw
+    let handle = vm.threadHandles[threadId]
+    if handle == nil:
+      vm.threadHandles.del(threadId)
+      return valueNil()
 
-  let tid = vm.nextThreadId
-  inc(vm.nextThreadId)
+    if not handle.joined:
+      joinThread(handle.worker)
+      handle.joined = true
 
-  var handle = VmThreadHandle(
-    id: tid,
-    payload: payload,
-    moduleRef: targetModule,
-    joined: false
-  )
-  createThread(handle.worker, threadWorker, payload)
-  vm.threadHandles[tid] = handle
-  tid
-
-proc joinThreadNow(vm: var Vm; threadId: int): Value =
-  if threadId <= 0 or not vm.threadHandles.hasKey(threadId):
-    return valueNil()
-
-  let handle = vm.threadHandles[threadId]
-  if handle == nil:
+    let payload = handle.payload
+    let ok = payload != nil and payload.ok == 1
+    let outVal = if ok: unpackThreadResult(payload) else: valueNil()
+    if payload != nil:
+      deallocShared(payload)
+      handle.payload = nil
     vm.threadHandles.del(threadId)
-    return valueNil()
 
-  if not handle.joined:
-    joinThread(handle.worker)
-    handle.joined = true
+    if not ok:
+      raiseVmValue(vmRuntimeError(vm, "thread failed", "AIR.THREAD.FAILED"))
+    outVal
+else:
+  proc spawnThreadNow(vm: var Vm; fnValue: Value; args: seq[Value]): int =
+    discard fnValue
+    discard args
+    raiseVmValue(vmRuntimeError(vm, "thread/spawn disabled for wasm profile", "AIR.THREAD.DISABLED"))
 
-  let payload = handle.payload
-  let ok = payload != nil and payload.ok == 1
-  let outVal = if ok: unpackThreadResult(payload) else: valueNil()
-  if payload != nil:
-    deallocShared(payload)
-    handle.payload = nil
-  vm.threadHandles.del(threadId)
-
-  if not ok:
-    raiseVmValue(vmRuntimeError(vm, "thread failed", "AIR.THREAD.FAILED"))
-  outVal
+  proc joinThreadNow(vm: var Vm; threadId: int): Value =
+    discard threadId
+    raiseVmValue(vmRuntimeError(vm, "thread/join disabled for wasm profile", "AIR.THREAD.DISABLED"))
 
 proc asIntDefault(v: Value; defaultVal: int): int =
   if isInt(v):
@@ -921,7 +974,14 @@ proc detRandValue*(vm: var Vm): int64 =
   if vm.replayMode:
     return nextReplayEvent(vm, RekDetRand).number
 
-  let rnd = int64(xorshift64(vm.rngState) and 0x7FFFFFFF'u64)
+  let rnd =
+    if vm.deterministic:
+      int64(xorshift64(vm.rngState) and 0x7FFFFFFF'u64)
+    else:
+      when defined(gene_wasm):
+        hostRandI64()
+      else:
+        int64(xorshift64(vm.rngState) and 0x7FFFFFFF'u64)
   vm.replayLog.add(ReplayEvent(
     kind: RekDetRand,
     toolName: "",
@@ -941,7 +1001,10 @@ proc detNowValue*(vm: var Vm): int64 =
     if vm.deterministic:
       vm.cpuStepsUsed
     else:
-      getTime().toUnix()
+      when defined(gene_wasm):
+        hostNowUnix()
+      else:
+        getTime().toUnix()
 
   vm.replayLog.add(ReplayEvent(
     kind: RekDetNow,
@@ -975,7 +1038,10 @@ proc hasCapability(vm: Vm; cap: string): bool =
   false
 
 proc nowMs(): int64 =
-  epochTime().int64 * 1000
+  when defined(gene_wasm):
+    hostNowUnix() * 1000
+  else:
+    epochTime().int64 * 1000
 
 proc checkQuota(vm: var Vm) =
   inc(vm.cpuStepsUsed)
@@ -1993,12 +2059,12 @@ proc saveCheckpointToFile*(vm: Vm; path: string; frame: FrameCtx) =
   var content = newString(bytes.len)
   for i, b in bytes:
     content[i] = char(b)
-  writeFile(path, content)
+  runtimeWriteTextFile(path, content)
 
 proc loadCheckpointFromFile*(vm: var Vm; path: string; frame: var FrameCtx): bool =
-  if not fileExists(path):
+  if not runtimeFileExists(path):
     return false
-  let content = readFile(path)
+  let content = runtimeReadTextFile(path)
   var bytes = newSeq[byte](content.len)
   for i, ch in content:
     bytes[i] = byte(ord(ch))
@@ -3066,6 +3132,50 @@ proc bindFunctionArgs(vm: Vm; fnMeta: AirFunction; args: seq[Value]; kwargs: Val
     else:
       raiseVmValue(vmRuntimeError(vm, "missing required keyword argument: ^" & param.name, "AIR.CALL.MISSING_KWARG"))
 
+proc callExternalNative(vm: var Vm; entry: NativeEntry; args: seq[Value]): Value =
+  if entry.externalFn == nil:
+    raiseVmValue(vmRuntimeError(vm, "external native has null function pointer: " & entry.name, "AIR.NATIVE.NULL_PTR"))
+
+  emitAudit(vm, "ffi.call.start", %*{"name": entry.name, "argc": args.len})
+
+  var ctx = AirNativeCtx(
+    vm: cast[pointer](unsafeAddr vm),
+    task_id: uint64(max(vm.currentTaskId, 0)),
+    caps_mask: entry.externalCapsMask,
+    trace_id: uint64(max(vm.cpuStepsUsed, 0))
+  )
+
+  var argRaw: seq[uint64] = @[]
+  if args.len > 0:
+    argRaw = newSeq[uint64](args.len)
+    for i, a in args:
+      argRaw[i] = a.raw
+
+  var outResult: uint64 = 0
+  var outError: uint64 = 0
+  let status = entry.externalFn(
+    addr ctx,
+    (if argRaw.len > 0: addr argRaw[0] else: nil),
+    uint16(args.len),
+    addr outResult,
+    addr outError
+  )
+
+  case status
+  of 0:
+    let outVal = Value(raw: outResult)
+    emitAudit(vm, "ffi.call.result", %*{"name": entry.name, "ok": true})
+    outVal
+  of 1:
+    emitAudit(vm, "ffi.call.result", %*{"name": entry.name, "ok": false})
+    let errVal = Value(raw: outError)
+    if isNil(errVal):
+      raiseVmValue(vmRuntimeError(vm, "external native returned error without payload: " & entry.name, "AIR.NATIVE.ERROR"))
+    raiseVmValue(errVal)
+  else:
+    emitAudit(vm, "ffi.call.result", %*{"name": entry.name, "ok": false, "trap": true})
+    raiseVmValue(vmRuntimeError(vm, "external native trapped: " & entry.name, "AIR.NATIVE.TRAP"))
+
 proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value = valueNil(); kwargs: Value = valueNil()): Value =
   if isNil(callee):
     raiseVmValue(vmDiagnostic(
@@ -3092,6 +3202,8 @@ proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value =
     let entry = vm.natives[sid]
     if entry.arity >= 0 and args.len != entry.arity:
       raiseVmValue(vmRuntimeError(vm, "native arity mismatch for " & entry.name, "AIR.NATIVE.BAD_ARITY"))
+    if entry.isExternal:
+      requireCapability(vm, "cap.ffi.call", "ffi.call")
     if entry.caps.len > 0:
       for cap in entry.caps:
         if not hasCapability(vm, cap):
@@ -3106,6 +3218,8 @@ proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value =
             hints = @["Grant required native capability"],
             repairTags = @["capability", "native"]
           ))
+    if entry.isExternal:
+      return callExternalNative(vm, entry, args)
     return entry.callback(vm, args)
 
   let fnObj = asFunctionObj(callee)
@@ -3187,7 +3301,31 @@ proc registerNative*(vm: var Vm; name: string; arity: int; fn: NativeProc; caps:
     arity: arity,
     caps: caps,
     isMacro: isMacro,
-    callback: fn
+    callback: fn,
+    externalFn: nil,
+    externalCapsMask: 0'u64,
+    isExternal: false
+  )
+  vm.globals[sid] = newNativeFunctionValue(name, arity)
+
+proc registerExternalNative*(
+  vm: var Vm;
+  name: string;
+  arity: int;
+  fn: AirNativeFn;
+  caps: seq[string] = @["cap.ffi.call"];
+  capsMask: uint64 = 0'u64
+) =
+  let sid = internSymbol(name)
+  vm.natives[sid] = NativeEntry(
+    name: name,
+    arity: arity,
+    caps: caps,
+    isMacro: false,
+    callback: nil,
+    externalFn: fn,
+    externalCapsMask: capsMask,
+    isExternal: true
   )
   vm.globals[sid] = newNativeFunctionValue(name, arity)
 
@@ -3206,6 +3344,9 @@ proc runModule*(vm: var Vm; module: AirModule): Value =
   vm.cpuStepsUsed = 0
   vm.toolCallsUsed = 0
   vm.preparedToolSchemaId = -1
+  vm.stepDone = false
+  vm.stepResult = valueNil()
+  vm.stepError = valueNil()
   vm.auditEvents.setLen(0)
   if vm.replayMode:
     vm.replayCursor = 0
@@ -3239,9 +3380,48 @@ proc runModule*(vm: var Vm; module: AirModule): Value =
     mainObj.paramTypes.add(p.typeAnn)
 
   try:
-    executeFunction(vm, mainObj, @[])
+    let outVal = executeFunction(vm, mainObj, @[])
+    vm.stepDone = true
+    vm.stepResult = outVal
+    vm.stepError = valueNil()
+    outVal
   except VmThrow as thrown:
     let errObj = asErrorObj(thrown.value)
+    vm.stepDone = true
+    vm.stepResult = valueNil()
+    vm.stepError = thrown.value
     if errObj != nil:
       raise newException(VmRuntimeError, errObj.message)
     raise newException(VmRuntimeError, thrown.value.toDebugString())
+
+proc vm_poll*(vm: Vm): VmStepResult =
+  if not vm.stepDone:
+    return VmStepResult(state: VssPending, value: valueNil(), taskId: vm.currentTaskId)
+  if not isNil(vm.stepError):
+    return VmStepResult(state: VssError, value: vm.stepError, taskId: vm.currentTaskId)
+  VmStepResult(state: VssDone, value: vm.stepResult, taskId: vm.currentTaskId)
+
+proc vm_step*(vm: var Vm; maxInstructions: int): VmStepResult =
+  if vm.module == nil:
+    return VmStepResult(state: VssDone, value: valueNil(), taskId: vm.currentTaskId)
+  if vm.stepDone:
+    return vm_poll(vm)
+  if maxInstructions <= 0:
+    return VmStepResult(state: VssPending, value: valueNil(), taskId: vm.currentTaskId)
+
+  try:
+    let outVal = runModule(vm, vm.module)
+    VmStepResult(state: VssDone, value: outVal, taskId: vm.currentTaskId)
+  except VmRuntimeError as ex:
+    vm.stepDone = true
+    vm.stepResult = valueNil()
+    vm.stepError = newErrorValue(ex.msg)
+    VmStepResult(state: VssError, value: vm.stepError, taskId: vm.currentTaskId)
+
+proc vm_resume*(vm: var Vm; taskId: int; value: Value): VmStepResult =
+  if taskId > 0 and vm.tasks.hasKey(taskId):
+    let t = vm.tasks[taskId]
+    t.result = value
+    t.state = TsDone
+    t.error = valueNil()
+  vm_poll(vm)

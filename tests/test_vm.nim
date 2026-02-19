@@ -1,4 +1,4 @@
-import std/[unittest, os, tables, json]
+import std/[unittest, os, tables, json, osproc, strutils]
 import ../src/types
 import ../src/parser
 import ../src/compiler
@@ -18,6 +18,9 @@ proc runWithPath(source: string; sourcePath: string): Value =
   var vm = newVm()
   registerDefaultNatives(vm)
   vm.runModule(module)
+
+proc geneStringLit(s: string): string =
+  "\"" & s.replace("\\", "\\\\").replace("\"", "\\\"") & "\""
 
 suite "VM - Primitives":
   test "nil value":
@@ -1031,6 +1034,82 @@ suite "VM - Protocols and Abstract":
     check msg != nil
     let env = parseJson(msg.value)
     check env["code"].getStr() == "AIR.ABSTRACT.METHOD"
+
+suite "VM - Native Extensions":
+  test "native/load loads C extension and invokes external function":
+    let root = getTempDir() / "genex_vm_ext_test"
+    defer:
+      if dirExists(root):
+        removeDir(root)
+    if dirExists(root):
+      removeDir(root)
+    createDir(root)
+
+    let sourcePath = getCurrentDir() / "examples" / "extensions" / "simple_ext.c"
+    let dylibName =
+      when defined(macosx):
+        "simple_ext.dylib"
+      elif defined(windows):
+        "simple_ext.dll"
+      else:
+        "simple_ext.so"
+    let dylibPath = root / dylibName
+
+    let buildCmd =
+      when defined(macosx):
+        "cc -dynamiclib -fPIC -o " & quoteShell(dylibPath) & " " & quoteShell(sourcePath)
+      elif defined(windows):
+        "cc -shared -o " & quoteShell(dylibPath) & " " & quoteShell(sourcePath)
+      else:
+        "cc -shared -fPIC -o " & quoteShell(dylibPath) & " " & quoteShell(sourcePath)
+    let built = execCmdEx(buildCmd)
+    check built.exitCode == 0
+    if built.exitCode != 0:
+      checkpoint("extension build failed:\n" & built.output)
+
+    let src = "(cap_grant \"cap.ffi.call\") (native/load " & geneStringLit(dylibPath) & ") (ext_id 42)"
+    let r = run(src)
+    check isInt(r)
+    check asInt(r) == 42
+
+  test "native/load denied without cap.ffi.call":
+    let r = run("""
+      (try
+        (native/load "./missing_ext")
+      catch e
+        true)
+    """)
+    check asBool(r) == true
+
+suite "VM - Cooperative Step API":
+  test "vm_step executes and vm_poll observes completion":
+    let prog = parseProgram("(+ 1 2)")
+    let module = compileProgram(prog)
+    var runtime = newVm()
+    registerDefaultNatives(runtime)
+    runtime.module = module
+
+    let p0 = vm_poll(runtime)
+    check p0.state == VssPending
+
+    let s1 = vm_step(runtime, 100)
+    check s1.state == VssDone
+    check isInt(s1.value)
+    check asInt(s1.value) == 3
+
+    let p1 = vm_poll(runtime)
+    check p1.state == VssDone
+    check asInt(p1.value) == 3
+
+  test "vm_resume no-op returns poll state":
+    let prog = parseProgram("42")
+    let module = compileProgram(prog)
+    var runtime = newVm()
+    registerDefaultNatives(runtime)
+    runtime.module = module
+    discard vm_step(runtime, 16)
+    let resumed = vm_resume(runtime, 123, valueInt(9))
+    check resumed.state == VssDone
 
 suite "VM - Quotes":
   test "quote returns gene value":
