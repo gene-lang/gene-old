@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gene Playground (WASM)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b111a;
+      --bg-soft: #121c2a;
+      --bg-panel: #111926;
+      --fg: #d8e0ee;
+      --fg-muted: #90a0ba;
+      --accent: #2fd4b5;
+      --accent-2: #f6ab59;
+      --border: #243247;
+      --good: #31d39a;
+      --bad: #ff6b7f;
+      --shadow: rgba(0, 0, 0, 0.28);
+      --font-ui: "Space Grotesk", "Trebuchet MS", "Segoe UI", sans-serif;
+      --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      height: 100%;
+      color: var(--fg);
+      background:
+        radial-gradient(1200px 600px at 90% -10%, rgba(47, 212, 181, 0.1), transparent 60%),
+        radial-gradient(1000px 500px at -15% 120%, rgba(246, 171, 89, 0.1), transparent 60%),
+        var(--bg);
+      font-family: var(--font-ui);
+    }
+
+    .app {
+      height: 100%;
+      padding: 20px;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 12px;
+    }
+
+    .topbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 1.05rem;
+      letter-spacing: 0.02em;
+      font-weight: 600;
+    }
+
+    .status {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--fg-muted);
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: rgba(18, 28, 42, 0.72);
+    }
+
+    .status[data-state="ready"] {
+      color: var(--good);
+      border-color: rgba(49, 211, 154, 0.45);
+    }
+
+    .status[data-state="error"] {
+      color: var(--bad);
+      border-color: rgba(255, 107, 127, 0.45);
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, #182437, #111a28);
+      color: var(--fg);
+      font: 500 0.82rem/1 var(--font-ui);
+      padding: 8px 12px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: transform 120ms ease, border-color 120ms ease;
+    }
+
+    .btn:hover {
+      border-color: #345279;
+      transform: translateY(-1px);
+    }
+
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn.run {
+      border-color: rgba(47, 212, 181, 0.5);
+      background: linear-gradient(180deg, rgba(47, 212, 181, 0.25), rgba(47, 212, 181, 0.08));
+      color: #dffaf4;
+    }
+
+    .split {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 1fr 0.9fr;
+      gap: 12px;
+    }
+
+    .panel {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(17, 25, 38, 0.96), rgba(12, 18, 29, 0.96));
+      box-shadow: 0 10px 30px var(--shadow);
+      overflow: hidden;
+    }
+
+    .panel h2 {
+      margin: 0;
+      padding: 10px 12px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--fg-muted);
+      border-bottom: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.01);
+    }
+
+    #editor {
+      width: 100%;
+      height: 100%;
+      padding: 12px;
+      border: 0;
+      outline: 0;
+      resize: none;
+      font: 0.9rem/1.45 var(--font-mono);
+      color: #d9e7ff;
+      background: transparent;
+      tab-size: 2;
+    }
+
+    #output {
+      margin: 0;
+      padding: 12px;
+      overflow: auto;
+      font: 0.9rem/1.45 var(--font-mono);
+      color: #d5ffe9;
+      white-space: pre-wrap;
+    }
+
+    #output.error {
+      color: #ffd6de;
+    }
+
+    .hint {
+      margin: 0;
+      font-size: 0.77rem;
+      color: var(--fg-muted);
+      font-family: var(--font-mono);
+    }
+
+    @media (max-width: 960px) {
+      .app {
+        padding: 14px;
+      }
+      .split {
+        grid-template-columns: 1fr;
+      }
+      .panel {
+        min-height: 280px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <div class="topbar">
+      <h1 class="title">Gene Playground (WASM)</h1>
+      <div class="status" id="status" data-state="loading">Loading Gene WASM module...</div>
+    </div>
+
+    <div class="toolbar">
+      <button class="btn run" id="run" disabled>Run</button>
+      <span class="hint">Ctrl/Cmd+Enter to run</span>
+      <button class="btn preset" data-preset="core">Core Example</button>
+      <button class="btn preset" data-preset="closures">Closures + Arrays</button>
+      <button class="btn preset" data-preset="classes">Classes + Maps</button>
+    </div>
+
+    <div class="split">
+      <section class="panel">
+        <h2>Code</h2>
+        <textarea id="editor" spellcheck="false"></textarea>
+      </section>
+      <section class="panel">
+        <h2>Output</h2>
+        <pre id="output">WASM not loaded yet.</pre>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const presets = {
+      core: `# From examples/full.gene (trimmed for playground)
+(var i 42)
+(var msg "Hello, Gene!")
+(var arr [1 2 3 4 5])
+(var m {^lang "Gene" ^year 2026})
+
+(fn add [a b]
+  (a + b))
+
+(fn make_adder [x]
+  (fn [y] (x + y)))
+
+(class Point
+  (ctor [x y]
+    (/x = x)
+    (/y = y))
+  (method length []
+    (sqrt ((/x * /x) + (/y * /y))))
+  (method to_s []
+    ("Point(" .append (str /x) ", " (str /y) ")")))
+
+(var add10 (make_adder 10))
+(var p (new Point 3 4))
+
+(var result {
+  ^message msg
+  ^sum (add i 8)
+  ^closure (add10 7)
+  ^first arr/0
+  ^map_value m/lang
+  ^point p/.to_s
+  ^distance p/.length
+})
+
+result`,
+      closures: `(fn make_scale [n]
+  (fn [x] (x * n)))
+
+(var arr [1 2 3 4 5])
+(var scale3 (make_scale 3))
+(var mapped (arr .map scale3))
+(var odds (mapped .filter (fn [x] ((x % 2) != 0))))
+
+{^mapped mapped ^odds odds}`,
+      classes: `(class Counter
+  (ctor [start]
+    (/value = start))
+  (method inc []
+    (/value += 1)
+    /value)
+  (method read []
+    /value))
+
+(var c (new Counter 9))
+{^first c/.inc ^second c/.inc ^current c/.read}`
+    };
+
+    const editor = document.getElementById("editor");
+    const output = document.getElementById("output");
+    const runBtn = document.getElementById("run");
+    const statusNode = document.getElementById("status");
+    let geneEval = null;
+
+    function setStatus(text, state) {
+      statusNode.textContent = text;
+      statusNode.dataset.state = state;
+    }
+
+    function setOutput(text, isError = false) {
+      output.textContent = text;
+      output.classList.toggle("error", isError);
+    }
+
+    function loadPreset(name) {
+      if (!presets[name]) return;
+      editor.value = presets[name];
+    }
+
+    function runCode() {
+      if (!geneEval) {
+        setOutput("WASM is not ready yet. If files are missing, run: nimble wasm", true);
+        return;
+      }
+      try {
+        const out = geneEval(editor.value);
+        setOutput(out === undefined || out === null ? "" : String(out), false);
+      } catch (err) {
+        setOutput(`Bridge error: ${err?.message || err}`, true);
+      }
+    }
+
+    loadPreset("core");
+
+    runBtn.addEventListener("click", runCode);
+    editor.addEventListener("keydown", (evt) => {
+      if ((evt.ctrlKey || evt.metaKey) && evt.key === "Enter") {
+        evt.preventDefault();
+        runCode();
+      }
+    });
+
+    document.querySelectorAll(".preset").forEach((btn) => {
+      btn.addEventListener("click", () => loadPreset(btn.dataset.preset));
+    });
+
+    window.Module = {
+      locateFile(path) {
+        return path;
+      },
+      onRuntimeInitialized() {
+        geneEval = window.Module.cwrap("gene_eval", "string", ["string"]);
+        runBtn.disabled = false;
+        setStatus("Ready", "ready");
+        runCode();
+      }
+    };
+
+    const loader = document.createElement("script");
+    loader.src = "gene_wasm.js";
+    loader.async = true;
+    loader.onerror = () => {
+      setStatus("Missing gene_wasm.js (run `nimble wasm`)", "error");
+      setOutput("Build the WASM bundle first: nimble wasm", true);
+    };
+    document.body.appendChild(loader);
+  </script>
+</body>
+</html>

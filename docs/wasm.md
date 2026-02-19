@@ -43,6 +43,29 @@ nim c -d:release \
 
 ## Emscripten
 
+Install Emscripten (`emcc`) with `emsdk`:
+
+```bash
+git clone https://github.com/emscripten-core/emsdk.git
+cd emsdk
+./emsdk install latest
+./emsdk activate latest
+source ./emsdk_env.sh
+```
+
+Then build the browser playground module:
+
+```bash
+nimble wasm
+```
+
+This emits:
+
+- `web/gene_wasm.js`
+- `web/gene_wasm.wasm`
+
+Manual equivalent:
+
 ```bash
 GENE_PROFILE=wasm-emscripten \
 nim c -d:release \
@@ -53,8 +76,23 @@ nim c -d:release \
   --cc:clang \
   --clang.exe:emcc \
   --clang.linkerexe:emcc \
-  --passL:"-s WASM=1 -s MODULARIZE=1 -s EXPORT_ES6=1 -s ALLOW_MEMORY_GROWTH=1" \
-  src/gene.nim
+  --passL:"-sWASM=1 -sALLOW_MEMORY_GROWTH=1 -sNO_EXIT_RUNTIME=1 -sENVIRONMENT=web -sEXPORTED_FUNCTIONS=[\"_gene_eval\"] -sEXPORTED_RUNTIME_METHODS=[\"cwrap\"]" \
+  -o:web/gene_wasm.js \
+  src/gene_wasm.nim
+```
+
+`src/gene_wasm.nim` exports:
+
+- `gene_eval(code: cstring): cstring`
+
+It parses, compiles, and runs Gene source, returning captured `print/println` output plus the final expression value as a string.
+In WASM profiles, OS threads are disabled and `native/load` dynamic extension loading is disabled.
+
+To run the UI:
+
+```bash
+python3 -m http.server 8080
+# open http://localhost:8080/web/
 ```
 
 ## Cooperative Runtime API
