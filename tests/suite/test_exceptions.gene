@@ -1,31 +1,16 @@
 # test_exceptions.gene — try/catch, throw
 
-(var pass_count 0)
-(var fail_count 0)
-
-(fn assert_eq [actual expected label]
-  (if (actual == expected)
-    (do
-      (pass_count += 1)
-      (println "  PASS:" label))
-  else
-    (do
-      (fail_count += 1)
-      (println "  FAIL:" label "- expected" expected "got" actual))))
-
-(fn assert_true [val label]
-  (assert_eq val true label))
-
-(println "=== test_exceptions.gene ===")
+(import * as T "./testkit")
+(var t (new T/Suite "test_exceptions.gene"))
 
 # Basic try-catch
-(println "--- Try/Catch ---")
+(t .section "Try/Catch")
 (var result
   (try
     (throw "oops")
   catch e
     42))
-(assert_eq result 42 "catch returns 42")
+(t .assert_eq result 42 "catch returns 42")
 
 # Try without error
 (var result2
@@ -33,7 +18,7 @@
     99
   catch e
     0))
-(assert_eq result2 99 "try without error returns 99")
+(t .assert_eq result2 99 "try without error returns 99")
 
 # Catch captures error
 (var caught_err nil)
@@ -44,16 +29,16 @@ catch e
 # caught_err should be a string-like error value
 
 # Division by zero
-(println "--- Division by Zero ---")
+(t .section "Division by Zero")
 (var div_result
   (try
     (/ 1 0)
   catch e
     -1))
-(assert_eq div_result -1 "div by zero caught")
+(t .assert_eq div_result -1 "div by zero caught")
 
 # Nested try-catch
-(println "--- Nested Try/Catch ---")
+(t .section "Nested Try/Catch")
 (var nested_result
   (try
     (try
@@ -62,17 +47,17 @@ catch e
       "caught inner")
   catch e
     "caught outer"))
-(assert_eq nested_result "caught inner" "inner catch handles")
+(t .assert_eq nested_result "caught inner" "inner catch handles")
 
 # Try-catch in function
-(println "--- Exception in Function ---")
+(t .section "Exception in Function")
 (fn safe_div [a b]
   (try
     (/ a b)
   catch e
     0))
-(assert_eq (safe_div 10 2) 5.0 "safe_div(10, 2) = 5")
-(assert_eq (safe_div 1 0) 0 "safe_div(1, 0) = 0")
+(t .assert_eq (safe_div 10 2) 5.0 "safe_div(10, 2) = 5")
+(t .assert_eq (safe_div 1 0) 0 "safe_div(1, 0) = 0")
 
 # Throw from function
 (fn fail_fn []
@@ -83,7 +68,7 @@ catch e
     (fail_fn)
   catch e
     "caught from fn"))
-(assert_eq fn_err "caught from fn" "catch error from function")
+(t .assert_eq fn_err "caught from fn" "catch error from function")
 
 # Error does not propagate when caught
 (var propagated false)
@@ -96,14 +81,6 @@ catch e
 catch e
   (propagated = false))
 # After inner catch, execution continues
-(assert_true propagated "error handled, execution continues")
+(t .assert_true propagated "error handled, execution continues")
 
-# Summary
-(println "")
-(println "=== Results ===")
-(println "  Passed:" pass_count)
-(println "  Failed:" fail_count)
-(if (fail_count == 0)
-  (println "  ALL TESTS PASSED")
-else
-  (println "  SOME TESTS FAILED"))
+(t .done)

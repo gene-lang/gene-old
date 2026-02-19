@@ -221,6 +221,12 @@ suite "Compiler - Loops":
     check code.hasOpcode(OpBrFalse)
     check code.hasOpcode(OpJump)
 
+  test "repeat loop":
+    let m = compile("(var x 0) (repeat 3 (x += 1))")
+    let code = mainFnCode(m)
+    check code.hasOpcode(OpCmpLt)
+    check code.hasOpcode(OpJump)
+
 suite "Compiler - Functions":
   test "named function":
     let m = compile("(fn add [a b] (+ a b))")

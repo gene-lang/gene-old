@@ -1,74 +1,59 @@
 # test_control_flow.gene — if/elif/else, loop, for-in, break/continue
 
-(var pass_count 0)
-(var fail_count 0)
-
-(fn assert_eq [actual expected label]
-  (if (actual == expected)
-    (do
-      (pass_count += 1)
-      (println "  PASS:" label))
-  else
-    (do
-      (fail_count += 1)
-      (println "  FAIL:" label "- expected" expected "got" actual))))
-
-(fn assert_true [val label]
-  (assert_eq val true label))
-
-(println "=== test_control_flow.gene ===")
+(import * as T "./testkit")
+(var t (new T/Suite "test_control_flow.gene"))
 
 # If/else
-(println "--- If/Else ---")
-(assert_eq (if true 1 else 2) 1 "if true => 1")
-(assert_eq (if false 1 else 2) 2 "if false => 2")
-(assert_eq (if true 42) 42 "if true => 42")
+(t .section "If/Else")
+(t .assert_eq (if true 1 else 2) 1 "if true => 1")
+(t .assert_eq (if false 1 else 2) 2 "if false => 2")
+(t .assert_eq (if true 42) 42 "if true => 42")
 
 # If as expression
 (var x (if true "yes" else "no"))
-(assert_eq x "yes" "if as expression")
+(t .assert_eq x "yes" "if as expression")
 
 # Elif
-(println "--- Elif ---")
+(t .section "Elif")
 (var val 5)
 (var result
   (if (val > 10) "big"
    elif (val > 3) "medium"
    else "small"))
-(assert_eq result "medium" "elif chain: medium")
+(t .assert_eq result "medium" "elif chain: medium")
 
 (val = 15)
 (var result2
   (if (val > 10) "big"
    elif (val > 3) "medium"
    else "small"))
-(assert_eq result2 "big" "elif chain: big")
+(t .assert_eq result2 "big" "elif chain: big")
 
 (val = 1)
 (var result3
   (if (val > 10) "big"
    elif (val > 3) "medium"
    else "small"))
-(assert_eq result3 "small" "elif chain: small")
+(t .assert_eq result3 "small" "elif chain: small")
 
 # Nested if
-(println "--- Nested If ---")
-(assert_eq
+(t .section "Nested If")
+(t .assert_eq
   (if true
     (if false 1 else 2)
   else 3)
   2 "nested if")
 
 # Loop with break
-(println "--- Loop/Break ---")
+(t .section "Loop/Break")
 (var count 0)
 (loop
   (count += 1)
   (if (count >= 5) (break)))
-(assert_eq count 5 "loop breaks at 5")
+(t .assert_eq count 5 "loop breaks at 5")
 
 # Loop with continue
-(println "--- Loop/Continue ---")
+(t .section "Loop/Continue")
 (var sum 0)
 (var i 0)
 (loop
@@ -76,14 +61,14 @@
   (if (i > 10) (break))
   (if ((i % 2) == 0) (continue))
   (sum += i))
-(assert_eq sum 25 "sum of odd 1-10 = 25")
+(t .assert_eq sum 25 "sum of odd 1-10 = 25")
 
 # For-in array
-(println "--- For-in ---")
+(t .section "For-in")
 (var total 0)
 (for x in [10 20 30]
   (total += x))
-(assert_eq total 60 "for-in sum = 60")
+(t .assert_eq total 60 "for-in sum = 60")
 
 # For-in collecting
 (var items [])
@@ -93,49 +78,58 @@
 (var counted 0)
 (for x in [1 2 3 4 5]
   (counted += 1))
-(assert_eq counted 5 "for-in counted 5 items")
+(t .assert_eq counted 5 "for-in counted 5 items")
 
 # For-in nested
-(println "--- Nested For-in ---")
+(t .section "Nested For-in")
 (var product_sum 0)
 (for a in [1 2 3]
   (for b in [10 20]
     (product_sum += (a * b))))
-(assert_eq product_sum 180 "nested for sum = 180")
+(t .assert_eq product_sum 180 "nested for sum = 180")
 
 # Loop counter pattern
-(println "--- Loop Counter ---")
+(t .section "Loop Counter")
 (var n 0)
 (var factorial 1)
 (loop
   (n += 1)
   (factorial *= n)
-(if (n >= 5) (break)))
-(assert_eq factorial 120 "loop factorial(5) = 120")
+  (if (n >= 5) (break)))
+(t .assert_eq factorial 120 "loop factorial(5) = 120")
 
 # While loop
-(println "--- While ---")
+(t .section "While")
 (var wx 4)
 (while (wx > 0)
   (wx -= 1))
-(assert_eq wx 0 "while loop decrements to zero")
+(t .assert_eq wx 0 "while loop decrements to zero")
+
+# Repeat loop
+(t .section "Repeat")
+(var rx 0)
+(repeat 4
+  (rx += 3))
+(t .assert_eq rx 12 "repeat runs body fixed times")
+
+(var rsum 0)
+(var rseen 0)
+(repeat 10
+  (rseen += 1)
+  (if (rseen > 6) (break))
+  (if ((rseen % 2) == 0) (continue))
+  (rsum += rseen))
+(t .assert_eq rsum 9 "repeat honors continue and break")
+(t .assert_eq rseen 7 "repeat break exits early")
 
 # Case/when/else
-(println "--- Case ---")
+(t .section "Case")
 (var cval 2)
 (var case_res
   (case cval
     when 1 "one"
     when 2 "two"
     else "other"))
-(assert_eq case_res "two" "case chooses matching branch")
+(t .assert_eq case_res "two" "case chooses matching branch")
 
-# Summary
-(println "")
-(println "=== Results ===")
-(println "  Passed:" pass_count)
-(println "  Failed:" fail_count)
-(if (fail_count == 0)
-  (println "  ALL TESTS PASSED")
-else
-  (println "  SOME TESTS FAILED"))
+(t .done)

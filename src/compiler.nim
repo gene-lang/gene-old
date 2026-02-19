@@ -615,6 +615,52 @@ proc compileWhileForm(ctx: FnContext; node: AstNode) =
 
   ctx.emit(OpConstNil)
 
+proc compileRepeatForm(ctx: FnContext; node: AstNode) =
+  let items = node.items
+  if items.len < 2:
+    raise fail(node, "repeat requires a count expression")
+
+  let countSlot = declareLocal(ctx, "__repeat_n_" & $node.line & "_" & $node.col)
+  let idxSlot = declareLocal(ctx, "__repeat_i_" & $node.line & "_" & $node.col)
+
+  compileExpr(ctx, items[1])
+  ctx.emit(OpStoreLocal, b = countSlot.uint32)
+  ctx.emit(OpPop)
+
+  discard ctx.emitConst(valueInt(0))
+  ctx.emit(OpStoreLocal, b = idxSlot.uint32)
+  ctx.emit(OpPop)
+
+  let condIp = ctx.fn.code.len
+  let loopCtx = LoopContext(startIp: condIp, continueIp: condIp, breakPatches: @[])
+  ctx.loops.add(loopCtx)
+
+  ctx.emit(OpLoadLocal, b = idxSlot.uint32)
+  ctx.emit(OpLoadLocal, b = countSlot.uint32)
+  ctx.emit(OpCmpLt)
+  let brEnd = ctx.emit(OpBrFalse, b = 0)
+
+  # Bump iteration index before body so `continue` can jump to condition.
+  ctx.emit(OpLoadLocal, b = idxSlot.uint32)
+  discard ctx.emitConst(valueInt(1))
+  ctx.emit(OpAdd)
+  ctx.emit(OpStoreLocal, b = idxSlot.uint32)
+  ctx.emit(OpPop)
+
+  for i in 2..<items.len:
+    compileExpr(ctx, items[i])
+    ctx.emit(OpPop)
+
+  ctx.emit(OpJump, b = condIp.uint32)
+
+  let endPc = ctx.fn.code.len
+  ctx.fn.patchB(brEnd, endPc)
+  for ip in loopCtx.breakPatches:
+    ctx.fn.patchB(ip, endPc)
+  discard ctx.loops.pop()
+
+  ctx.emit(OpConstNil)
+
 proc compileCaseForm(ctx: FnContext; node: AstNode) =
   let items = node.items
   if items.len < 2:
@@ -1146,6 +1192,9 @@ proc compileSpecialForm(ctx: FnContext; node: AstNode): bool =
     true
   of "while":
     compileWhileForm(ctx, node)
+    true
+  of "repeat":
+    compileRepeatForm(ctx, node)
     true
   of "case":
     compileCaseForm(ctx, node)

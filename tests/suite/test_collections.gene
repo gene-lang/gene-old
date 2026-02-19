@@ -1,120 +1,100 @@
 # test_collections.gene — arrays, maps, gene values, spread
 
-(var pass_count 0)
-(var fail_count 0)
-
-(fn assert_eq [actual expected label]
-  (if (actual == expected)
-    (do
-      (pass_count += 1)
-      (println "  PASS:" label))
-  else
-    (do
-      (fail_count += 1)
-      (println "  FAIL:" label "- expected" expected "got" actual))))
-
-(println "=== test_collections.gene ===")
+(import * as T "./testkit")
+(var t (new T/Suite "test_collections.gene"))
 
 # Arrays
-(println "--- Arrays ---")
+(t .section "Arrays")
 (var arr [1 2 3 4 5])
-(assert_eq arr/0 1 "arr/0 = 1")
-(assert_eq arr/4 5 "arr/4 = 5")
-(assert_eq arr/.length 5 "arr length = 5")
-(assert_eq (len arr) 5 "len(arr) = 5")
+(t .assert_eq arr/0 1 "arr/0 = 1")
+(t .assert_eq arr/4 5 "arr/4 = 5")
+(t .assert_eq arr/.length 5 "arr length = 5")
+(t .assert_eq (len arr) 5 "len(arr) = 5")
 
 # Empty array
 (var empty [])
-(assert_eq empty/.length 0 "empty array length = 0")
+(t .assert_eq empty/.length 0 "empty array length = 0")
 
 # Mixed type array
 (var mixed [1 "hello" true nil])
-(assert_eq mixed/0 1 "mixed[0] = 1")
-(assert_eq mixed/1 "hello" "mixed[1] = hello")
-(assert_eq mixed/2 true "mixed[2] = true")
-(assert_eq mixed/3 nil "mixed[3] = nil")
+(t .assert_eq mixed/0 1 "mixed[0] = 1")
+(t .assert_eq mixed/1 "hello" "mixed[1] = hello")
+(t .assert_eq mixed/2 true "mixed[2] = true")
+(t .assert_eq mixed/3 nil "mixed[3] = nil")
 
 # Nested arrays
 (var nested [[1 2] [3 4]])
-(assert_eq nested/0/0 1 "nested[0][0] = 1")
-(assert_eq nested/0/1 2 "nested[0][1] = 2")
-(assert_eq nested/1/0 3 "nested[1][0] = 3")
+(t .assert_eq nested/0/0 1 "nested[0][0] = 1")
+(t .assert_eq nested/0/1 2 "nested[0][1] = 2")
+(t .assert_eq nested/1/0 3 "nested[1][0] = 3")
 
 # Array indexing from end
 (var mod_arr [10 20 30])
-(assert_eq mod_arr/2 30 "arr[2] = 30")
+(t .assert_eq mod_arr/2 30 "arr[2] = 30")
 
 # Array spread
 (var a [1 2])
 (var b [3 4])
 (var combined [a... b...])
-(assert_eq (len combined) 4 "spread array length = 4")
-(assert_eq combined/0 1 "spread[0] = 1")
-(assert_eq combined/3 4 "spread[3] = 4")
+(t .assert_eq (len combined) 4 "spread array length = 4")
+(t .assert_eq combined/0 1 "spread[0] = 1")
+(t .assert_eq combined/3 4 "spread[3] = 4")
 
 # Array methods
-(println "--- Array Methods ---")
+(t .section "Array Methods")
 (var m_arr [1 2 3])
-(assert_eq (m_arr .push 4) 4 "arr.push returns new length")
-(assert_eq (m_arr .pop) 4 "arr.pop returns last element")
+(t .assert_eq (m_arr .push 4) 4 "arr.push returns new length")
+(t .assert_eq (m_arr .pop) 4 "arr.pop returns last element")
 (var mapped (m_arr .map (fn [x] (x * 2))))
-(assert_eq mapped/0 2 "arr.map first value")
-(assert_eq mapped/2 6 "arr.map third value")
+(t .assert_eq mapped/0 2 "arr.map first value")
+(t .assert_eq mapped/2 6 "arr.map third value")
 (var filtered (m_arr .filter (fn [x] (x > 1))))
-(assert_eq (len filtered) 2 "arr.filter keeps two values")
-(assert_eq (m_arr .reduce 0 (fn [acc x] (acc + x))) 6 "arr.reduce sums")
+(t .assert_eq (len filtered) 2 "arr.filter keeps two values")
+(t .assert_eq (m_arr .reduce 0 (fn [acc x] (acc + x))) 6 "arr.reduce sums")
 
 # Maps
-(println "--- Maps ---")
+(t .section "Maps")
 (var m {^a 1 ^b 2 ^c 3})
-(assert_eq m/a 1 "map m/a = 1")
-(assert_eq m/b 2 "map m/b = 2")
-(assert_eq m/c 3 "map m/c = 3")
+(t .assert_eq m/a 1 "map m/a = 1")
+(t .assert_eq m/b 2 "map m/b = 2")
+(t .assert_eq m/c 3 "map m/c = 3")
 
 # Empty map
 (var empty_map {})
 (empty_map/x = 42)
-(assert_eq empty_map/x 42 "set empty_map/x = 42")
+(t .assert_eq empty_map/x 42 "set empty_map/x = 42")
 
 # Map modification
 (var m2 {^x 1})
 (m2/x = 99)
-(assert_eq m2/x 99 "modified map m2/x = 99")
+(t .assert_eq m2/x 99 "modified map m2/x = 99")
 
 # Nested maps
 (var config {^db {^host "localhost" ^port 5432}})
-(assert_eq config/db/host "localhost" "nested map config/db/host")
-(assert_eq config/db/port 5432 "nested map config/db/port")
+(t .assert_eq config/db/host "localhost" "nested map config/db/host")
+(t .assert_eq config/db/port 5432 "nested map config/db/port")
 
 # Nil-safe navigation
-(assert_eq config?/db?/host "localhost" "nil-safe path returns value")
+(t .assert_eq config?/db?/host "localhost" "nil-safe path returns value")
 (var nil_cfg nil)
-(assert_eq nil_cfg?/db?/host nil "nil-safe path returns nil")
+(t .assert_eq nil_cfg?/db?/host nil "nil-safe path returns nil")
 
 # Gene values (quoted)
-(println "--- Gene Values ---")
+(t .section "Gene Values")
 (var person `(Person ^name "Alice" ^age 30 child1 child2))
-(assert_eq person/.type `Person "gene type = Person")
+(t .assert_eq person/.type `Person "gene type = Person")
 
 # For-in over array
-(println "--- Iteration ---")
+(t .section "Iteration")
 (var sum 0)
 (for x in [1 2 3 4 5]
   (sum += x))
-(assert_eq sum 15 "sum of [1..5] = 15")
+(t .assert_eq sum 15 "sum of [1..5] = 15")
 
 # For-in over array collecting
 (var count 0)
 (for x in [10 20 30]
   (count += 1))
-(assert_eq count 3 "counted 3 items")
+(t .assert_eq count 3 "counted 3 items")
 
-# Summary
-(println "")
-(println "=== Results ===")
-(println "  Passed:" pass_count)
-(println "  Failed:" fail_count)
-(if (fail_count == 0)
-  (println "  ALL TESTS PASSED")
-else
-  (println "  SOME TESTS FAILED"))
+(t .done)

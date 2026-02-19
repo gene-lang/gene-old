@@ -1,22 +1,10 @@
 # test_classes.gene — class, ctor, method, inheritance, super
 
-(var pass_count 0)
-(var fail_count 0)
-
-(fn assert_eq [actual expected label]
-  (if (actual == expected)
-    (do
-      (pass_count += 1)
-      (println "  PASS:" label))
-  else
-    (do
-      (fail_count += 1)
-      (println "  FAIL:" label "- expected" expected "got" actual))))
-
-(println "=== test_classes.gene ===")
+(import * as T "./testkit")
+(var t (new T/Suite "test_classes.gene"))
 
 # Basic class with constructor
-(println "--- Basic Class ---")
+(t .section "Basic Class")
 (class Point
   (ctor [x y]
     (/x = x)
@@ -26,14 +14,14 @@
   (method sum [] (/x + /y)))
 
 (var p (new Point 3 4))
-(assert_eq p/x 3 "Point p/x = 3")
-(assert_eq p/y 4 "Point p/y = 4")
-(assert_eq (p .get_x) 3 "Point get_x() = 3")
-(assert_eq (p .get_y) 4 "Point get_y() = 4")
-(assert_eq (p .sum) 7 "Point sum() = 7")
+(t .assert_eq p/x 3 "Point p/x = 3")
+(t .assert_eq p/y 4 "Point p/y = 4")
+(t .assert_eq (p .get_x) 3 "Point get_x() = 3")
+(t .assert_eq (p .get_y) 4 "Point get_y() = 4")
+(t .assert_eq (p .sum) 7 "Point sum() = 7")
 
 # Method with parameters
-(println "--- Methods with Parameters ---")
+(t .section "Methods with Parameters")
 (class Calculator
   (ctor [base]
     (/base = base))
@@ -43,11 +31,11 @@
     (/base * n)))
 
 (var calc (new Calculator 10))
-(assert_eq (calc .add 5) 15 "calc.add(5) = 15")
-(assert_eq (calc .multiply 3) 30 "calc.multiply(3) = 30")
+(t .assert_eq (calc .add 5) 15 "calc.add(5) = 15")
+(t .assert_eq (calc .multiply 3) 30 "calc.multiply(3) = 30")
 
 # Field mutation
-(println "--- Field Mutation ---")
+(t .section "Field Mutation")
 (class Counter
   (ctor []
     (/count = 0))
@@ -57,14 +45,14 @@
   (method value [] /count))
 
 (var c (new Counter))
-(assert_eq (c .value) 0 "counter starts at 0")
+(t .assert_eq (c .value) 0 "counter starts at 0")
 (c .inc)
 (c .inc)
 (c .inc)
-(assert_eq (c .value) 3 "counter after 3 increments = 3")
+(t .assert_eq (c .value) 3 "counter after 3 increments = 3")
 
 # Inheritance
-(println "--- Inheritance ---")
+(t .section "Inheritance")
 (class Animal
   (ctor [name]
     (/name = name))
@@ -85,25 +73,17 @@
 
 (var d (new Dog "Rex"))
 (var ca (new Cat "Whiskers"))
-(assert_eq d/name "Rex" "Dog has name = Rex")
-(assert_eq (d .speak) "Woof!" "Dog.speak() = Woof!")
-(assert_eq (ca .speak) "Meow!" "Cat.speak() = Meow!")
+(t .assert_eq d/name "Rex" "Dog has name = Rex")
+(t .assert_eq (d .speak) "Woof!" "Dog.speak() = Woof!")
+(t .assert_eq (ca .speak) "Meow!" "Cat.speak() = Meow!")
 
 # Multiple instances
-(println "--- Multiple Instances ---")
+(t .section "Multiple Instances")
 (var p1 (new Point 1 2))
 (var p2 (new Point 10 20))
-(assert_eq p1/x 1 "p1/x = 1")
-(assert_eq p2/x 10 "p2/x = 10")
-(assert_eq (p1 .sum) 3 "p1.sum() = 3")
-(assert_eq (p2 .sum) 30 "p2.sum() = 30")
+(t .assert_eq p1/x 1 "p1/x = 1")
+(t .assert_eq p2/x 10 "p2/x = 10")
+(t .assert_eq (p1 .sum) 3 "p1.sum() = 3")
+(t .assert_eq (p2 .sum) 30 "p2.sum() = 30")
 
-# Summary
-(println "")
-(println "=== Results ===")
-(println "  Passed:" pass_count)
-(println "  Failed:" fail_count)
-(if (fail_count == 0)
-  (println "  ALL TESTS PASSED")
-else
-  (println "  SOME TESTS FAILED"))
+(t .done)

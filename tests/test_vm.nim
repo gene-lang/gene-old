@@ -255,6 +255,32 @@ suite "VM - Loops":
     """)
     check asInt(r) == 0
 
+  test "repeat loop":
+    let r = run("""
+      (var x 0)
+      (repeat 3
+        (x += 2))
+      x
+    """)
+    check asInt(r) == 6
+
+  test "repeat loop with continue and break":
+    let r = run("""
+      (var sum 0)
+      (var seen 0)
+      (repeat 10
+        (seen += 1)
+        (if (seen > 6) (break))
+        (if ((seen % 2) == 0) (continue))
+        (sum += seen))
+      [sum seen]
+    """)
+    let outArr = asArrayObj(r)
+    check outArr != nil
+    check outArr.items.len == 2
+    check asInt(outArr.items[0]) == 9
+    check asInt(outArr.items[1]) == 7
+
 suite "VM - Case":
   test "case when else":
     let r = run("""

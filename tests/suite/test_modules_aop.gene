@@ -1,48 +1,28 @@
 # test_modules_aop.gene — file imports, namespaces, aspect bundles
 
-(var pass_count 0)
-(var fail_count 0)
-
-(fn assert_eq [actual expected label]
-  (if (actual == expected)
-    (do
-      (pass_count += 1)
-      (println "  PASS:" label))
-  else
-    (do
-      (fail_count += 1)
-      (println "  FAIL:" label "- expected" expected "got" actual))))
-
-(println "=== test_modules_aop.gene ===")
+(import * as T "./testkit")
+(var t (new T/Suite "test_modules_aop.gene"))
 
 # File-based imports
-(println "--- Import ---")
+(t .section "Import")
 (import * as Utils "./module_utils")
 (import * as Utils2 "./module_utils")
-(assert_eq Utils/answer 42 "imported namespace value")
-(assert_eq (Utils/inc 9) 10 "imported namespace function")
-(assert_eq Utils2/answer 42 "cached second import value")
+(t .assert_eq Utils/answer 42 "imported namespace value")
+(t .assert_eq (Utils/inc 9) 10 "imported namespace function")
+(t .assert_eq Utils2/answer 42 "cached second import value")
 
 # Namespace block
-(println "--- Namespace ---")
+(t .section "Namespace")
 (ns Config
   (var debug true)
   (var version "1.0"))
-(assert_eq Config/debug true "namespace value bool")
-(assert_eq Config/version "1.0" "namespace value string")
+(t .assert_eq Config/debug true "namespace value bool")
+(t .assert_eq Config/version "1.0" "namespace value string")
 
 # Aspect bundle callable
-(println "--- Aspect Bundle ---")
+(t .section "Aspect Bundle")
 (aspect X [cls m1]
   (before m1 [a...] nil))
-(assert_eq (X Utils `inc) nil "aspect bundle call returns nil")
+(t .assert_eq (X Utils `inc) nil "aspect bundle call returns nil")
 
-# Summary
-(println "")
-(println "=== Results ===")
-(println "  Passed:" pass_count)
-(println "  Failed:" fail_count)
-(if (fail_count == 0)
-  (println "  ALL TESTS PASSED")
-else
-  (println "  SOME TESTS FAILED"))
+(t .done)

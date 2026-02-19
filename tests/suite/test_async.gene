@@ -1,57 +1,37 @@
 # test_async.gene — async/await
 
-(var pass_count 0)
-(var fail_count 0)
-
-(fn assert_eq [actual expected label]
-  (if (actual == expected)
-    (do
-      (pass_count += 1)
-      (println "  PASS:" label))
-  else
-    (do
-      (fail_count += 1)
-      (println "  FAIL:" label "- expected" expected "got" actual))))
-
-(println "=== test_async.gene ===")
+(import * as T "./testkit")
+(var t (new T/Suite "test_async.gene"))
 
 # Basic async/await
-(println "--- Basic Async ---")
+(t .section "Basic Async")
 (var r1 (await (async 42)))
-(assert_eq r1 42 "await async 42")
+(t .assert_eq r1 42 "await async 42")
 
 (var r2 (await (async nil)))
-(assert_eq r2 nil "await async nil")
+(t .assert_eq r2 nil "await async nil")
 
 (var r3 (await (async (+ 1 2))))
-(assert_eq r3 3 "await async (+ 1 2)")
+(t .assert_eq r3 3 "await async (+ 1 2)")
 
 # Async with variable
-(println "--- Async with Variables ---")
+(t .section "Async with Variables")
 (var future (async (* 6 7)))
 (var result (await future))
-(assert_eq result 42 "await stored future")
+(t .assert_eq result 42 "await stored future")
 
 # Multiple async
-(println "--- Multiple Async ---")
+(t .section "Multiple Async")
 (var f1 (async 10))
 (var f2 (async 20))
 (var total ((await f1) + (await f2)))
-(assert_eq total 30 "sum of two awaited futures")
+(t .assert_eq total 30 "sum of two awaited futures")
 
 # Async preserves value types
-(println "--- Async Value Types ---")
-(assert_eq (await (async "hello")) "hello" "async string")
-(assert_eq (await (async true)) true "async bool")
+(t .section "Async Value Types")
+(t .assert_eq (await (async "hello")) "hello" "async string")
+(t .assert_eq (await (async true)) true "async bool")
 (var async_arr (await (async [1 2 3])))
-(assert_eq (len async_arr) 3 "async array")
+(t .assert_eq (len async_arr) 3 "async array")
 
-# Summary
-(println "")
-(println "=== Results ===")
-(println "  Passed:" pass_count)
-(println "  Failed:" fail_count)
-(if (fail_count == 0)
-  (println "  ALL TESTS PASSED")
-else
-  (println "  SOME TESTS FAILED"))
+(t .done)

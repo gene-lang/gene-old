@@ -1,0 +1,65 @@
+# testkit.gene — lightweight suite runner for Gene test files
+
+(class Suite
+  (ctor [name]
+    (/name = name)
+    (/pass_count = 0)
+    (/fail_count = 0)
+    (println "=== " name " ==="))
+
+  (method section [title]
+    (println "--- " title " ---"))
+
+  (method assert_eq [actual expected label]
+    (if (actual == expected)
+      (do
+        (/pass_count = (/pass_count + 1))
+        (println "  PASS:" label))
+    else
+      (do
+        (/fail_count = (/fail_count + 1))
+        (println "  FAIL:" label "- expected" expected "got" actual))))
+
+  (method assert_true [val label]
+    (if (val == true)
+      (do
+        (/pass_count = (/pass_count + 1))
+        (println "  PASS:" label))
+    else
+      (do
+        (/fail_count = (/fail_count + 1))
+        (println "  FAIL:" label "- expected true got" val))))
+
+  (method assert_false [val label]
+    (if (val == false)
+      (do
+        (/pass_count = (/pass_count + 1))
+        (println "  PASS:" label))
+    else
+      (do
+        (/fail_count = (/fail_count + 1))
+        (println "  FAIL:" label "- expected false got" val))))
+
+  (method assert_nil [val label]
+    (if (val == nil)
+      (do
+        (/pass_count = (/pass_count + 1))
+        (println "  PASS:" label))
+    else
+      (do
+        (/fail_count = (/fail_count + 1))
+        (println "  FAIL:" label "- expected nil got" val))))
+
+  (method done []
+    (println "")
+    (println "=== Results ===")
+    (println "  Passed:" /pass_count)
+    (println "  Failed:" /fail_count)
+    (if (/fail_count == 0)
+      (do
+        (println "  ALL TESTS PASSED")
+        true)
+    else
+      (do
+        (println "  SOME TESTS FAILED")
+        false))))
