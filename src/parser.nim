@@ -305,6 +305,47 @@ proc readString(r: var Reader): AstNode =
       parts.add(lit)
       literal.setLen(0)
 
+  template parseInterpolationChunk(label: string) =
+    discard r.advance() # consume '{'
+    flushLiteral()
+
+    var depth = 1
+    var exprBuf = ""
+    var inString = false
+    var escaped = false
+
+    while true:
+      if r.atEnd:
+        raise r.fail("unterminated " & label & "{...} interpolation")
+      let c = r.advance()
+      if inString:
+        exprBuf.add(c)
+        if escaped:
+          escaped = false
+        elif c == '\\':
+          escaped = true
+        elif c == '"':
+          inString = false
+        continue
+
+      case c
+      of '"':
+        inString = true
+        exprBuf.add(c)
+      of '{':
+        inc(depth)
+        exprBuf.add(c)
+      of '}':
+        dec(depth)
+        if depth == 0:
+          break
+        exprBuf.add(c)
+      else:
+        exprBuf.add(c)
+
+    let parsed = parseInterpolation(exprBuf, r.filename, line, col)
+    parts.add(parsed)
+
   while true:
     if r.atEnd:
       raise r.fail("unterminated string literal")
@@ -325,45 +366,12 @@ proc readString(r: var Reader): AstNode =
         literal.add(esc)
     of '$':
       if r.peek() == '{':
-        discard r.advance() # consume '{'
-        flushLiteral()
-
-        var depth = 1
-        var exprBuf = ""
-        var inString = false
-        var escaped = false
-
-        while true:
-          if r.atEnd:
-            raise r.fail("unterminated ${...} interpolation")
-          let c = r.advance()
-          if inString:
-            exprBuf.add(c)
-            if escaped:
-              escaped = false
-            elif c == '\\':
-              escaped = true
-            elif c == '"':
-              inString = false
-            continue
-
-          case c
-          of '"':
-            inString = true
-            exprBuf.add(c)
-          of '{':
-            inc(depth)
-            exprBuf.add(c)
-          of '}':
-            dec(depth)
-            if depth == 0:
-              break
-            exprBuf.add(c)
-          else:
-            exprBuf.add(c)
-
-        let parsed = parseInterpolation(exprBuf, r.filename, line, col)
-        parts.add(parsed)
+        parseInterpolationChunk("$")
+      else:
+        literal.add(ch)
+    of '#':
+      if r.peek() == '{':
+        parseInterpolationChunk("#")
       else:
         literal.add(ch)
     else:

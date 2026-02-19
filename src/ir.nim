@@ -157,6 +157,7 @@ type
     name*: string
     typeAnn*: string
     isKeyword*: bool
+    isVariadic*: bool
     hasDefault*: bool
     defaultValue*: Value
 
@@ -289,6 +290,8 @@ proc functionToString*(m: AirModule; fn: AirFunction): string =
     var meta: seq[string] = @[]
     if param.isKeyword:
       meta.add("kw")
+    if param.isVariadic:
+      meta.add("variadic")
     if param.hasDefault:
       meta.add("default=" & param.defaultValue.toDebugString())
     let suffix = if meta.len == 0: "" else: " [" & meta.join(", ") & "]"

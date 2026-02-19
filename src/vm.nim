@@ -1,6 +1,8 @@
 import std/[tables, strutils, times, math, sets, json, hashes, os, sequtils]
 import ./types
 import ./ir
+import ./parser
+import ./compiler
 
 type
   VmRuntimeError* = object of CatchableError
@@ -85,6 +87,7 @@ type
 
   Vm* = object
     module*: AirModule
+    loadedModules*: seq[AirModule]
     globals*: OrderedTable[int, Value]
     natives*: OrderedTable[int, NativeEntry]
     tasks*: OrderedTable[int, TaskNode]
@@ -107,10 +110,13 @@ type
     diagnostics*: seq[string]
     capabilityStack*: seq[HashSet[string]]
     namespaceStack*: seq[Value]
+    moduleCache*: OrderedTable[string, Value]
+    moduleLoading*: HashSet[string]
 
 proc newVm*(): Vm =
   Vm(
     module: nil,
+    loadedModules: @[],
     globals: initOrderedTable[int, Value](),
     natives: initOrderedTable[int, NativeEntry](),
     tasks: initOrderedTable[int, TaskNode](),
@@ -137,7 +143,9 @@ proc newVm*(): Vm =
     rngState: 0x9E3779B97F4A7C15'u64,
     diagnostics: @[],
     capabilityStack: @[],
-    namespaceStack: @[]
+    namespaceStack: @[],
+    moduleCache: initOrderedTable[string, Value](),
+    moduleLoading: initHashSet[string]()
   )
 
 proc raiseVmValue(err: Value) {.noreturn.} =
@@ -172,6 +180,123 @@ proc getGlobal(vm: Vm; symId: int): Value =
 proc setGlobal(vm: var Vm; symId: int; value: Value) =
   vm.globals[symId] = value
 
+proc setScopedGlobal(vm: var Vm; symId: int; value: Value) =
+  if vm.namespaceStack.len > 0:
+    let nsMap = asMapObj(vm.namespaceStack[^1])
+    if nsMap != nil:
+      nsMap.entries[symbolName(symId)] = value
+      return
+  setGlobal(vm, symId, value)
+
+proc ensureLoadedModule(vm: var Vm; module: AirModule): int =
+  if module == nil:
+    return -1
+  for i, existing in vm.loadedModules:
+    if existing == module:
+      return i
+  let idx = vm.loadedModules.len
+  vm.loadedModules.add(module)
+  idx
+
+proc getConstPath(module: AirModule; idx: int): string =
+  if module == nil or idx < 0 or idx >= module.constants.len:
+    return ""
+
+  let v = module.constants[idx]
+  let sObj = asStringObj(v)
+  if sObj != nil:
+    return sObj.value
+
+  if isSymbol(v):
+    return asSymbolName(v)
+
+  v.asString()
+
+proc resolveImportPath(baseSourcePath, requested: string): string =
+  if requested.len == 0:
+    return ""
+
+  var baseDir = getCurrentDir()
+  if baseSourcePath.len > 0 and not baseSourcePath.startsWith("<"):
+    let parts = splitFile(baseSourcePath)
+    if parts.dir.len > 0:
+      baseDir = parts.dir
+
+  var candidate = requested
+  if not isAbsolute(requested):
+    candidate = baseDir / requested
+
+  var candidates: seq[string] = @[candidate]
+  if splitFile(candidate).ext.len == 0:
+    candidates.add(candidate & ".gene")
+    candidates.add(candidate / "index.gene")
+
+  for c in candidates:
+    if fileExists(c):
+      return absolutePath(c)
+
+  absolutePath(candidates[0])
+
+proc executeFunction(
+  vm: var Vm;
+  fnObj: FunctionObj;
+  args: seq[Value];
+  selfValue: Value = valueNil();
+  resumeGen: GeneratorObj = nil
+): Value
+
+proc runImportedModule(vm: var Vm; modulePath: string): Value =
+  if modulePath.len == 0:
+    raiseVmValue(newErrorValue("invalid import path"))
+
+  if vm.moduleCache.hasKey(modulePath):
+    return vm.moduleCache[modulePath]
+
+  if modulePath in vm.moduleLoading:
+    raiseVmValue(newErrorValue("circular import: " & modulePath))
+
+  if not fileExists(modulePath):
+    raiseVmValue(newErrorValue("import not found: " & modulePath))
+
+  vm.moduleLoading.incl(modulePath)
+  let nsValue = newMapValue()
+  vm.moduleCache[modulePath] = nsValue
+
+  try:
+    let src = readFile(modulePath)
+    let ast = parseProgram(src, modulePath)
+    let importedModule = compileProgram(ast, modulePath)
+
+    let prevModule = vm.module
+    let prevNsDepth = vm.namespaceStack.len
+    vm.module = importedModule
+    vm.namespaceStack.add(nsValue)
+
+    try:
+      if importedModule.mainFn >= 0 and importedModule.mainFn < importedModule.functions.len:
+        let importedModuleId = ensureLoadedModule(vm, importedModule)
+        let mainMeta = importedModule.functions[importedModule.mainFn]
+        let mainVal = newFunctionValue(mainMeta.name, importedModule.mainFn, mainMeta.arity, importedModuleId)
+        let mainObj = asFunctionObj(mainVal)
+        for p in mainMeta.params:
+          mainObj.paramNames.add(p.name)
+          mainObj.paramTypes.add(p.typeAnn)
+        discard executeFunction(vm, mainObj, @[])
+    finally:
+      vm.module = prevModule
+      vm.namespaceStack.setLen(prevNsDepth)
+
+    vm.moduleLoading.excl(modulePath)
+    nsValue
+  except VmThrow:
+    vm.moduleLoading.excl(modulePath)
+    vm.moduleCache.del(modulePath)
+    raise
+  except CatchableError as ex:
+    vm.moduleLoading.excl(modulePath)
+    vm.moduleCache.del(modulePath)
+    raiseVmValue(newErrorValue("import failed: " & ex.msg))
+
 proc setQuotaLimit*(vm: var Vm; kind: VmQuotaKind; value: int64) =
   case kind
   of QkCpuSteps:
@@ -197,8 +322,9 @@ proc instantiateFunctionValue(vm: var Vm; fnIdx: int; frame: FrameCtx): Value =
   if vm.module == nil or fnIdx < 0 or fnIdx >= vm.module.functions.len:
     return valueNil()
 
+  let moduleId = ensureLoadedModule(vm, vm.module)
   let fnMeta = vm.module.functions[fnIdx]
-  let fnVal = newFunctionValue(fnMeta.name, fnIdx, fnMeta.arity)
+  let fnVal = newFunctionValue(fnMeta.name, fnIdx, fnMeta.arity, moduleId)
   let fnObj = asFunctionObj(fnVal)
 
   for p in fnMeta.params:
@@ -250,6 +376,55 @@ proc asIntDefault(v: Value; defaultVal: int): int =
   defaultVal
 
 proc resumeValue*(vm: var Vm; value: Value): Value
+
+proc invokeArrayMethod(vm: var Vm; receiver: Value; methodName: string; args: seq[Value]; kwargs: Value): tuple[handled: bool, value: Value] =
+  let arr = asArrayObj(receiver)
+  if arr == nil:
+    return (false, valueNil())
+
+  if methodName notin ["push", "pop", "map", "filter", "reduce"]:
+    return (false, valueNil())
+
+  if kwargsHasEntries(kwargs):
+    raiseVmValue(newErrorValue("array method ." & methodName & " does not accept keyword arguments"))
+
+  case methodName
+  of "push":
+    for a in args:
+      arr.items.add(a)
+    (true, valueInt(arr.items.len))
+  of "pop":
+    if arr.items.len == 0:
+      (true, valueNil())
+    else:
+      let popped = arr.items[^1]
+      arr.items.setLen(arr.items.len - 1)
+      (true, popped)
+  of "map":
+    if args.len < 1:
+      raiseVmValue(newErrorValue("array .map requires a callback"))
+    var mapped: seq[Value] = @[]
+    for item in arr.items:
+      mapped.add(invokeValue(vm, args[0], @[item], receiver))
+    (true, newArrayValue(mapped))
+  of "filter":
+    if args.len < 1:
+      raiseVmValue(newErrorValue("array .filter requires a callback"))
+    var filtered: seq[Value] = @[]
+    for item in arr.items:
+      if isTruthy(invokeValue(vm, args[0], @[item], receiver)):
+        filtered.add(item)
+    (true, newArrayValue(filtered))
+  of "reduce":
+    if args.len < 2:
+      raiseVmValue(newErrorValue("array .reduce requires initial value and callback"))
+    var acc = args[0]
+    let fn = args[1]
+    for item in arr.items:
+      acc = invokeValue(vm, fn, @[acc, item], receiver)
+    (true, acc)
+  else:
+    (false, valueNil())
 
 proc iteratorNew(iterable: Value): Value =
   let it = newMapValue()
@@ -738,6 +913,7 @@ proc encodeObject(obj: HeapObject; ctx: var ObjEncodeCtx): int =
     let fn = asFunctionObj(valueFromPtr(obj))
     entry["name"] = %fn.name
     entry["fnIndex"] = %fn.fnIndex
+    entry["moduleId"] = %fn.moduleId
     entry["arity"] = %fn.arity
     entry["paramNames"] = %fn.paramNames
     entry["paramTypes"] = %fn.paramTypes
@@ -844,6 +1020,7 @@ proc initPlaceholder(kindName: string): HeapObject =
       kind: HkFunction,
       name: "",
       fnIndex: -1,
+      moduleId: -1,
       arity: 0,
       paramNames: @[],
       paramTypes: @[],
@@ -949,6 +1126,7 @@ proc decodeAllObjects(vm: var Vm; ctx: var ObjDecodeCtx) =
       let fn = FunctionObj(obj)
       fn.name = node["name"].getStr()
       fn.fnIndex = node["fnIndex"].getInt()
+      fn.moduleId = if node.hasKey("moduleId"): node["moduleId"].getInt() else: -1
       fn.arity = node["arity"].getInt()
       fn.paramNames = @[]
       for p in node["paramNames"]:
@@ -1056,11 +1234,12 @@ proc frameToJson(frame: FrameCtx; ctx: var ObjEncodeCtx): JsonNode =
   node["handlerStackDepths"] = %depths
   node
 
-proc hydrateFunctionValue(vm: Vm; fnIndex: int): Value =
+proc hydrateFunctionValue(vm: var Vm; fnIndex: int): Value =
   if vm.module == nil or fnIndex < 0 or fnIndex >= vm.module.functions.len:
     return valueNil()
   let meta = vm.module.functions[fnIndex]
-  let fnVal = newFunctionValue(meta.name, fnIndex, meta.arity)
+  let moduleId = ensureLoadedModule(vm, vm.module)
+  let fnVal = newFunctionValue(meta.name, fnIndex, meta.arity, moduleId)
   let fnObj = asFunctionObj(fnVal)
   if fnObj != nil:
     for p in meta.params:
@@ -1274,12 +1453,22 @@ proc executeFunction(
   selfValue: Value = valueNil();
   resumeGen: GeneratorObj = nil
 ): Value =
-  if vm.module == nil:
+  var targetModule = vm.module
+  if fnObj != nil and fnObj.moduleId >= 0 and fnObj.moduleId < vm.loadedModules.len:
+    targetModule = vm.loadedModules[fnObj.moduleId]
+
+  if targetModule == nil:
     return valueNil()
-  if fnObj.fnIndex < 0 or fnObj.fnIndex >= vm.module.functions.len:
+
+  let prevModule = vm.module
+  vm.module = targetModule
+  defer:
+    vm.module = prevModule
+
+  if fnObj.fnIndex < 0 or fnObj.fnIndex >= targetModule.functions.len:
     raise newException(VmRuntimeError, "invalid function index")
 
-  let fnMeta = vm.module.functions[fnObj.fnIndex]
+  let fnMeta = targetModule.functions[fnObj.fnIndex]
   var frame: FrameCtx
   if resumeGen != nil and resumeGen.started:
     frame = makeFrameFromGenerator(vm, resumeGen)
@@ -1400,16 +1589,8 @@ proc executeFunction(
         else:
           pushValue(frame, getGlobal(vm, sid))
       of OpStoreGlobal:
-        let sid = int(inst.b)
         let v = popValue(frame)
-        if vm.namespaceStack.len > 0:
-          let nsMap = asMapObj(vm.namespaceStack[^1])
-          if nsMap != nil:
-            nsMap.entries[symbolName(sid)] = v
-          else:
-            setGlobal(vm, sid, v)
-        else:
-          setGlobal(vm, sid, v)
+        setScopedGlobal(vm, int(inst.b), v)
         pushValue(frame, v)
 
       of OpLoadSelf:
@@ -1434,7 +1615,7 @@ proc executeFunction(
           else:
             pushValue(frame, valueFloat(asFloat(a) + asFloat(b)))
         else:
-          pushValue(frame, newStringValue(a.toDebugString() & b.toDebugString()))
+          pushValue(frame, newStringValue(a.asString() & b.asString()))
       of OpSub:
         let b = popValue(frame)
         let a = popValue(frame)
@@ -1589,6 +1770,10 @@ proc executeFunction(
         let args = popArgs(frame, argc)
         let receiver = popValue(frame)
         let methodName = symbolName(int(inst.b))
+        let arrayMethod = invokeArrayMethod(vm, receiver, methodName, args, valueNil())
+        if arrayMethod.handled:
+          pushValue(frame, arrayMethod.value)
+          continue
         var methodValue = getMember(receiver, methodName)
 
         if isNil(methodValue):
@@ -1613,6 +1798,10 @@ proc executeFunction(
         let args = popArgs(frame, argc)
         let receiver = popValue(frame)
         let methodName = symbolName(int(inst.b))
+        let arrayMethod = invokeArrayMethod(vm, receiver, methodName, args, kwargs)
+        if arrayMethod.handled:
+          pushValue(frame, arrayMethod.value)
+          continue
         var methodValue = getMember(receiver, methodName)
 
         if isNil(methodValue):
@@ -1788,11 +1977,20 @@ proc executeFunction(
         discard
 
       of OpImport:
-        let sid = int(inst.b)
-        var modVal = getGlobal(vm, sid)
-        if asMapObj(modVal) == nil:
-          modVal = newMapValue()
-          setGlobal(vm, sid, modVal)
+        let aliasSid = int(inst.b)
+        var modVal = valueNil()
+
+        if inst.mode == 1:
+          let requested = getConstPath(vm.module, int(inst.c))
+          let baseSource = if vm.module != nil: vm.module.sourcePath else: ""
+          let resolved = resolveImportPath(baseSource, requested)
+          modVal = runImportedModule(vm, resolved)
+        else:
+          modVal = getGlobal(vm, aliasSid)
+          if asMapObj(modVal) == nil:
+            modVal = newMapValue()
+
+        setScopedGlobal(vm, aliasSid, modVal)
         pushValue(frame, modVal)
       of OpExport:
         discard
@@ -2146,7 +2344,7 @@ proc kwargsHasEntries(kwargs: Value): bool =
 
 proc remainingRequiredPositional(params: seq[AirParam]; startIdx: int): int =
   for i in startIdx..<params.len:
-    if (not params[i].isKeyword) and (not params[i].hasDefault):
+    if (not params[i].isKeyword) and (not params[i].hasDefault) and (not params[i].isVariadic):
       inc(result)
 
 proc bindFunctionArgs(fnMeta: AirFunction; args: seq[Value]; kwargs: Value): seq[Value] =
@@ -2161,7 +2359,7 @@ proc bindFunctionArgs(fnMeta: AirFunction; args: seq[Value]; kwargs: Value): seq
   for param in fnMeta.params:
     if param.isKeyword:
       keywordNames.incl(param.name)
-    else:
+    elif not param.isVariadic:
       inc(maxPositional)
 
   for k in kwEntries.keys:
@@ -2175,6 +2373,14 @@ proc bindFunctionArgs(fnMeta: AirFunction; args: seq[Value]; kwargs: Value): seq
   var posIdx = 0
   for idx, param in fnMeta.params:
     if param.isKeyword:
+      continue
+
+    if param.isVariadic:
+      var rest: seq[Value] = @[]
+      while posIdx < args.len:
+        rest.add(args[posIdx])
+        inc(posIdx)
+      result[idx] = newArrayValue(rest)
       continue
 
     let requiredAfter = remainingRequiredPositional(fnMeta.params, idx + 1)
@@ -2234,10 +2440,14 @@ proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value =
 
   let fnObj = asFunctionObj(callee)
   if fnObj != nil:
-    if vm.module == nil or fnObj.fnIndex < 0 or fnObj.fnIndex >= vm.module.functions.len:
+    var fnModule = vm.module
+    if fnObj.moduleId >= 0 and fnObj.moduleId < vm.loadedModules.len:
+      fnModule = vm.loadedModules[fnObj.moduleId]
+
+    if fnModule == nil or fnObj.fnIndex < 0 or fnObj.fnIndex >= fnModule.functions.len:
       raiseVmValue(newErrorValue("invalid function metadata"))
 
-    let fnMeta = vm.module.functions[fnObj.fnIndex]
+    let fnMeta = fnModule.functions[fnObj.fnIndex]
     let boundArgs = bindFunctionArgs(fnMeta, args, kwargs)
 
     for i, paramType in fnObj.paramTypes:
@@ -2304,8 +2514,9 @@ proc runModule*(vm: var Vm; module: AirModule): Value =
   vm.taskScopeStack = @[]
   vm.namespaceStack = @[]
 
+  let mainModuleId = ensureLoadedModule(vm, vm.module)
   let mainMeta = vm.module.functions[vm.module.mainFn]
-  let mainVal = newFunctionValue(mainMeta.name, vm.module.mainFn, mainMeta.arity)
+  let mainVal = newFunctionValue(mainMeta.name, vm.module.mainFn, mainMeta.arity, mainModuleId)
   let mainObj = asFunctionObj(mainVal)
   for p in mainMeta.params:
     mainObj.paramNames.add(p.name)

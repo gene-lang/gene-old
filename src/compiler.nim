@@ -116,6 +116,11 @@ proc compileSymbolLookup(ctx: FnContext; sym: string)
 proc splitPath(symbolText: string): seq[string] =
   symbolText.split('/')
 
+proc stripNilSafeSuffix(seg: string): tuple[name: string, nilSafe: bool] =
+  if seg.len > 0 and seg[^1] == '?':
+    return (seg[0..^2], true)
+  (seg, false)
+
 proc compilePathLookup(ctx: FnContext; symbolText: string) =
   let parts = splitPath(symbolText)
   if parts.len == 0:
@@ -125,11 +130,13 @@ proc compilePathLookup(ctx: FnContext; symbolText: string) =
   if symbolText.startsWith("/"):
     ctx.emit(OpLoadSelf)
   else:
-    compileSymbolLookup(ctx, parts[0])
+    let base = stripNilSafeSuffix(parts[0]).name
+    compileSymbolLookup(ctx, base)
 
   let start = if symbolText.startsWith("/"): 1 else: 1
   for i in start..<parts.len:
-    let segment = parts[i]
+    let parsed = stripNilSafeSuffix(parts[i])
+    let segment = parsed.name
     if segment.len == 0:
       continue
 
@@ -138,10 +145,16 @@ proc compilePathLookup(ctx: FnContext; symbolText: string) =
       ctx.emit(OpGetChild, b = idx.uint32)
     elif segment.startsWith(".") and segment.len > 1:
       let sid = runtimeSym(ctx.m, segment[1..^1])
-      ctx.emit(OpGetMember, b = sid.uint32)
+      if parsed.nilSafe:
+        ctx.emit(OpGetMemberNil, b = sid.uint32)
+      else:
+        ctx.emit(OpGetMember, b = sid.uint32)
     else:
       let sid = runtimeSym(ctx.m, segment)
-      ctx.emit(OpGetMember, b = sid.uint32)
+      if parsed.nilSafe:
+        ctx.emit(OpGetMemberNil, b = sid.uint32)
+      else:
+        ctx.emit(OpGetMember, b = sid.uint32)
 
 proc compileSymbolLookup(ctx: FnContext; sym: string) =
   if sym == "$program":
@@ -173,6 +186,9 @@ proc compileLValueStore(ctx: FnContext; lhs: AstNode; valueExpr: AstNode; compou
   let target = lhs.text
 
   if target.contains('/'):
+    if target.contains('?'):
+      raise fail(lhs, "nil-safe paths are not assignable")
+
     let parts = splitPath(target)
     if parts.len < 2:
       raise fail(lhs, "invalid path assignment")
@@ -301,12 +317,18 @@ proc parseParams(arrayNode: AstNode; owner: AstNode): seq[AirParam] =
       name: "",
       typeAnn: "",
       isKeyword: false,
+      isVariadic: false,
       hasDefault: false,
       defaultValue: valueNil()
     )
 
     if item.kind == AkSymbol:
-      var (name, ann) = parseTypedName(item)
+      var paramNode = item
+      if item.text.endsWith("...") and item.text.len > 3:
+        param.isVariadic = true
+        paramNode = mkSymbol(item.line, item.col, item.text[0..^4])
+
+      var (name, ann) = parseTypedName(paramNode)
       if name.len == 0:
         raise fail(item, "invalid parameter name")
 
@@ -335,9 +357,14 @@ proc parseParams(arrayNode: AstNode; owner: AstNode): seq[AirParam] =
     if i + 1 < arrayNode.items.len and isHeadSymbol(arrayNode.items[i + 1], "="):
       if i + 2 >= arrayNode.items.len:
         raise fail(owner, "parameter default missing value for '" & param.name & "'")
+      if param.isVariadic:
+        raise fail(owner, "variadic parameter '" & param.name & "' cannot have a default")
       param.hasDefault = true
       param.defaultValue = parseDefaultParamValue(arrayNode.items[i + 2])
       inc(i, 2)
+
+    if param.isVariadic and i < arrayNode.items.high:
+      raise fail(owner, "variadic parameter '" & param.name & "' must be the last parameter")
 
     result.add(param)
     inc(i)
@@ -552,6 +579,87 @@ proc compileForForm(ctx: FnContext; node: AstNode) =
   discard ctx.loops.pop()
 
   ctx.emit(OpConstNil)
+
+proc compileWhileForm(ctx: FnContext; node: AstNode) =
+  let items = node.items
+  if items.len < 2:
+    ctx.emit(OpConstNil)
+    return
+
+  let condIp = ctx.fn.code.len
+  let loopCtx = LoopContext(startIp: condIp, continueIp: condIp, breakPatches: @[])
+  ctx.loops.add(loopCtx)
+
+  if items.len >= 2:
+    compileExpr(ctx, items[1])
+  else:
+    ctx.emit(OpConstFalse)
+  let brEnd = ctx.emit(OpBrFalse, b = 0)
+
+  if items.len <= 2:
+    ctx.emit(OpConstNil)
+    ctx.emit(OpPop)
+  else:
+    for i in 2..<items.len:
+      compileExpr(ctx, items[i])
+      if i < items.high:
+        ctx.emit(OpPop)
+
+  ctx.emit(OpJump, b = condIp.uint32)
+
+  let endPc = ctx.fn.code.len
+  ctx.fn.patchB(brEnd, endPc)
+  for ip in loopCtx.breakPatches:
+    ctx.fn.patchB(ip, endPc)
+  discard ctx.loops.pop()
+
+  ctx.emit(OpConstNil)
+
+proc compileCaseForm(ctx: FnContext; node: AstNode) =
+  let items = node.items
+  if items.len < 2:
+    raise fail(node, "case requires a target expression")
+
+  let targetSlot = declareLocal(ctx, "__case_" & $node.line & "_" & $node.col)
+  compileExpr(ctx, items[1])
+  ctx.emit(OpStoreLocal, b = targetSlot.uint32)
+  ctx.emit(OpPop)
+
+  var i = 2
+  var matchedElse = false
+  var endPatches: seq[int] = @[]
+
+  while i < items.len:
+    if isHeadSymbol(items[i], "when"):
+      if i + 2 >= items.len:
+        raise fail(node, "when requires pattern and body")
+      ctx.emit(OpLoadLocal, b = targetSlot.uint32)
+      compileExpr(ctx, items[i + 1])
+      ctx.emit(OpCmpEq)
+      let miss = ctx.emit(OpBrFalse, b = 0)
+      compileExpr(ctx, items[i + 2])
+      endPatches.add(ctx.emit(OpJump, b = 0))
+      ctx.fn.patchB(miss, ctx.fn.code.len)
+      i += 3
+      continue
+
+    if isHeadSymbol(items[i], "else"):
+      matchedElse = true
+      if i + 1 < items.len:
+        compileExpr(ctx, items[i + 1])
+      else:
+        ctx.emit(OpConstNil)
+      i = items.len
+      continue
+
+    raise fail(items[i], "case only accepts 'when' and 'else' clauses")
+
+  if not matchedElse:
+    ctx.emit(OpConstNil)
+
+  let endPc = ctx.fn.code.len
+  for p in endPatches:
+    ctx.fn.patchB(p, endPc)
 
 proc compileTryForm(ctx: FnContext; node: AstNode) =
   let items = node.items
@@ -1036,6 +1144,12 @@ proc compileSpecialForm(ctx: FnContext; node: AstNode): bool =
   of "for":
     compileForForm(ctx, node)
     true
+  of "while":
+    compileWhileForm(ctx, node)
+    true
+  of "case":
+    compileCaseForm(ctx, node)
+    true
   of "break":
     if ctx.loops.len == 0:
       raise fail(node, "break used outside loop")
@@ -1104,9 +1218,10 @@ proc compileSpecialForm(ctx: FnContext; node: AstNode): bool =
       ctx.emit(OpConstNil)
     true
   of "import":
-    if items.len >= 5 and items[1].kind == AkSymbol and items[1].text == "*" and isHeadSymbol(items[2], "as") and items[3].kind == AkSymbol:
+    if items.len >= 5 and items[1].kind == AkSymbol and items[1].text == "*" and isHeadSymbol(items[2], "as") and items[3].kind == AkSymbol and items[4].kind == AkString:
       let sid = runtimeSym(ctx.m, items[3].text)
-      ctx.emit(OpImport, b = sid.uint32)
+      let pathIdx = ctx.m.addConstant(newStringValue(items[4].text))
+      ctx.emit(OpImport, mode = 1, b = sid.uint32, c = pathIdx.uint32)
     elif items.len > 1 and items[1].kind == AkSymbol:
       let sid = runtimeSym(ctx.m, items[1].text)
       ctx.emit(OpImport, b = sid.uint32)
@@ -1125,7 +1240,21 @@ proc compileSpecialForm(ctx: FnContext; node: AstNode): bool =
     else:
       compileBodyExprs(ctx, items[1..^1])
     true
-  of "before", "around", "after", "aspect":
+  of "aspect":
+    if items.len < 3 or items[1].kind != AkSymbol:
+      raise fail(node, "aspect requires a name and parameter list")
+    var fnNode = AstNode(kind: AkList, line: node.line, col: node.col, items: @[])
+    fnNode.items.add(mkSymbol(node.line, node.col, "fn"))
+    fnNode.items.add(items[1])
+    fnNode.items.add(items[2])
+    if items.len > 3:
+      for i in 3..<items.len:
+        fnNode.items.add(items[i])
+    else:
+      fnNode.items.add(AstNode(kind: AkNil, line: node.line, col: node.col))
+    discard compileFunctionForm(ctx, fnNode)
+    true
+  of "before", "around", "after":
     # AOP forms are accepted as standalone syntax and currently compile to no-op values.
     ctx.emit(OpConstNil)
     true

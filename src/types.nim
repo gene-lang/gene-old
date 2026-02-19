@@ -70,6 +70,7 @@ type
   FunctionObj* = ref object of HeapObject
     name*: string
     fnIndex*: int
+    moduleId*: int
     arity*: int
     paramNames*: seq[string]
     paramTypes*: seq[string]
@@ -293,11 +294,12 @@ proc newGeneValue*(geneType: Value): Value =
   ))
   valueFromPtr(obj)
 
-proc newFunctionValue*(name: string; fnIndex: int; arity: int): Value =
+proc newFunctionValue*(name: string; fnIndex: int; arity: int; moduleId = -1): Value =
   let obj = retainRoot(FunctionObj(
     kind: HkFunction,
     name: name,
     fnIndex: fnIndex,
+    moduleId: moduleId,
     arity: arity,
     paramNames: @[],
     paramTypes: @[],
