@@ -106,6 +106,7 @@ type
     rngState*: uint64
     diagnostics*: seq[string]
     capabilityStack*: seq[HashSet[string]]
+    namespaceStack*: seq[Value]
 
 proc newVm*(): Vm =
   Vm(
@@ -135,7 +136,8 @@ proc newVm*(): Vm =
     deterministic: false,
     rngState: 0x9E3779B97F4A7C15'u64,
     diagnostics: @[],
-    capabilityStack: @[]
+    capabilityStack: @[],
+    namespaceStack: @[]
   )
 
 proc raiseVmValue(err: Value) {.noreturn.} =
@@ -237,7 +239,8 @@ proc instantiateFunctionValue(vm: var Vm; fnIdx: int; frame: FrameCtx): Value =
 
   fnVal
 
-proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value = valueNil()): Value
+proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value = valueNil(); kwargs: Value = valueNil()): Value
+proc kwargsHasEntries(kwargs: Value): bool
 
 proc asIntDefault(v: Value; defaultVal: int): int =
   if isInt(v):
@@ -1386,10 +1389,27 @@ proc executeFunction(
         pushValue(frame, v)
 
       of OpLoadGlobal:
-        pushValue(frame, getGlobal(vm, int(inst.b)))
+        let sid = int(inst.b)
+        if vm.namespaceStack.len > 0:
+          let nsMap = asMapObj(vm.namespaceStack[^1])
+          let key = symbolName(sid)
+          if nsMap != nil and nsMap.entries.hasKey(key):
+            pushValue(frame, nsMap.entries[key])
+          else:
+            pushValue(frame, getGlobal(vm, sid))
+        else:
+          pushValue(frame, getGlobal(vm, sid))
       of OpStoreGlobal:
+        let sid = int(inst.b)
         let v = popValue(frame)
-        setGlobal(vm, int(inst.b), v)
+        if vm.namespaceStack.len > 0:
+          let nsMap = asMapObj(vm.namespaceStack[^1])
+          if nsMap != nil:
+            nsMap.entries[symbolName(sid)] = v
+          else:
+            setGlobal(vm, sid, v)
+        else:
+          setGlobal(vm, sid, v)
         pushValue(frame, v)
 
       of OpLoadSelf:
@@ -1448,7 +1468,18 @@ proc executeFunction(
       of OpPow:
         let b = popValue(frame)
         let a = popValue(frame)
-        pushValue(frame, valueFloat(pow(asFloat(a), asFloat(b))))
+        if isInt(a) and isInt(b) and asInt(b) >= 0:
+          var base = asInt(a)
+          var exp = asInt(b)
+          var acc = 1'i64
+          while exp > 0:
+            if (exp and 1) == 1:
+              acc = acc * base
+            base = base * base
+            exp = exp shr 1
+          pushValue(frame, valueInt(acc))
+        else:
+          pushValue(frame, valueFloat(pow(asFloat(a), asFloat(b))))
       of OpNeg:
         let a = popValue(frame)
         if isInt(a):
@@ -1538,6 +1569,14 @@ proc executeFunction(
         let callResult = invokeValue(vm, callee, args)
         pushValue(frame, callResult)
 
+      of OpCallKw:
+        let argc = int(inst.c)
+        let kwargs = popValue(frame)
+        let args = popArgs(frame, argc)
+        let callee = popValue(frame)
+        let callResult = invokeValue(vm, callee, args, valueNil(), kwargs)
+        pushValue(frame, callResult)
+
       of OpCallMacro:
         let argc = int(inst.c)
         let args = popArgs(frame, argc)
@@ -1545,7 +1584,7 @@ proc executeFunction(
         let callResult = invokeValue(vm, callee, args)
         pushValue(frame, callResult)
 
-      of OpCallMethod, OpCallMethodKw:
+      of OpCallMethod:
         let argc = int(inst.c)
         let args = popArgs(frame, argc)
         let receiver = popValue(frame)
@@ -1568,7 +1607,31 @@ proc executeFunction(
           let callResult = invokeValue(vm, methodValue, args, receiver)
           pushValue(frame, callResult)
 
-      of OpCallSuper, OpCallSuperKw:
+      of OpCallMethodKw:
+        let argc = int(inst.c)
+        let kwargs = popValue(frame)
+        let args = popArgs(frame, argc)
+        let receiver = popValue(frame)
+        let methodName = symbolName(int(inst.b))
+        var methodValue = getMember(receiver, methodName)
+
+        if isNil(methodValue):
+          let sid = internSymbol(methodName)
+          if vm.globals.hasKey(sid):
+            var methodArgs: seq[Value] = @[receiver]
+            for a in args:
+              methodArgs.add(a)
+            let callResult = invokeValue(vm, vm.globals[sid], methodArgs, receiver, kwargs)
+            pushValue(frame, callResult)
+          elif argc == 0 and not kwargsHasEntries(kwargs):
+            pushValue(frame, getMember(receiver, methodName))
+          else:
+            handleThrow(newErrorValue("method not found: " & methodName))
+        else:
+          let callResult = invokeValue(vm, methodValue, args, receiver, kwargs)
+          pushValue(frame, callResult)
+
+      of OpCallSuper:
         let argc = int(inst.c)
         let args = popArgs(frame, argc)
         let methodName = symbolName(int(inst.b))
@@ -1586,6 +1649,27 @@ proc executeFunction(
         if not superCls.methods.hasKey(methodName):
           handleThrow(newErrorValue("super method missing: " & methodName))
         let callResult = invokeValue(vm, superCls.methods[methodName], args, frame.selfVal)
+        pushValue(frame, callResult)
+
+      of OpCallSuperKw:
+        let argc = int(inst.c)
+        let kwargs = popValue(frame)
+        let args = popArgs(frame, argc)
+        let methodName = symbolName(int(inst.b))
+
+        let instObj = asInstanceObj(frame.selfVal)
+        if instObj == nil:
+          handleThrow(newErrorValue("super call without instance"))
+        let cls = asClassObj(instObj.cls)
+        if cls == nil:
+          handleThrow(newErrorValue("super call on invalid class"))
+        let superCls = asClassObj(cls.superClass)
+        if superCls == nil:
+          handleThrow(newErrorValue("super class not found"))
+
+        if not superCls.methods.hasKey(methodName):
+          handleThrow(newErrorValue("super method missing: " & methodName))
+        let callResult = invokeValue(vm, superCls.methods[methodName], args, frame.selfVal, kwargs)
         pushValue(frame, callResult)
 
       of OpCallerEval:
@@ -1704,11 +1788,37 @@ proc executeFunction(
         discard
 
       of OpImport:
-        pushValue(frame, valueNil())
+        let sid = int(inst.b)
+        var modVal = getGlobal(vm, sid)
+        if asMapObj(modVal) == nil:
+          modVal = newMapValue()
+          setGlobal(vm, sid, modVal)
+        pushValue(frame, modVal)
       of OpExport:
         discard
-      of OpNsEnter, OpNsExit:
-        discard
+      of OpNsEnter:
+        let sid = int(inst.b)
+        let nsName = symbolName(sid)
+        var nsVal = valueNil()
+
+        if vm.namespaceStack.len == 0:
+          nsVal = getGlobal(vm, sid)
+          if asMapObj(nsVal) == nil:
+            nsVal = newMapValue()
+            setGlobal(vm, sid, nsVal)
+        else:
+          let parent = asMapObj(vm.namespaceStack[^1])
+          if parent != nil and parent.entries.hasKey(nsName):
+            nsVal = parent.entries[nsName]
+          if asMapObj(nsVal) == nil:
+            nsVal = newMapValue()
+            if parent != nil:
+              parent.entries[nsName] = nsVal
+
+        vm.namespaceStack.add(nsVal)
+      of OpNsExit:
+        if vm.namespaceStack.len > 0:
+          vm.namespaceStack.setLen(vm.namespaceStack.len - 1)
 
       of OpGetMember:
         let target = popValue(frame)
@@ -2030,18 +2140,86 @@ proc resumeValue*(vm: var Vm; value: Value): Value =
 
   outValue
 
-proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value = valueNil()): Value =
+proc kwargsHasEntries(kwargs: Value): bool =
+  let m = asMapObj(kwargs)
+  m != nil and len(m.entries) > 0
+
+proc remainingRequiredPositional(params: seq[AirParam]; startIdx: int): int =
+  for i in startIdx..<params.len:
+    if (not params[i].isKeyword) and (not params[i].hasDefault):
+      inc(result)
+
+proc bindFunctionArgs(fnMeta: AirFunction; args: seq[Value]; kwargs: Value): seq[Value] =
+  var kwEntries = initOrderedTable[string, Value]()
+  let kwMap = asMapObj(kwargs)
+  if kwMap != nil:
+    for k, v in kwMap.entries:
+      kwEntries[k] = v
+
+  var keywordNames = initHashSet[string]()
+  var maxPositional = 0
+  for param in fnMeta.params:
+    if param.isKeyword:
+      keywordNames.incl(param.name)
+    else:
+      inc(maxPositional)
+
+  for k in kwEntries.keys:
+    if k notin keywordNames:
+      raiseVmValue(newErrorValue("unknown keyword argument: ^" & k))
+
+  result = newSeq[Value](fnMeta.params.len)
+  for i in 0..<result.len:
+    result[i] = valueNil()
+
+  var posIdx = 0
+  for idx, param in fnMeta.params:
+    if param.isKeyword:
+      continue
+
+    let requiredAfter = remainingRequiredPositional(fnMeta.params, idx + 1)
+    let available = args.len - posIdx
+
+    if param.hasDefault:
+      if available > requiredAfter:
+        result[idx] = args[posIdx]
+        inc(posIdx)
+      else:
+        result[idx] = param.defaultValue
+    else:
+      if available > requiredAfter:
+        result[idx] = args[posIdx]
+        inc(posIdx)
+      else:
+        raiseVmValue(newErrorValue("missing required argument: " & param.name))
+
+  if posIdx < args.len:
+    raiseVmValue(newErrorValue("too many positional arguments: expected at most " & $maxPositional & " got " & $args.len))
+
+  for idx, param in fnMeta.params:
+    if not param.isKeyword:
+      continue
+    if kwEntries.hasKey(param.name):
+      result[idx] = kwEntries[param.name]
+    elif param.hasDefault:
+      result[idx] = param.defaultValue
+    else:
+      raiseVmValue(newErrorValue("missing required keyword argument: ^" & param.name))
+
+proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value = valueNil(); kwargs: Value = valueNil()): Value =
   if isNil(callee):
     raiseVmValue(newErrorValue("attempted to call nil"))
 
   if isSymbol(callee):
     let sid = asSymbolId(callee)
     if vm.globals.hasKey(sid):
-      return invokeValue(vm, vm.globals[sid], args, selfValue)
+      return invokeValue(vm, vm.globals[sid], args, selfValue, kwargs)
     raiseVmValue(newErrorValue("unknown callable symbol: " & asSymbolName(callee)))
 
   let nativeObj = asNativeFunctionObj(callee)
   if nativeObj != nil:
+    if kwargsHasEntries(kwargs):
+      raiseVmValue(newErrorValue("native functions do not accept keyword arguments: " & nativeObj.name))
     let sid = internSymbol(nativeObj.name)
     if not vm.natives.hasKey(sid):
       raiseVmValue(newErrorValue("native not registered: " & nativeObj.name))
@@ -2056,15 +2234,18 @@ proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value =
 
   let fnObj = asFunctionObj(callee)
   if fnObj != nil:
-    if fnObj.arity >= 0 and args.len != fnObj.arity:
-      raiseVmValue(newErrorValue("function arity mismatch: expected " & $fnObj.arity & " got " & $args.len))
+    if vm.module == nil or fnObj.fnIndex < 0 or fnObj.fnIndex >= vm.module.functions.len:
+      raiseVmValue(newErrorValue("invalid function metadata"))
+
+    let fnMeta = vm.module.functions[fnObj.fnIndex]
+    let boundArgs = bindFunctionArgs(fnMeta, args, kwargs)
 
     for i, paramType in fnObj.paramTypes:
-      if i < args.len and paramType.len > 0 and not expectType(args[i], paramType):
-        raiseVmValue(newErrorValue("type mismatch for parameter " & fnObj.paramNames[i] & ": expected " & paramType & " got " & inferTypeName(args[i])))
+      if i < boundArgs.len and paramType.len > 0 and not expectType(boundArgs[i], paramType):
+        raiseVmValue(newErrorValue("type mismatch for parameter " & fnObj.paramNames[i] & ": expected " & paramType & " got " & inferTypeName(boundArgs[i])))
 
     if FfGenerator in fnObj.flags:
-      let genVal = newGeneratorValue(callee, args)
+      let genVal = newGeneratorValue(callee, boundArgs)
       let gen = asGeneratorObj(genVal)
       if gen != nil:
         gen.selfVal = selfValue
@@ -2074,13 +2255,13 @@ proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value =
             gen.upvalues[name] = fnObj.upvalues[name]
       return genVal
 
-    return executeFunction(vm, fnObj, args, selfValue)
+    return executeFunction(vm, fnObj, boundArgs, selfValue)
 
   let cls = asClassObj(callee)
   if cls != nil:
     let instance = newInstanceValue(callee)
     if not isNil(cls.ctor):
-      discard invokeValue(vm, cls.ctor, args, instance)
+      discard invokeValue(vm, cls.ctor, args, instance, kwargs)
     return instance
 
   raiseVmValue(newErrorValue("value is not callable: " & callee.toDebugString()))
@@ -2121,6 +2302,7 @@ proc runModule*(vm: var Vm; module: AirModule): Value =
   vm.currentTaskId = 0
   vm.nextTaskId = 1
   vm.taskScopeStack = @[]
+  vm.namespaceStack = @[]
 
   let mainMeta = vm.module.functions[vm.module.mainFn]
   let mainVal = newFunctionValue(mainMeta.name, vm.module.mainFn, mainMeta.arity)

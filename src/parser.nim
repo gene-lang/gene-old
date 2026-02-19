@@ -56,6 +56,17 @@ type
     line: int
     col: int
 
+  KeywordImplicit = enum
+    KiNone
+    KiTrue
+    KiNil
+
+  KeywordPattern = object
+    root: string
+    path: seq[string]
+    implicit: KeywordImplicit
+    hasPath: bool
+
 proc newNode(kind: AstKind; line, col: int): AstNode =
   AstNode(kind: kind, line: line, col: col)
 
@@ -90,19 +101,14 @@ proc fail(r: Reader; msg: string): ref ParseError =
   result.msg = r.filename & ":" & $r.line & ":" & $r.col & ": " & msg
 
 proc isDelimiter(ch: char): bool {.inline.} =
-  ch == '\0' or ch.isSpaceAscii or ch in {'(', ')', '[', ']', '{', '}', '"', '\'', '`', ';'}
+  ch == '\0' or ch.isSpaceAscii or ch in {'(', ')', '[', ']', '{', '}', '"', '\'', '`', ';', '#'}
 
 proc skipWhitespaceAndComments(r: var Reader) =
   while true:
     while r.peek().isSpaceAscii:
       discard r.advance()
 
-    if r.peek() == '#':
-      while not r.atEnd and r.peek() != '\n':
-        discard r.advance()
-      continue
-
-    if r.peek() == ';':
+    if r.peek() == '#' and r.peek(1) != '@':
       while not r.atEnd and r.peek() != '\n':
         discard r.advance()
       continue
@@ -110,6 +116,164 @@ proc skipWhitespaceAndComments(r: var Reader) =
     break
 
 proc parseExpr(r: var Reader): AstNode
+
+proc mkKeywordNode(line, col: int; name: string): AstNode =
+  result = newNode(AkKeyword, line, col)
+  result.text = name
+
+proc mkBoolNode(line, col: int; value: bool): AstNode =
+  result = newNode(AkBool, line, col)
+  result.boolVal = value
+
+proc mkNilNode(line, col: int): AstNode =
+  newNode(AkNil, line, col)
+
+proc splitKeywordParts(raw: string): seq[string] =
+  var start = 0
+  for i, ch in raw:
+    if ch == '^':
+      result.add(raw[start..<i])
+      start = i + 1
+  if start <= raw.high:
+    result.add(raw[start..^1])
+  else:
+    result.add("")
+
+proc analyzeKeywordPattern(r: Reader; key: AstNode): KeywordPattern =
+  let raw = key.text
+  if raw.len == 0:
+    raise r.fail("keyword requires a name after '^'")
+
+  if raw[0] == '^':
+    if raw.len == 1:
+      raise r.fail("invalid keyword shorthand '^^' without a name")
+    return KeywordPattern(root: raw[1..^1], path: @[], implicit: KiTrue, hasPath: false)
+
+  if raw[0] == '!':
+    if raw.len == 1:
+      raise r.fail("invalid keyword shorthand '^!' without a name")
+    return KeywordPattern(root: raw[1..^1], path: @[], implicit: KiNil, hasPath: false)
+
+  if raw.find('^') < 0:
+    return KeywordPattern(root: raw, path: @[], implicit: KiNone, hasPath: false)
+
+  let parts = splitKeywordParts(raw)
+  if parts.len < 2 or parts[0].len == 0:
+    raise r.fail("invalid nested keyword '" & raw & "'")
+
+  result = KeywordPattern(root: parts[0], path: @[], implicit: KiNone, hasPath: true)
+  var i = 1
+  while i < parts.len:
+    let seg = parts[i]
+    if seg.len == 0:
+      if i + 1 >= parts.len or i + 1 != parts.high:
+        raise r.fail("invalid nested keyword shorthand '" & raw & "'")
+      var terminal = parts[i + 1]
+      if terminal.len == 0:
+        raise r.fail("invalid nested keyword shorthand '" & raw & "'")
+      if terminal[0] == '!':
+        if terminal.len == 1:
+          raise r.fail("invalid nested keyword shorthand '" & raw & "'")
+        terminal = terminal[1..^1]
+        result.implicit = KiNil
+      else:
+        result.implicit = KiTrue
+      result.path.add(terminal)
+      i = parts.len
+      continue
+
+    var name = seg
+    if name[0] == '!':
+      if i != parts.high:
+        raise r.fail("nil shorthand can only appear at the final nested key in '" & raw & "'")
+      if name.len == 1:
+        raise r.fail("invalid nested keyword shorthand '" & raw & "'")
+      name = name[1..^1]
+      result.implicit = KiNil
+      result.path.add(name)
+      i = parts.len
+      continue
+
+    result.path.add(name)
+    inc(i)
+
+  if result.path.len == 0:
+    raise r.fail("invalid nested keyword '" & raw & "'")
+
+proc buildNestedKeywordMap(path: seq[string]; terminal: AstNode; line, col: int): AstNode =
+  if path.len == 0:
+    return terminal
+
+  var current = terminal
+  for idx in countdown(path.high, 0):
+    var m = newNode(AkMap, line, col)
+    m.entries = @[]
+    m.entries.add(MapEntry(
+      key: mkKeywordNode(line, col, path[idx]),
+      value: current
+    ))
+    current = m
+  current
+
+proc expandListKeywordShorthands(r: Reader; items: seq[AstNode]): seq[AstNode] =
+  var i = 0
+  while i < items.len:
+    let item = items[i]
+    if item.kind != AkKeyword:
+      result.add(item)
+      inc(i)
+      continue
+
+    let pattern = analyzeKeywordPattern(r, item)
+    let rootKey = mkKeywordNode(item.line, item.col, pattern.root)
+
+    if pattern.hasPath:
+      var terminal: AstNode
+      case pattern.implicit
+      of KiTrue:
+        terminal = mkBoolNode(item.line, item.col, true)
+      of KiNil:
+        terminal = mkNilNode(item.line, item.col)
+      of KiNone:
+        if i + 1 >= items.len:
+          raise r.fail("nested keyword '^" & item.text & "' requires a value")
+        terminal = items[i + 1]
+        inc(i)
+
+      result.add(rootKey)
+      result.add(buildNestedKeywordMap(pattern.path, terminal, item.line, item.col))
+      inc(i)
+      continue
+
+    result.add(rootKey)
+    case pattern.implicit
+    of KiTrue:
+      result.add(mkBoolNode(item.line, item.col, true))
+    of KiNil:
+      result.add(mkNilNode(item.line, item.col))
+    of KiNone:
+      discard
+    inc(i)
+
+proc parseParserMacro(r: var Reader): AstNode =
+  let line = r.line
+  let col = r.col
+  discard r.advance() # #
+  discard r.advance() # @
+
+  skipWhitespaceAndComments(r)
+  if r.atEnd:
+    raise r.fail("#@ parser macro requires a target expression")
+  let callee = parseExpr(r)
+
+  skipWhitespaceAndComments(r)
+  if r.atEnd or r.peek() in {')', ']', '}', ';'}:
+    raise r.fail("#@ parser macro requires one argument expression")
+  let arg = parseExpr(r)
+
+  var n = newNode(AkList, line, col)
+  n.items = @[callee, arg]
+  n
 
 proc parseInterpolation(content: string; filename: string; line, col: int): AstNode =
   let p = parseProgram(content, filename & "#interp")
@@ -266,17 +430,108 @@ proc parseListLike(r: var Reader; closing: char; kind: AstKind): AstNode =
     skipWhitespaceAndComments(r)
     while not r.atEnd and r.peek() != closing:
       let key = parseExpr(r)
-      skipWhitespaceAndComments(r)
-      if r.atEnd or r.peek() == closing:
-        raise r.fail("map key without value")
-      let val = parseExpr(r)
-      m.entries.add(MapEntry(key: key, value: val))
+      if key.kind == AkKeyword:
+        let pattern = analyzeKeywordPattern(r, key)
+        let rootKey = mkKeywordNode(key.line, key.col, pattern.root)
+
+        if pattern.hasPath:
+          var terminal: AstNode
+          case pattern.implicit
+          of KiTrue:
+            terminal = mkBoolNode(key.line, key.col, true)
+          of KiNil:
+            terminal = mkNilNode(key.line, key.col)
+          of KiNone:
+            skipWhitespaceAndComments(r)
+            if r.atEnd or r.peek() == closing:
+              raise r.fail("map key '^" & key.text & "' without value")
+            terminal = parseExpr(r)
+          m.entries.add(MapEntry(
+            key: rootKey,
+            value: buildNestedKeywordMap(pattern.path, terminal, key.line, key.col)
+          ))
+        else:
+          case pattern.implicit
+          of KiTrue:
+            m.entries.add(MapEntry(key: rootKey, value: mkBoolNode(key.line, key.col, true)))
+          of KiNil:
+            m.entries.add(MapEntry(key: rootKey, value: mkNilNode(key.line, key.col)))
+          of KiNone:
+            skipWhitespaceAndComments(r)
+            if r.atEnd or r.peek() == closing:
+              raise r.fail("map key without value")
+            let val = parseExpr(r)
+            m.entries.add(MapEntry(key: rootKey, value: val))
+      else:
+        skipWhitespaceAndComments(r)
+        if r.atEnd or r.peek() == closing:
+          raise r.fail("map key without value")
+        let val = parseExpr(r)
+        m.entries.add(MapEntry(key: key, value: val))
       skipWhitespaceAndComments(r)
 
     if r.peek() != closing:
       raise r.fail("expected '" & $closing & "' to close map")
     discard r.advance()
     return m
+
+  if kind == AkList:
+    var segments: seq[seq[AstNode]] = @[@[]]
+    var sawSemicolon = false
+
+    skipWhitespaceAndComments(r)
+    while not r.atEnd and r.peek() != closing:
+      if r.peek() == ';':
+        sawSemicolon = true
+        if segments.len == 0 or segments[^1].len == 0:
+          raise r.fail("empty expression segment in ';' chain")
+        discard r.advance()
+        segments.add(@[])
+        skipWhitespaceAndComments(r)
+        continue
+
+      segments[^1].add(parseExpr(r))
+      skipWhitespaceAndComments(r)
+
+    if r.peek() != closing:
+      raise r.fail("expected '" & $closing & "'")
+    discard r.advance()
+
+    if segments.len == 0 or segments[^1].len == 0 and sawSemicolon:
+      raise r.fail("empty expression segment in ';' chain")
+
+    var normalized: seq[seq[AstNode]] = @[]
+    for seg in segments:
+      normalized.add(expandListKeywordShorthands(r, seg))
+
+    if not sawSemicolon:
+      var node = newNode(AkList, line, col)
+      node.items = normalized[0]
+      return node
+
+    if normalized[0].len == 0:
+      raise r.fail("empty expression segment in ';' chain")
+
+    var chain: AstNode
+    if normalized[0].len == 1:
+      if normalized[0][0].kind == AkList:
+        chain = normalized[0][0]
+      else:
+        chain = newNode(AkList, line, col)
+        chain.items = @[normalized[0][0]]
+    else:
+      chain = newNode(AkList, line, col)
+      chain.items = normalized[0]
+
+    for i in 1..<normalized.len:
+      if normalized[i].len == 0:
+        raise r.fail("empty expression segment in ';' chain")
+      var step = newNode(AkList, line, col)
+      step.items = @[chain]
+      for n in normalized[i]:
+        step.items.add(n)
+      chain = step
+    return chain
 
   var node = newNode(kind, line, col)
   node.items = @[]
@@ -323,6 +578,11 @@ proc parseExpr(r: var Reader): AstNode =
     parseListLike(r, ']', AkArray)
   of '{':
     parseListLike(r, '}', AkMap)
+  of '#':
+    if r.peek(1) == '@':
+      parseParserMacro(r)
+    else:
+      raise r.fail("unexpected '#' token")
   of '"':
     readString(r)
   of '^':

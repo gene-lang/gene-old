@@ -258,7 +258,33 @@ proc compileLValueStore(ctx: FnContext; lhs: AstNode; valueExpr: AstNode; compou
 proc isHeadSymbol(node: AstNode; text: string): bool =
   node.kind == AkSymbol and node.text == text
 
-proc parseParams(arrayNode: AstNode): seq[AirParam] =
+proc parseParamKeyword(node: AstNode): tuple[name: string, hasImplicitDefault: bool, implicitValue: Value] =
+  if node.kind != AkKeyword:
+    return ("", false, valueNil())
+
+  let raw = node.text
+  if raw.len == 0:
+    return ("", false, valueNil())
+
+  if raw[0] == '^':
+    if raw.len == 1:
+      return ("", false, valueNil())
+    return (raw[1..^1], true, valueBool(true))
+
+  if raw[0] == '!':
+    if raw.len == 1:
+      return ("", false, valueNil())
+    return (raw[1..^1], true, valueNil())
+
+  if raw.contains("^"):
+    return ("", false, valueNil())
+
+  (raw, false, valueNil())
+
+proc parseDefaultParamValue(node: AstNode): Value =
+  quotedAstToValue(node)
+
+proc parseParams(arrayNode: AstNode; owner: AstNode): seq[AirParam] =
   if arrayNode == nil:
     return @[]
 
@@ -271,20 +297,49 @@ proc parseParams(arrayNode: AstNode): seq[AirParam] =
   var i = 0
   while i < arrayNode.items.len:
     let item = arrayNode.items[i]
-    if item.kind != AkSymbol:
+    var param = AirParam(
+      name: "",
+      typeAnn: "",
+      isKeyword: false,
+      hasDefault: false,
+      defaultValue: valueNil()
+    )
+
+    if item.kind == AkSymbol:
+      var (name, ann) = parseTypedName(item)
+      if name.len == 0:
+        raise fail(item, "invalid parameter name")
+
+      if ann.len == 0 and item.text.endsWith(":") and i + 1 < arrayNode.items.len and arrayNode.items[i + 1].kind == AkSymbol:
+        ann = arrayNode.items[i + 1].text
+        inc(i)
+
+      param.name = name
+      param.typeAnn = ann
+    elif item.kind == AkKeyword:
+      let parsed = parseParamKeyword(item)
+      if parsed.name.len == 0:
+        raise fail(item, "invalid keyword parameter syntax '^" & item.text & "'")
+      let typedKw = mkSymbol(item.line, item.col, parsed.name)
+      let (kwName, kwAnn) = parseTypedName(typedKw)
+      param.name = kwName
+      param.typeAnn = kwAnn
+      param.isKeyword = true
+      if parsed.hasImplicitDefault:
+        param.hasDefault = true
+        param.defaultValue = parsed.implicitValue
+    else:
       inc(i)
       continue
 
-    var (name, ann) = parseTypedName(item)
-    if name.len == 0:
-      inc(i)
-      continue
+    if i + 1 < arrayNode.items.len and isHeadSymbol(arrayNode.items[i + 1], "="):
+      if i + 2 >= arrayNode.items.len:
+        raise fail(owner, "parameter default missing value for '" & param.name & "'")
+      param.hasDefault = true
+      param.defaultValue = parseDefaultParamValue(arrayNode.items[i + 2])
+      inc(i, 2)
 
-    if ann.len == 0 and item.text.endsWith(":") and i + 1 < arrayNode.items.len and arrayNode.items[i + 1].kind == AkSymbol:
-      ann = arrayNode.items[i + 1].text
-      inc(i)
-
-    result.add(AirParam(name: name, typeAnn: ann))
+    result.add(param)
     inc(i)
 
 proc compileBodyExprs(ctx: FnContext; nodes: seq[AstNode]) =
@@ -297,7 +352,14 @@ proc compileBodyExprs(ctx: FnContext; nodes: seq[AstNode]) =
     if i < nodes.high:
       ctx.emit(OpPop)
 
-proc compileFunctionForm(ctx: FnContext; node: AstNode; forceMethod = false; forcedName = ""; bindNamed = true): string =
+proc compileFunctionForm(
+  ctx: FnContext;
+  node: AstNode;
+  forceMethod = false;
+  forceGenerator = false;
+  forcedName = "";
+  bindNamed = true
+): string =
   let items = node.items
   var idx = 1
   var fnName = forcedName
@@ -321,7 +383,7 @@ proc compileFunctionForm(ctx: FnContext; node: AstNode; forceMethod = false; for
 
   let body = if idx < items.len: items[idx..^1] else: @[]
 
-  let params = parseParams(paramsNode)
+  let params = parseParams(paramsNode, node)
   if fnName.len == 0:
     fnName = "<lambda>"
 
@@ -329,6 +391,8 @@ proc compileFunctionForm(ctx: FnContext; node: AstNode; forceMethod = false; for
   fn.params = params
   if forceMethod:
     fn.flags.incl(FFlagMethod)
+  if forceGenerator:
+    fn.flags.incl(FFlagGenerator)
   if fnName.endsWith("!"):
     fn.flags.incl(FFlagMacroLike)
 
@@ -515,18 +579,40 @@ proc compileTryForm(ctx: FnContext; node: AstNode) =
     ctx.fn.patchB(tryBegin, catchPc)
 
     ctx.emit(OpCatchBegin)
+    let exSym = runtimeSym(ctx.m, "$ex")
+    ctx.emit(OpStoreGlobal, b = exSym.uint32)
+
     var catchBodyStart = catchIdx + 1
+    var catchVar = ""
+    var catchType = ""
+
     if catchBodyStart < items.len and items[catchBodyStart].kind == AkSymbol:
       let catcher = items[catchBodyStart].text
-      if catcher != "*":
-        if ctx.isTopLevel:
-          let sid = runtimeSym(ctx.m, catcher)
-          ctx.emit(OpStoreGlobal, b = sid.uint32)
-        else:
-          if not ctx.locals.hasKey(catcher):
-            discard declareLocal(ctx, catcher)
-          ctx.emit(OpStoreLocal, b = ctx.locals[catcher].slot.uint32)
+      if catcher == "_" or catcher == "*":
+        discard
+      elif catcher.len > 0 and catcher[0].isUpperAscii:
+        catchType = catcher
+      else:
+        catchVar = catcher
       inc(catchBodyStart)
+
+    if catchType.len > 0:
+      ctx.emit(OpDup)
+      ctx.emit(OpTypeof)
+      discard ctx.emitConst(valueSymbol(catchType.toLowerAscii()))
+      ctx.emit(OpCmpEq)
+      let typeOk = ctx.emit(OpBrTrue, b = 0)
+      ctx.emit(OpThrow)
+      ctx.fn.patchB(typeOk, ctx.fn.code.len)
+
+    if catchVar.len > 0:
+      if ctx.isTopLevel or catchVar.startsWith("$"):
+        let sid = runtimeSym(ctx.m, catchVar)
+        ctx.emit(OpStoreGlobal, b = sid.uint32)
+      else:
+        if not ctx.locals.hasKey(catchVar):
+          discard declareLocal(ctx, catchVar)
+        ctx.emit(OpStoreLocal, b = ctx.locals[catchVar].slot.uint32)
 
     let catchBodyEnd = if finallyIdx >= 0: finallyIdx else: items.len
     if catchBodyStart >= catchBodyEnd:
@@ -572,6 +658,8 @@ proc compileClassForm(ctx: FnContext; node: AstNode) =
     if member.kind == AkList and member.items.len > 0 and member.items[0].kind == AkSymbol:
       let head = member.items[0].text
       if head == "ctor" or head == "ctor!":
+        if member.items.len >= 2 and member.items[1].kind == AkSymbol and member.items[1].text == "_":
+          raise fail(member, "ctor parameter list must use [] for empty params")
         var ctorNode = AstNode(kind: AkList, line: member.line, col: member.col, items: @[])
         ctorNode.items.add(mkSymbol(member.line, member.col, "fn"))
         if member.items.len >= 2:
@@ -584,6 +672,8 @@ proc compileClassForm(ctx: FnContext; node: AstNode) =
       elif head == "method" or head == "method!":
         if member.items.len < 3 or member.items[1].kind != AkSymbol:
           raise fail(member, "method requires a name and args")
+        if member.items[2].kind == AkSymbol and member.items[2].text == "_":
+          raise fail(member, "method parameter list must use [] for empty params")
         let methodName = member.items[1].text
 
         var methodNode = AstNode(kind: AkList, line: member.line, col: member.col, items: @[])
@@ -649,6 +739,132 @@ proc compileInterpolatedString(ctx: FnContext; node: AstNode) =
     compileExpr(ctx, node.parts[i])
     ctx.emit(OpAdd)
 
+type
+  KeywordArg = object
+    name: string
+    value: AstNode
+
+proc splitCallArgs(node: AstNode; args: seq[AstNode]): tuple[positional: seq[AstNode], keyword: seq[KeywordArg]] =
+  var i = 0
+  var inKeywordBlock = false
+  var endedKeywordBlock = false
+
+  while i < args.len:
+    let arg = args[i]
+    if arg.kind == AkKeyword:
+      if endedKeywordBlock:
+        raise fail(node, "properties cannot be split by children")
+      if i + 1 >= args.len:
+        raise fail(arg, "keyword argument '^" & arg.text & "' requires a value")
+      inKeywordBlock = true
+      result.keyword.add(KeywordArg(name: arg.text, value: args[i + 1]))
+      inc(i, 2)
+      continue
+
+    if inKeywordBlock:
+      endedKeywordBlock = true
+    result.positional.add(arg)
+    inc(i)
+
+proc compileKeywordMap(ctx: FnContext; keywordArgs: seq[KeywordArg]) =
+  ctx.emit(OpMapNew)
+  for entry in keywordArgs:
+    compileExpr(ctx, entry.value)
+    let sid = runtimeSym(ctx.m, entry.name)
+    ctx.emit(OpMapSet, b = sid.uint32)
+  ctx.emit(OpMapEnd)
+
+proc infixPrecedence(op: string): int =
+  case op
+  of "**":
+    7
+  of "*", "/", "%":
+    6
+  of "+", "-":
+    5
+  of "==", "!=", "<", "<=", ">", ">=":
+    4
+  of "&&":
+    3
+  of "||":
+    2
+  else:
+    -1
+
+proc emitInfixOp(ctx: FnContext; op: string) =
+  case op
+  of "+": ctx.emit(OpAdd)
+  of "-": ctx.emit(OpSub)
+  of "*": ctx.emit(OpMul)
+  of "/": ctx.emit(OpDiv)
+  of "%": ctx.emit(OpMod)
+  of "**": ctx.emit(OpPow)
+  of "==": ctx.emit(OpCmpEq)
+  of "!=": ctx.emit(OpCmpNe)
+  of "<": ctx.emit(OpCmpLt)
+  of "<=": ctx.emit(OpCmpLe)
+  of ">": ctx.emit(OpCmpGt)
+  of ">=": ctx.emit(OpCmpGe)
+  of "&&": ctx.emit(OpLogAnd)
+  of "||": ctx.emit(OpLogOr)
+  else:
+    discard
+
+proc tryCompileFlatInfix(ctx: FnContext; node: AstNode): bool =
+  if node.kind != AkList or node.items.len < 3 or (node.items.len mod 2) == 0:
+    return false
+
+  type
+    PostfixKind = enum
+      PfOperand
+      PfOperator
+    PostfixToken = object
+      kind: PostfixKind
+      expr: AstNode
+      op: string
+
+  var output: seq[PostfixToken] = @[]
+  var opStack: seq[string] = @[]
+
+  for i, item in node.items:
+    if (i mod 2) == 0:
+      output.add(PostfixToken(kind: PfOperand, expr: item))
+      continue
+
+    if item.kind != AkSymbol:
+      return false
+
+    let op = item.text
+    let prec = infixPrecedence(op)
+    if prec < 0:
+      return false
+    let rightAssoc = op == "**"
+
+    while opStack.len > 0:
+      let top = opStack[^1]
+      let topPrec = infixPrecedence(top)
+      if topPrec < 0:
+        break
+      if (rightAssoc and prec < topPrec) or ((not rightAssoc) and prec <= topPrec):
+        output.add(PostfixToken(kind: PfOperator, op: top))
+        opStack.setLen(opStack.len - 1)
+      else:
+        break
+    opStack.add(op)
+
+  while opStack.len > 0:
+    output.add(PostfixToken(kind: PfOperator, op: opStack[^1]))
+    opStack.setLen(opStack.len - 1)
+
+  for tok in output:
+    case tok.kind
+    of PfOperand:
+      compileExpr(ctx, tok.expr)
+    of PfOperator:
+      emitInfixOp(ctx, tok.op)
+
+  true
+
 proc compileCall(ctx: FnContext; node: AstNode) =
   let items = node.items
   if items.len == 0:
@@ -656,26 +872,38 @@ proc compileCall(ctx: FnContext; node: AstNode) =
     return
 
   if items.len >= 2 and items[1].kind == AkSymbol and items[1].text.startsWith("."):
+    let split = splitCallArgs(node, items[2..^1])
     compileExpr(ctx, items[0])
     let methodName = items[1].text[1..^1]
-    for i in 2..<items.len:
-      compileExpr(ctx, items[i])
+    for arg in split.positional:
+      compileExpr(ctx, arg)
+    if split.keyword.len > 0:
+      compileKeywordMap(ctx, split.keyword)
     let sid = runtimeSym(ctx.m, methodName)
     if items[0].kind == AkSymbol and items[0].text == "super":
-      ctx.emit(OpCallSuper, c = (items.len - 2).uint32, b = sid.uint32)
+      if split.keyword.len > 0:
+        ctx.emit(OpCallSuperKw, c = split.positional.len.uint32, b = sid.uint32)
+      else:
+        ctx.emit(OpCallSuper, c = split.positional.len.uint32, b = sid.uint32)
     else:
-      ctx.emit(OpCallMethod, c = (items.len - 2).uint32, b = sid.uint32)
+      if split.keyword.len > 0:
+        ctx.emit(OpCallMethodKw, c = split.positional.len.uint32, b = sid.uint32)
+      else:
+        ctx.emit(OpCallMethod, c = split.positional.len.uint32, b = sid.uint32)
     return
 
   if items[0].kind == AkSymbol and items[0].text.endsWith("!"):
+    let split = splitCallArgs(node, items[1..^1])
+    if split.keyword.len > 0:
+      raise fail(node, "macro-like calls do not support keyword arguments")
     compileExpr(ctx, items[0])
-    for i in 1..<items.len:
-      discard ctx.emitConst(quotedAstToValue(items[i]))
-    ctx.emit(OpCallMacro, c = (items.len - 1).uint32)
+    for arg in split.positional:
+      discard ctx.emitConst(quotedAstToValue(arg))
+    ctx.emit(OpCallMacro, c = split.positional.len.uint32)
     return
 
   let opSym = if items[0].kind == AkSymbol: items[0].text else: ""
-  if items.len == 3 and opSym in ["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&&", "||"]:
+  if items.len == 3 and opSym in ["+", "-", "*", "/", "%", "**", "==", "!=", "<", "<=", ">", ">=", "&&", "||"]:
     compileExpr(ctx, items[1])
     compileExpr(ctx, items[2])
     case opSym
@@ -684,6 +912,7 @@ proc compileCall(ctx: FnContext; node: AstNode) =
     of "*": ctx.emit(OpMul)
     of "/": ctx.emit(OpDiv)
     of "%": ctx.emit(OpMod)
+    of "**": ctx.emit(OpPow)
     of "==": ctx.emit(OpCmpEq)
     of "!=": ctx.emit(OpCmpNe)
     of "<": ctx.emit(OpCmpLt)
@@ -695,9 +924,42 @@ proc compileCall(ctx: FnContext; node: AstNode) =
     else: discard
     return
 
+  if opSym in ["+", "*", "&&", "||"] and items.len > 3:
+    compileExpr(ctx, items[1])
+    for i in 2..<items.len:
+      compileExpr(ctx, items[i])
+      emitInfixOp(ctx, opSym)
+    return
+
+  if opSym == "-" and items.len > 3:
+    compileExpr(ctx, items[1])
+    for i in 2..<items.len:
+      compileExpr(ctx, items[i])
+      ctx.emit(OpSub)
+    return
+
+  if opSym == "/" and items.len > 3:
+    compileExpr(ctx, items[1])
+    for i in 2..<items.len:
+      compileExpr(ctx, items[i])
+      ctx.emit(OpDiv)
+    return
+
+  if opSym == "%" and items.len > 3:
+    compileExpr(ctx, items[1])
+    for i in 2..<items.len:
+      compileExpr(ctx, items[i])
+      ctx.emit(OpMod)
+    return
+
   if items.len == 2 and opSym == "!":
     compileExpr(ctx, items[1])
     ctx.emit(OpLogNot)
+    return
+
+  if items.len == 2 and opSym == "-":
+    compileExpr(ctx, items[1])
+    ctx.emit(OpNeg)
     return
 
   if items.len == 2 and opSym == "typeof":
@@ -706,17 +968,27 @@ proc compileCall(ctx: FnContext; node: AstNode) =
     return
 
   if opSym == "new" and items.len >= 2:
+    let split = splitCallArgs(node, items[2..^1])
     compileExpr(ctx, items[1])
-    for i in 2..<items.len:
-      compileExpr(ctx, items[i])
-    ctx.emit(OpCall, c = (items.len - 2).uint32)
+    for arg in split.positional:
+      compileExpr(ctx, arg)
+    if split.keyword.len > 0:
+      compileKeywordMap(ctx, split.keyword)
+      ctx.emit(OpCallKw, c = split.positional.len.uint32)
+    else:
+      ctx.emit(OpCall, c = split.positional.len.uint32)
     return
 
+  let split = splitCallArgs(node, items[1..^1])
   compileExpr(ctx, items[0])
-  for i in 1..<items.len:
-    compileExpr(ctx, items[i])
+  for arg in split.positional:
+    compileExpr(ctx, arg)
 
-  ctx.emit(OpCall, c = (items.len - 1).uint32)
+  if split.keyword.len > 0:
+    compileKeywordMap(ctx, split.keyword)
+    ctx.emit(OpCallKw, c = split.positional.len.uint32)
+  else:
+    ctx.emit(OpCall, c = split.positional.len.uint32)
 
 proc compileSpecialForm(ctx: FnContext; node: AstNode): bool =
   if node.kind != AkList or node.items.len == 0 or node.items[0].kind != AkSymbol:
@@ -781,6 +1053,9 @@ proc compileSpecialForm(ctx: FnContext; node: AstNode): bool =
   of "fn":
     discard compileFunctionForm(ctx, node)
     true
+  of "fn*":
+    discard compileFunctionForm(ctx, node, forceGenerator = true)
+    true
   of "return":
     if items.len > 1:
       compileExpr(ctx, items[1])
@@ -829,13 +1104,16 @@ proc compileSpecialForm(ctx: FnContext; node: AstNode): bool =
       ctx.emit(OpConstNil)
     true
   of "import":
-    if items.len > 1 and items[1].kind == AkSymbol:
+    if items.len >= 5 and items[1].kind == AkSymbol and items[1].text == "*" and isHeadSymbol(items[2], "as") and items[3].kind == AkSymbol:
+      let sid = runtimeSym(ctx.m, items[3].text)
+      ctx.emit(OpImport, b = sid.uint32)
+    elif items.len > 1 and items[1].kind == AkSymbol:
       let sid = runtimeSym(ctx.m, items[1].text)
       ctx.emit(OpImport, b = sid.uint32)
     else:
       ctx.emit(OpConstNil)
     true
-  of "module":
+  of "module", "ns":
     if items.len > 1 and items[1].kind == AkSymbol:
       let sid = runtimeSym(ctx.m, items[1].text)
       ctx.emit(OpNsEnter, b = sid.uint32)
@@ -846,6 +1124,10 @@ proc compileSpecialForm(ctx: FnContext; node: AstNode): bool =
       ctx.emit(OpNsExit)
     else:
       compileBodyExprs(ctx, items[1..^1])
+    true
+  of "before", "around", "after", "aspect":
+    # AOP forms are accepted as standalone syntax and currently compile to no-op values.
+    ctx.emit(OpConstNil)
     true
   of "capabilities":
     if items.len > 1 and items[1].kind == AkArray:
@@ -1024,28 +1306,12 @@ proc compileExpr(ctx: FnContext; node: AstNode) =
       if op == "/=":
         compileLValueStore(ctx, node.items[0], node.items[2], "/")
         return
-
-    if node.items.len == 3 and node.items[1].kind == AkSymbol:
-      let infix = node.items[1].text
-      if infix in ["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&&", "||"]:
-        compileExpr(ctx, node.items[0])
-        compileExpr(ctx, node.items[2])
-        case infix
-        of "+": ctx.emit(OpAdd)
-        of "-": ctx.emit(OpSub)
-        of "*": ctx.emit(OpMul)
-        of "/": ctx.emit(OpDiv)
-        of "%": ctx.emit(OpMod)
-        of "==": ctx.emit(OpCmpEq)
-        of "!=": ctx.emit(OpCmpNe)
-        of "<": ctx.emit(OpCmpLt)
-        of "<=": ctx.emit(OpCmpLe)
-        of ">": ctx.emit(OpCmpGt)
-        of ">=": ctx.emit(OpCmpGe)
-        of "&&": ctx.emit(OpLogAnd)
-        of "||": ctx.emit(OpLogOr)
-        else: discard
+      if op == "%=":
+        compileLValueStore(ctx, node.items[0], node.items[2], "%")
         return
+
+    if tryCompileFlatInfix(ctx, node):
+      return
 
     if compileSpecialForm(ctx, node):
       return

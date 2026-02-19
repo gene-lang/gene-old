@@ -156,6 +156,9 @@ type
   AirParam* = object
     name*: string
     typeAnn*: string
+    isKeyword*: bool
+    hasDefault*: bool
+    defaultValue*: Value
 
   AirFunction* = ref object
     id*: int
@@ -283,7 +286,13 @@ proc functionToString*(m: AirModule; fn: AirFunction): string =
   lines.add(fmt"function {fn.id}: {fn.name}/{fn.arity} locals={fn.localCount} upvalues={fn.upvalueSymbols.len} flags=[{flagText}]")
   for i, param in fn.params:
     let t = if param.typeAnn.len == 0: "Any" else: param.typeAnn
-    lines.add(fmt"  param {i}: {param.name}: {t}")
+    var meta: seq[string] = @[]
+    if param.isKeyword:
+      meta.add("kw")
+    if param.hasDefault:
+      meta.add("default=" & param.defaultValue.toDebugString())
+    let suffix = if meta.len == 0: "" else: " [" & meta.join(", ") & "]"
+    lines.add(fmt"  param {i}: {param.name}: {t}{suffix}")
   for ip, inst in fn.code:
     lines.add(fmt"  {ip:>4}: {instToString(inst)}")
   lines.join("\n")
