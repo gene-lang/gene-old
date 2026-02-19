@@ -93,18 +93,19 @@ proc nativeTypeof(vm: var Vm; args: seq[Value]): Value =
   valueSymbol(inferTypeName(args[0]).toLowerAscii())
 
 proc nativeNow(vm: var Vm; args: seq[Value]): Value =
-  discard vm
   discard args
-  valueInt(epochTime().int64)
+  valueInt(detNowValue(vm))
 
 proc nativeRand(vm: var Vm; args: seq[Value]): Value =
-  discard vm
   var upper = 2147483647
   if args.len > 0:
     upper = asInt(args[0]).int
     if upper <= 0:
       upper = 1
-  valueInt(rand(upper - 1))
+  let raw = detRandValue(vm)
+  if upper <= 1:
+    return valueInt(0)
+  valueInt(raw mod upper.int64)
 
 proc nativeCallerEval(vm: var Vm; args: seq[Value]): Value =
   discard vm

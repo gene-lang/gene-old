@@ -71,6 +71,20 @@ type
     value*: Value
     error*: Value
 
+  ReplayEventKind* = enum
+    RekToolCall
+    RekDetRand
+    RekDetNow
+
+  ReplayEvent* = object
+    kind*: ReplayEventKind
+    toolName*: string
+    args*: Value
+    ok*: bool
+    value*: Value
+    error*: Value
+    number*: int64
+
   ToolHandler* = proc(vm: var Vm; req: ToolCallRequest): ToolCallResult {.nimcall.}
 
   ToolRegistration* = object
@@ -135,6 +149,10 @@ type
     deterministic*: bool
     rngState*: uint64
     diagnostics*: seq[string]
+    auditEvents*: seq[JsonNode]
+    replayLog*: seq[ReplayEvent]
+    replayMode*: bool
+    replayCursor*: int
     capabilityStack*: seq[HashSet[string]]
     namespaceStack*: seq[Value]
     moduleCache*: OrderedTable[string, Value]
@@ -171,14 +189,147 @@ proc newVm*(): Vm =
     deterministic: false,
     rngState: 0x9E3779B97F4A7C15'u64,
     diagnostics: @[],
+    auditEvents: @[],
+    replayLog: @[],
+    replayMode: false,
+    replayCursor: 0,
     capabilityStack: @[],
     namespaceStack: @[],
     moduleCache: initOrderedTable[string, Value](),
     moduleLoading: initHashSet[string]()
   )
 
+proc replayKindName(kind: ReplayEventKind): string =
+  case kind
+  of RekToolCall: "tool_call"
+  of RekDetRand: "det_rand"
+  of RekDetNow: "det_now"
+
+proc inferDiagCode(message: string): string =
+  let msg = message.toLowerAscii()
+  if msg.contains("capability denied"):
+    return "AIR.CAPABILITY.DENIED"
+  if msg.contains("quota exceeded") or msg.contains("quota check failed"):
+    return "AIR.QUOTA.BREACH"
+  if msg.contains("replay"):
+    return "AIR.REPLAY.MISMATCH"
+  "AIR.RUNTIME.ERROR"
+
+proc makeDiagnosticMessage(
+  code: string;
+  message: string;
+  stage = "runtime";
+  modulePath = "";
+  hints: seq[string] = @[];
+  repairTags: seq[string] = @[];
+  expected: JsonNode = nil;
+  observed: JsonNode = nil
+): string =
+  var root = newJObject()
+  root["code"] = %code
+  root["severity"] = %"error"
+  root["stage"] = %stage
+  root["module"] = %modulePath
+  root["span"] = %*{"file": modulePath, "line": 0, "column": 0}
+  root["message"] = %message
+  root["hints"] = newJArray()
+  for h in hints:
+    root["hints"].add(%h)
+  root["repair_tags"] = newJArray()
+  for tag in repairTags:
+    root["repair_tags"].add(%tag)
+  if expected != nil:
+    root["expected"] = expected
+  if observed != nil:
+    root["observed"] = observed
+  $root
+
+proc isDiagnosticEnvelope(message: string): bool =
+  let trimmed = message.strip()
+  if not trimmed.startsWith("{") or not trimmed.endsWith("}"):
+    return false
+  try:
+    let parsed = parseJson(trimmed)
+    parsed.kind == JObject and parsed.hasKey("code") and parsed.hasKey("message")
+  except CatchableError:
+    false
+
+proc wrapErrorAsDiagnostic(err: Value): Value =
+  let errObj = asErrorObj(err)
+  if errObj != nil:
+    if isDiagnosticEnvelope(errObj.message):
+      return err
+    return newErrorValue(makeDiagnosticMessage(
+      inferDiagCode(errObj.message),
+      errObj.message,
+      hints = @[],
+      repairTags = @["runtime"]
+    ))
+  newErrorValue(makeDiagnosticMessage(
+    "AIR.RUNTIME.THROW",
+    err.toDebugString(),
+    hints = @[],
+    repairTags = @["runtime", "throw"]
+  ))
+
+proc vmDiagnostic(
+  vm: Vm;
+  code: string;
+  message: string;
+  hints: seq[string] = @[];
+  repairTags: seq[string] = @[];
+  expected: JsonNode = nil;
+  observed: JsonNode = nil
+): Value =
+  let modulePath = if vm.module != nil: vm.module.sourcePath else: ""
+  newErrorValue(makeDiagnosticMessage(
+    code,
+    message,
+    modulePath = modulePath,
+    hints = hints,
+    repairTags = repairTags,
+    expected = expected,
+    observed = observed
+  ))
+
+proc vmRuntimeError(vm: Vm; message: string; code = ""): Value =
+  let outCode = if code.len > 0: code else: inferDiagCode(message)
+  vmDiagnostic(
+    vm,
+    outCode,
+    message,
+    hints = @[],
+    repairTags = @["runtime"]
+  )
+
+proc emitAudit(vm: var Vm; eventKind: string; details: JsonNode = nil) =
+  var entry = newJObject()
+  entry["kind"] = %eventKind
+  entry["ts_ms"] = %(epochTime().int64 * 1000)
+  entry["task_id"] = %vm.currentTaskId
+  entry["module"] = %(if vm.module != nil: vm.module.sourcePath else: "")
+  if details != nil:
+    entry["details"] = details
+  else:
+    entry["details"] = newJObject()
+  vm.auditEvents.add(entry)
+
+proc clearReplayLog*(vm: var Vm) =
+  vm.replayLog.setLen(0)
+  vm.replayCursor = 0
+
+proc beginReplay*(vm: var Vm; events: seq[ReplayEvent]) =
+  vm.replayMode = true
+  vm.replayLog = events
+  vm.replayCursor = 0
+
+proc endReplay*(vm: var Vm) =
+  vm.replayMode = false
+  vm.replayCursor = 0
+
 proc raiseVmValue(err: Value) {.noreturn.} =
-  let ex = VmThrow(msg: err.toDebugString(), value: err)
+  let wrapped = wrapErrorAsDiagnostic(err)
+  let ex = VmThrow(msg: wrapped.toDebugString(), value: wrapped)
   raise ex
 
 proc popValue(frame: var FrameCtx): Value =
@@ -276,16 +427,16 @@ proc executeFunction(
 
 proc runImportedModule(vm: var Vm; modulePath: string): Value =
   if modulePath.len == 0:
-    raiseVmValue(newErrorValue("invalid import path"))
+    raiseVmValue(vmRuntimeError(vm, "invalid import path", "AIR.IMPORT.INVALID_PATH"))
 
   if vm.moduleCache.hasKey(modulePath):
     return vm.moduleCache[modulePath]
 
   if modulePath in vm.moduleLoading:
-    raiseVmValue(newErrorValue("circular import: " & modulePath))
+    raiseVmValue(vmRuntimeError(vm, "circular import: " & modulePath, "AIR.IMPORT.CYCLE"))
 
   if not fileExists(modulePath):
-    raiseVmValue(newErrorValue("import not found: " & modulePath))
+    raiseVmValue(vmRuntimeError(vm, "import not found: " & modulePath, "AIR.IMPORT.NOT_FOUND"))
 
   vm.moduleLoading.incl(modulePath)
   let nsValue = newMapValue()
@@ -297,7 +448,7 @@ proc runImportedModule(vm: var Vm; modulePath: string): Value =
     let importedModule = compileProgram(ast, modulePath)
     let issues = verifyAirModule(importedModule)
     if issues.len > 0:
-      raiseVmValue(newErrorValue(issues[0]))
+      raiseVmValue(vmRuntimeError(vm, issues[0], "AIR.VERIFY.ERROR"))
     importedModule.verified = true
 
     let prevModule = vm.module
@@ -328,7 +479,7 @@ proc runImportedModule(vm: var Vm; modulePath: string): Value =
   except CatchableError as ex:
     vm.moduleLoading.excl(modulePath)
     vm.moduleCache.del(modulePath)
-    raiseVmValue(newErrorValue("import failed: " & ex.msg))
+    raiseVmValue(vmRuntimeError(vm, "import failed: " & ex.msg, "AIR.IMPORT.ERROR"))
 
 proc setQuotaLimit*(vm: var Vm; kind: VmQuotaKind; value: int64) =
   case kind
@@ -374,6 +525,8 @@ proc instantiateFunctionValue(vm: var Vm; fnIdx: int; frame: FrameCtx): Value =
       fnObj.flags.incl(FfMacroLike)
     of FFlagMethod:
       fnObj.flags.incl(FfMethod)
+    of FFlagAbstract:
+      fnObj.flags.incl(FfAbstract)
     of FFlagHasTry:
       discard
 
@@ -513,23 +666,23 @@ proc threadWorker(payload: ptr ThreadThunk) {.thread.} =
 proc spawnThreadNow(vm: var Vm; fnValue: Value; args: seq[Value]): int =
   let fnObj = asFunctionObj(fnValue)
   if fnObj == nil:
-    raiseVmValue(newErrorValue("thread/spawn requires a function"))
+    raiseVmValue(vmRuntimeError(vm, "thread/spawn requires a function", "AIR.THREAD.BAD_CALL"))
   if fnObj.name == "<lambda>":
-    raiseVmValue(newErrorValue("thread/spawn requires a named function"))
+    raiseVmValue(vmRuntimeError(vm, "thread/spawn requires a named function", "AIR.THREAD.BAD_CALL"))
   if fnObj.upvalueNames.len > 0:
-    raiseVmValue(newErrorValue("thread/spawn does not support closures with captures"))
+    raiseVmValue(vmRuntimeError(vm, "thread/spawn does not support closures with captures", "AIR.THREAD.UNSUPPORTED_CLOSURE"))
 
   if args.len > 8:
-    raiseVmValue(newErrorValue("thread/spawn supports at most 8 arguments"))
+    raiseVmValue(vmRuntimeError(vm, "thread/spawn supports at most 8 arguments", "AIR.THREAD.BAD_ARITY"))
   for a in args:
     if not isThreadValueSupported(a):
-      raiseVmValue(newErrorValue("thread/spawn only supports nil/bool/int/float args"))
+      raiseVmValue(vmRuntimeError(vm, "thread/spawn only supports nil/bool/int/float args", "AIR.THREAD.BAD_ARG"))
 
   var targetModule = vm.module
   if fnObj.moduleId >= 0 and fnObj.moduleId < vm.loadedModules.len:
     targetModule = vm.loadedModules[fnObj.moduleId]
   if targetModule == nil:
-    raiseVmValue(newErrorValue("thread/spawn missing function module"))
+    raiseVmValue(vmRuntimeError(vm, "thread/spawn missing function module", "AIR.THREAD.MODULE_MISSING"))
 
   let payload = cast[ptr ThreadThunk](allocShared0(sizeof(ThreadThunk)))
   payload.modulePtr = cast[pointer](targetModule)
@@ -575,7 +728,7 @@ proc joinThreadNow(vm: var Vm; threadId: int): Value =
   vm.threadHandles.del(threadId)
 
   if not ok:
-    raiseVmValue(newErrorValue("thread failed"))
+    raiseVmValue(vmRuntimeError(vm, "thread failed", "AIR.THREAD.FAILED"))
   outVal
 
 proc asIntDefault(v: Value; defaultVal: int): int =
@@ -596,7 +749,7 @@ proc invokeArrayMethod(vm: var Vm; receiver: Value; methodName: string; args: se
     return (false, valueNil())
 
   if kwargsHasEntries(kwargs):
-    raiseVmValue(newErrorValue("array method ." & methodName & " does not accept keyword arguments"))
+    raiseVmValue(vmRuntimeError(vm, "array method ." & methodName & " does not accept keyword arguments", "AIR.ARRAY.BAD_KWARGS"))
 
   case methodName
   of "push":
@@ -612,14 +765,14 @@ proc invokeArrayMethod(vm: var Vm; receiver: Value; methodName: string; args: se
       (true, popped)
   of "map":
     if args.len < 1:
-      raiseVmValue(newErrorValue("array .map requires a callback"))
+      raiseVmValue(vmRuntimeError(vm, "array .map requires a callback", "AIR.ARRAY.BAD_ARGS"))
     var mapped: seq[Value] = @[]
     for item in arr.items:
       mapped.add(invokeValue(vm, args[0], @[item], receiver))
     (true, newArrayValue(mapped))
   of "filter":
     if args.len < 1:
-      raiseVmValue(newErrorValue("array .filter requires a callback"))
+      raiseVmValue(vmRuntimeError(vm, "array .filter requires a callback", "AIR.ARRAY.BAD_ARGS"))
     var filtered: seq[Value] = @[]
     for item in arr.items:
       if isTruthy(invokeValue(vm, args[0], @[item], receiver)):
@@ -627,7 +780,7 @@ proc invokeArrayMethod(vm: var Vm; receiver: Value; methodName: string; args: se
     (true, newArrayValue(filtered))
   of "reduce":
     if args.len < 2:
-      raiseVmValue(newErrorValue("array .reduce requires initial value and callback"))
+      raiseVmValue(vmRuntimeError(vm, "array .reduce requires initial value and callback", "AIR.ARRAY.BAD_ARGS"))
     var acc = args[0]
     let fn = args[1]
     for item in arr.items:
@@ -744,6 +897,63 @@ proc xorshift64(state: var uint64): uint64 =
   state = x
   x
 
+proc nextReplayEvent(vm: var Vm; expected: ReplayEventKind): ReplayEvent =
+  if vm.replayCursor >= vm.replayLog.len:
+    raiseVmValue(vmDiagnostic(
+      vm,
+      "AIR.REPLAY.EXHAUSTED",
+      "replay log exhausted while reading " & replayKindName(expected),
+      hints = @["Record a fresh replay log for this program run"],
+      repairTags = @["replay", "determinism"]
+    ))
+  result = vm.replayLog[vm.replayCursor]
+  inc(vm.replayCursor)
+  if result.kind != expected:
+    raiseVmValue(vmDiagnostic(
+      vm,
+      "AIR.REPLAY.MISMATCH",
+      "replay event mismatch: expected " & replayKindName(expected) & " got " & replayKindName(result.kind),
+      hints = @["Ensure source and replay log come from the same build"],
+      repairTags = @["replay", "determinism"]
+    ))
+
+proc detRandValue*(vm: var Vm): int64 =
+  if vm.replayMode:
+    return nextReplayEvent(vm, RekDetRand).number
+
+  let rnd = int64(xorshift64(vm.rngState) and 0x7FFFFFFF'u64)
+  vm.replayLog.add(ReplayEvent(
+    kind: RekDetRand,
+    toolName: "",
+    args: valueNil(),
+    ok: true,
+    value: valueNil(),
+    error: valueNil(),
+    number: rnd
+  ))
+  rnd
+
+proc detNowValue*(vm: var Vm): int64 =
+  if vm.replayMode:
+    return nextReplayEvent(vm, RekDetNow).number
+
+  let nowValue =
+    if vm.deterministic:
+      vm.cpuStepsUsed
+    else:
+      getTime().toUnix()
+
+  vm.replayLog.add(ReplayEvent(
+    kind: RekDetNow,
+    toolName: "",
+    args: valueNil(),
+    ok: true,
+    value: valueNil(),
+    error: valueNil(),
+    number: nowValue
+  ))
+  nowValue
+
 proc hasCapability(vm: Vm; cap: string): bool =
   if cap.len == 0:
     return true
@@ -771,17 +981,50 @@ proc checkQuota(vm: var Vm) =
   inc(vm.cpuStepsUsed)
   if vm.quota.cpuStepLimit >= 0 and vm.cpuStepsUsed > vm.quota.cpuStepLimit:
     vm.quota.cpuStepLimit = vm.cpuStepsUsed + 64
-    raiseVmValue(newErrorValue("quota exceeded: cpu steps"))
+    emitAudit(vm, "quota.breach", %*{
+      "quota": "cpu_steps",
+      "used": vm.cpuStepsUsed,
+      "limit": vm.quota.cpuStepLimit
+    })
+    raiseVmValue(vmDiagnostic(
+      vm,
+      "AIR.QUOTA.BREACH",
+      "quota exceeded: cpu steps",
+      hints = @["Increase cpu quota or reduce instruction count"],
+      repairTags = @["quota", "cpu"]
+    ))
 
   if vm.quota.heapObjectLimit >= 0 and heapObjectCount().int64 > vm.quota.heapObjectLimit:
     vm.quota.heapObjectLimit = heapObjectCount().int64 + 64
-    raiseVmValue(newErrorValue("quota exceeded: heap objects"))
+    emitAudit(vm, "quota.breach", %*{
+      "quota": "heap_objects",
+      "used": heapObjectCount().int64,
+      "limit": vm.quota.heapObjectLimit
+    })
+    raiseVmValue(vmDiagnostic(
+      vm,
+      "AIR.QUOTA.BREACH",
+      "quota exceeded: heap objects",
+      hints = @["Increase heap quota or reduce allocations"],
+      repairTags = @["quota", "memory"]
+    ))
 
   if vm.quota.wallClockMsLimit >= 0:
     let elapsed = nowMs() - vm.startedAtMs
     if elapsed > vm.quota.wallClockMsLimit:
       vm.quota.wallClockMsLimit = elapsed + 64
-      raiseVmValue(newErrorValue("quota exceeded: wall clock"))
+      emitAudit(vm, "quota.breach", %*{
+        "quota": "wall_clock_ms",
+        "used": elapsed,
+        "limit": vm.quota.wallClockMsLimit
+      })
+      raiseVmValue(vmDiagnostic(
+        vm,
+        "AIR.QUOTA.BREACH",
+        "quota exceeded: wall clock",
+        hints = @["Increase wall-clock quota or reduce runtime work"],
+        repairTags = @["quota", "time"]
+      ))
 
 proc encodeHandlers(frame: FrameCtx; catchIps: var seq[int]; depths: var seq[int]) =
   catchIps = @[]
@@ -837,11 +1080,21 @@ proc persistFrameToGenerator(gen: GeneratorObj; frame: FrameCtx) =
     gen.upvalues[k] = v
   encodeHandlers(frame, gen.handlerCatchIps, gen.handlerStackDepths)
 
-proc requireCapability(vm: Vm; cap: string; context: string) =
+proc requireCapability(vm: var Vm; cap: string; context: string) =
   if cap.len == 0:
     return
   if not hasCapability(vm, cap):
-    raiseVmValue(newErrorValue("capability denied (" & context & "): " & cap))
+    emitAudit(vm, "capability.denied", %*{
+      "capability": cap,
+      "context": context
+    })
+    raiseVmValue(vmDiagnostic(
+      vm,
+      "AIR.CAPABILITY.DENIED",
+      "capability denied (" & context & "): " & cap,
+      hints = @["Grant capability in policy or narrow required effects"],
+      repairTags = @["capability", "policy"]
+    ))
 
 proc parseQuotaKind(value: Value): VmQuotaKind =
   let s = value.asString().toLowerAscii()
@@ -911,7 +1164,7 @@ proc cancelTaskRecursive(vm: var Vm; taskId: int) =
   if task.state in {TsDone, TsFailed, TsCancelled}:
     return
   task.state = TsCancelled
-  task.error = newErrorValue("task cancelled")
+  task.error = vmRuntimeError(vm, "task cancelled", "AIR.TASK.CANCELLED")
   for childId in task.children:
     cancelTaskRecursive(vm, childId)
 
@@ -922,7 +1175,7 @@ proc runTaskNow(vm: var Vm; task: TaskNode) =
     return
   if task.deadlineUnix >= 0 and nowMs() > task.deadlineUnix:
     task.state = TsCancelled
-    task.error = newErrorValue("task deadline exceeded")
+    task.error = vmRuntimeError(vm, "task deadline exceeded", "AIR.TASK.DEADLINE")
     return
 
   task.state = TsRunning
@@ -1010,7 +1263,13 @@ proc attachToolFutureMeta(futureVal: Value; schemaId: int; args: Value; idempote
 
 proc executeToolCall(vm: var Vm; schemaId: int; args: Value): Value =
   if vm.module == nil or schemaId < 0 or schemaId >= vm.module.toolSchemas.len:
-    return attachToolFutureMeta(newFutureRejectedValue(newErrorValue("invalid tool schema id")), schemaId, args, "")
+    return attachToolFutureMeta(newFutureRejectedValue(vmDiagnostic(
+      vm,
+      "AIR.TOOL.INVALID_SCHEMA",
+      "invalid tool schema id",
+      hints = @["Compile with a valid tool schema id"],
+      repairTags = @["tool", "schema"]
+    )), schemaId, args, "")
 
   let moduleSchema = vm.module.toolSchemas[schemaId]
   let registration =
@@ -1025,13 +1284,27 @@ proc executeToolCall(vm: var Vm; schemaId: int; args: Value): Value =
 
   let validationErr = validateToolArgs(schema, args)
   if validationErr.len > 0:
-    return attachToolFutureMeta(newFutureRejectedValue(newErrorValue(validationErr)), schemaId, args, "")
+    return attachToolFutureMeta(newFutureRejectedValue(vmDiagnostic(
+      vm,
+      "AIR.TOOL.BAD_ARGS",
+      validationErr,
+      hints = @["Pass request args that satisfy tool schema"],
+      repairTags = @["tool", "schema", "args"]
+    )), schemaId, args, "")
 
   if vm.quota.toolCallLimit >= 0 and vm.toolCallsUsed >= vm.quota.toolCallLimit:
-    return attachToolFutureMeta(newFutureRejectedValue(newErrorValue("quota exceeded: tool calls")), schemaId, args, "")
-
-  if registration.handler == nil:
-    return attachToolFutureMeta(newFutureRejectedValue(newErrorValue("tool handler not registered: " & schema.name)), schemaId, args, "")
+    emitAudit(vm, "quota.breach", %*{
+      "quota": "tool_calls",
+      "used": vm.toolCallsUsed,
+      "limit": vm.quota.toolCallLimit
+    })
+    return attachToolFutureMeta(newFutureRejectedValue(vmDiagnostic(
+      vm,
+      "AIR.QUOTA.BREACH",
+      "quota exceeded: tool calls",
+      hints = @["Increase tool-call quota or reduce invocations"],
+      repairTags = @["quota", "tool"]
+    )), schemaId, args, "")
 
   var idemKey = ""
   let argMap = asMapObj(args)
@@ -1042,6 +1315,46 @@ proc executeToolCall(vm: var Vm; schemaId: int; args: Value): Value =
 
   if vm.toolIdempotencyCache.hasKey(idemKey):
     return attachToolFutureMeta(newFutureResolvedValue(vm.toolIdempotencyCache[idemKey]), schemaId, args, idemKey)
+
+  emitAudit(vm, "tool.call.start", %*{
+    "tool": schema.name,
+    "schema_id": schemaId,
+    "idempotency_key": idemKey
+  })
+
+  if vm.replayMode:
+    let ev = nextReplayEvent(vm, RekToolCall)
+    if ev.toolName != schema.name or ev.args.toDebugString() != args.toDebugString():
+      raiseVmValue(vmDiagnostic(
+        vm,
+        "AIR.REPLAY.MISMATCH",
+        "tool replay mismatch for " & schema.name,
+        hints = @["Re-record replay log with matching input arguments"],
+        repairTags = @["replay", "tool"]
+      ))
+
+    emitAudit(vm, "tool.call.replay", %*{
+      "tool": schema.name,
+      "ok": ev.ok
+    })
+    if ev.ok:
+      vm.toolIdempotencyCache[idemKey] = ev.value
+      return attachToolFutureMeta(newFutureResolvedValue(ev.value), schemaId, args, idemKey)
+    return attachToolFutureMeta(newFutureRejectedValue(ev.error), schemaId, args, idemKey)
+
+  if registration.handler == nil:
+    emitAudit(vm, "tool.call.result", %*{
+      "tool": schema.name,
+      "ok": false,
+      "reason": "handler_not_registered"
+    })
+    return attachToolFutureMeta(newFutureRejectedValue(vmDiagnostic(
+      vm,
+      "AIR.TOOL.UNREGISTERED",
+      "tool handler not registered: " & schema.name,
+      hints = @["Register tool handler before execution"],
+      repairTags = @["tool", "runtime"]
+    )), schemaId, args, idemKey)
 
   var req = ToolCallRequest(
     toolName: schema.name,
@@ -1061,9 +1374,42 @@ proc executeToolCall(vm: var Vm; schemaId: int; args: Value): Value =
     let res = registration.handler(vm, req)
     if res.ok:
       vm.toolIdempotencyCache[idemKey] = res.value
+      vm.replayLog.add(ReplayEvent(
+        kind: RekToolCall,
+        toolName: schema.name,
+        args: args,
+        ok: true,
+        value: res.value,
+        error: valueNil(),
+        number: 0
+      ))
+      emitAudit(vm, "tool.call.result", %*{
+        "tool": schema.name,
+        "ok": true,
+        "attempt": attempt
+      })
       return attachToolFutureMeta(newFutureResolvedValue(res.value), schemaId, args, idemKey)
-    lastErr = if isNil(res.error): newErrorValue("tool call failed") else: res.error
+    lastErr = if isNil(res.error): vmDiagnostic(
+      vm,
+      "AIR.TOOL.CALL_FAILED",
+      "tool call failed",
+      hints = @["Inspect tool handler error payload"],
+      repairTags = @["tool"]
+    ) else: res.error
 
+  vm.replayLog.add(ReplayEvent(
+    kind: RekToolCall,
+    toolName: schema.name,
+    args: args,
+    ok: false,
+    value: valueNil(),
+    error: lastErr,
+    number: 0
+  ))
+  emitAudit(vm, "tool.call.result", %*{
+    "tool": schema.name,
+    "ok": false
+  })
   attachToolFutureMeta(newFutureRejectedValue(lastErr), schemaId, args, idemKey)
 
 type
@@ -1376,6 +1722,7 @@ proc decodeAllObjects(vm: var Vm; ctx: var ObjDecodeCtx) =
         of $FfGenerator: fn.flags.incl(FfGenerator)
         of $FfMacroLike: fn.flags.incl(FfMacroLike)
         of $FfMethod: fn.flags.incl(FfMethod)
+        of $FfAbstract: fn.flags.incl(FfAbstract)
         else: discard
     of HkNativeFn:
       NativeFnObj(obj).name = node["name"].getStr()
@@ -1863,7 +2210,7 @@ proc executeFunction(
         let a = popValue(frame)
         let denom = asFloat(b)
         if denom == 0.0:
-          handleThrow(newErrorValue("division by zero"))
+          handleThrow(vmRuntimeError(vm, "division by zero", "AIR.ARITH.DIV_ZERO"))
         else:
           pushValue(frame, valueFloat(asFloat(a) / denom))
       of OpMod:
@@ -1871,7 +2218,7 @@ proc executeFunction(
         let a = popValue(frame)
         let rhs = asInt(b)
         if rhs == 0:
-          handleThrow(newErrorValue("mod by zero"))
+          handleThrow(vmRuntimeError(vm, "mod by zero", "AIR.ARITH.MOD_ZERO"))
         else:
           pushValue(frame, valueInt(asInt(a) mod rhs))
       of OpPow:
@@ -2015,7 +2362,7 @@ proc executeFunction(
           elif argc == 0:
             pushValue(frame, getMember(receiver, methodName))
           else:
-            handleThrow(newErrorValue("method not found: " & methodName))
+            handleThrow(vmRuntimeError(vm, "method not found: " & methodName, "AIR.OOP.METHOD_NOT_FOUND"))
         else:
           let callResult = invokeValue(vm, methodValue, args, receiver)
           pushValue(frame, callResult)
@@ -2043,7 +2390,7 @@ proc executeFunction(
           elif argc == 0 and not kwargsHasEntries(kwargs):
             pushValue(frame, getMember(receiver, methodName))
           else:
-            handleThrow(newErrorValue("method not found: " & methodName))
+            handleThrow(vmRuntimeError(vm, "method not found: " & methodName, "AIR.OOP.METHOD_NOT_FOUND"))
         else:
           let callResult = invokeValue(vm, methodValue, args, receiver, kwargs)
           pushValue(frame, callResult)
@@ -2055,16 +2402,16 @@ proc executeFunction(
 
         let instObj = asInstanceObj(frame.selfVal)
         if instObj == nil:
-          handleThrow(newErrorValue("super call without instance"))
+          handleThrow(vmRuntimeError(vm, "super call without instance", "AIR.OOP.SUPER_INVALID"))
         let cls = asClassObj(instObj.cls)
         if cls == nil:
-          handleThrow(newErrorValue("super call on invalid class"))
+          handleThrow(vmRuntimeError(vm, "super call on invalid class", "AIR.OOP.SUPER_INVALID"))
         let superCls = asClassObj(cls.superClass)
         if superCls == nil:
-          handleThrow(newErrorValue("super class not found"))
+          handleThrow(vmRuntimeError(vm, "super class not found", "AIR.OOP.SUPER_MISSING"))
 
         if not superCls.methods.hasKey(methodName):
-          handleThrow(newErrorValue("super method missing: " & methodName))
+          handleThrow(vmRuntimeError(vm, "super method missing: " & methodName, "AIR.OOP.METHOD_NOT_FOUND"))
         let callResult = invokeValue(vm, superCls.methods[methodName], args, frame.selfVal)
         pushValue(frame, callResult)
 
@@ -2076,16 +2423,16 @@ proc executeFunction(
 
         let instObj = asInstanceObj(frame.selfVal)
         if instObj == nil:
-          handleThrow(newErrorValue("super call without instance"))
+          handleThrow(vmRuntimeError(vm, "super call without instance", "AIR.OOP.SUPER_INVALID"))
         let cls = asClassObj(instObj.cls)
         if cls == nil:
-          handleThrow(newErrorValue("super call on invalid class"))
+          handleThrow(vmRuntimeError(vm, "super call on invalid class", "AIR.OOP.SUPER_INVALID"))
         let superCls = asClassObj(cls.superClass)
         if superCls == nil:
-          handleThrow(newErrorValue("super class not found"))
+          handleThrow(vmRuntimeError(vm, "super class not found", "AIR.OOP.SUPER_MISSING"))
 
         if not superCls.methods.hasKey(methodName):
-          handleThrow(newErrorValue("super method missing: " & methodName))
+          handleThrow(vmRuntimeError(vm, "super method missing: " & methodName, "AIR.OOP.METHOD_NOT_FOUND"))
         let callResult = invokeValue(vm, superCls.methods[methodName], args, frame.selfVal, kwargs)
         pushValue(frame, callResult)
 
@@ -2213,7 +2560,7 @@ proc executeFunction(
           # function-level advice attachment
           let fnObj = asFunctionObj(targetVal)
           if fnObj == nil:
-            handleThrow(newErrorValue("decorator target is not a function"))
+            handleThrow(vmRuntimeError(vm, "decorator target is not a function", "AIR.AOP.BAD_TARGET"))
           case mode
           of 0:
             fnObj.beforeHooks.add(hookVal)
@@ -2229,11 +2576,11 @@ proc executeFunction(
           let clsVal = popValue(frame)
           let methodName = adviceMethodName(targetVal)
           if methodName.len == 0:
-            handleThrow(newErrorValue("invalid advised method name"))
+            handleThrow(vmRuntimeError(vm, "invalid advised method name", "AIR.AOP.BAD_TARGET"))
           let methodVal = getMember(clsVal, methodName)
           let fnObj = asFunctionObj(methodVal)
           if fnObj == nil:
-            handleThrow(newErrorValue("advised member is not a function: " & methodName))
+            handleThrow(vmRuntimeError(vm, "advised member is not a function: " & methodName, "AIR.AOP.BAD_TARGET"))
           case mode
           of 1:
             fnObj.beforeHooks.add(hookVal)
@@ -2443,7 +2790,17 @@ proc executeFunction(
       of OpCapAssert:
         let capName = symbolName(int(inst.b))
         if not hasCapability(vm, capName):
-          handleThrow(newErrorValue("capability denied: " & capName))
+          emitAudit(vm, "capability.denied", %*{
+            "capability": capName,
+            "context": "cap_assert"
+          })
+          handleThrow(vmDiagnostic(
+            vm,
+            "AIR.CAPABILITY.DENIED",
+            "capability denied: " & capName,
+            hints = @["Grant required capability before cap_assert"],
+            repairTags = @["capability", "policy"]
+          ))
       of OpQuotaSet:
         let amount = popValue(frame)
         let kindVal = popValue(frame)
@@ -2465,7 +2822,19 @@ proc executeFunction(
         let required = if isInt(amount): asInt(amount) else: 0
         let limit = quotaLimit(vm, kind)
         if limit >= 0 and quotaCurrent(vm, kind) + required > limit:
-          handleThrow(newErrorValue("quota check failed"))
+          emitAudit(vm, "quota.breach", %*{
+            "quota": $kind,
+            "required": required,
+            "current": quotaCurrent(vm, kind),
+            "limit": limit
+          })
+          handleThrow(vmDiagnostic(
+            vm,
+            "AIR.QUOTA.BREACH",
+            "quota check failed",
+            hints = @["Increase quota or reduce required amount"],
+            repairTags = @["quota"]
+          ))
         pushValue(frame, valueBool(true))
       of OpCheckpointHint:
         vm.diagnostics.add("checkpoint hint at ip=" & $(frame.ip - 1))
@@ -2485,9 +2854,9 @@ proc executeFunction(
             frame.ip = resumeIp
             pushValue(frame, valueInt(slot))
           else:
-            handleThrow(newErrorValue("checkpoint restore failed"))
+            handleThrow(vmRuntimeError(vm, "checkpoint restore failed", "AIR.CHECKPOINT.RESTORE_FAILED"))
         else:
-          handleThrow(newErrorValue("checkpoint slot not found"))
+          handleThrow(vmRuntimeError(vm, "checkpoint slot not found", "AIR.CHECKPOINT.SLOT_NOT_FOUND"))
 
       of OpToolPrep:
         vm.preparedToolSchemaId = int(inst.b)
@@ -2529,26 +2898,35 @@ proc executeFunction(
         else:
           let schemaId = fut.toolSchemaId
           if schemaId < 0:
-            handleThrow(newErrorValue("tool retry without schema metadata"))
+            handleThrow(vmDiagnostic(
+              vm,
+              "AIR.TOOL.RETRY_METADATA",
+              "tool retry without schema metadata",
+              hints = @["Retry only tool futures produced by tool_call"],
+              repairTags = @["tool", "retry"]
+            ))
           else:
             pushValue(frame, executeToolCall(vm, schemaId, fut.toolArgs))
 
       of OpDetSeed:
         vm.rngState = uint64(inst.b) xor (uint64(inst.c) shl 32)
       of OpDetRand:
-        let rnd = xorshift64(vm.rngState)
-        pushValue(frame, valueInt(int64(rnd and 0x7FFFFFFF'u64)))
+        pushValue(frame, valueInt(detRandValue(vm)))
       of OpDetNow:
-        if vm.deterministic:
-          pushValue(frame, valueInt(int64(vm.rngState and 0x7FFFFFFF'u64)))
-        else:
-          pushValue(frame, valueInt(getTime().toUnix()))
+        pushValue(frame, valueInt(detNowValue(vm)))
       of OpTraceEmit:
         vm.diagnostics.add("trace event " & $inst.b)
       of OpAuditEmit:
-        vm.diagnostics.add("audit event " & $inst.b)
+        emitAudit(vm, "audit.emit", %*{"event_id": inst.b})
       of OpDiagEmit:
-        vm.diagnostics.add("diag code " & $inst.b)
+        let diagMsg = makeDiagnosticMessage(
+          "AIR.DIAG.EMIT." & $inst.b,
+          "diagnostic emitted by OpDiagEmit",
+          modulePath = (if vm.module != nil: vm.module.sourcePath else: ""),
+          hints = @[],
+          repairTags = @["diagnostic"]
+        )
+        vm.diagnostics.add(diagMsg)
 
       of OpTypeof:
         let v = popValue(frame)
@@ -2574,9 +2952,6 @@ proc executeFunction(
         if frame.stack.len > 0:
           return popValue(frame)
         return valueNil()
-      else:
-        # Unimplemented AIR opcodes are currently treated as no-ops.
-        discard
 
     except VmThrow as thrown:
       handleThrow(thrown.value)
@@ -2626,7 +3001,7 @@ proc remainingRequiredPositional(params: seq[AirParam]; startIdx: int): int =
     if (not params[i].isKeyword) and (not params[i].hasDefault) and (not params[i].isVariadic):
       inc(result)
 
-proc bindFunctionArgs(fnMeta: AirFunction; args: seq[Value]; kwargs: Value): seq[Value] =
+proc bindFunctionArgs(vm: Vm; fnMeta: AirFunction; args: seq[Value]; kwargs: Value): seq[Value] =
   var kwEntries = initOrderedTable[string, Value]()
   let kwMap = asMapObj(kwargs)
   if kwMap != nil:
@@ -2643,7 +3018,7 @@ proc bindFunctionArgs(fnMeta: AirFunction; args: seq[Value]; kwargs: Value): seq
 
   for k in kwEntries.keys:
     if k notin keywordNames:
-      raiseVmValue(newErrorValue("unknown keyword argument: ^" & k))
+      raiseVmValue(vmRuntimeError(vm, "unknown keyword argument: ^" & k, "AIR.CALL.BAD_KWARG"))
 
   result = newSeq[Value](fnMeta.params.len)
   for i in 0..<result.len:
@@ -2676,10 +3051,10 @@ proc bindFunctionArgs(fnMeta: AirFunction; args: seq[Value]; kwargs: Value): seq
         result[idx] = args[posIdx]
         inc(posIdx)
       else:
-        raiseVmValue(newErrorValue("missing required argument: " & param.name))
+        raiseVmValue(vmRuntimeError(vm, "missing required argument: " & param.name, "AIR.CALL.MISSING_ARG"))
 
   if posIdx < args.len:
-    raiseVmValue(newErrorValue("too many positional arguments: expected at most " & $maxPositional & " got " & $args.len))
+    raiseVmValue(vmRuntimeError(vm, "too many positional arguments: expected at most " & $maxPositional & " got " & $args.len, "AIR.CALL.TOO_MANY_ARGS"))
 
   for idx, param in fnMeta.params:
     if not param.isKeyword:
@@ -2689,32 +3064,48 @@ proc bindFunctionArgs(fnMeta: AirFunction; args: seq[Value]; kwargs: Value): seq
     elif param.hasDefault:
       result[idx] = param.defaultValue
     else:
-      raiseVmValue(newErrorValue("missing required keyword argument: ^" & param.name))
+      raiseVmValue(vmRuntimeError(vm, "missing required keyword argument: ^" & param.name, "AIR.CALL.MISSING_KWARG"))
 
 proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value = valueNil(); kwargs: Value = valueNil()): Value =
   if isNil(callee):
-    raiseVmValue(newErrorValue("attempted to call nil"))
+    raiseVmValue(vmDiagnostic(
+      vm,
+      "AIR.CALL.NIL",
+      "attempted to call nil",
+      hints = @["Ensure callee expression resolves to a function"],
+      repairTags = @["call"]
+    ))
 
   if isSymbol(callee):
     let sid = asSymbolId(callee)
     if vm.globals.hasKey(sid):
       return invokeValue(vm, vm.globals[sid], args, selfValue, kwargs)
-    raiseVmValue(newErrorValue("unknown callable symbol: " & asSymbolName(callee)))
+    raiseVmValue(vmRuntimeError(vm, "unknown callable symbol: " & asSymbolName(callee), "AIR.CALL.UNKNOWN_SYMBOL"))
 
   let nativeObj = asNativeFunctionObj(callee)
   if nativeObj != nil:
     if kwargsHasEntries(kwargs):
-      raiseVmValue(newErrorValue("native functions do not accept keyword arguments: " & nativeObj.name))
+      raiseVmValue(vmRuntimeError(vm, "native functions do not accept keyword arguments: " & nativeObj.name, "AIR.NATIVE.BAD_KWARGS"))
     let sid = internSymbol(nativeObj.name)
     if not vm.natives.hasKey(sid):
-      raiseVmValue(newErrorValue("native not registered: " & nativeObj.name))
+      raiseVmValue(vmRuntimeError(vm, "native not registered: " & nativeObj.name, "AIR.NATIVE.NOT_REGISTERED"))
     let entry = vm.natives[sid]
     if entry.arity >= 0 and args.len != entry.arity:
-      raiseVmValue(newErrorValue("native arity mismatch for " & entry.name))
+      raiseVmValue(vmRuntimeError(vm, "native arity mismatch for " & entry.name, "AIR.NATIVE.BAD_ARITY"))
     if entry.caps.len > 0:
       for cap in entry.caps:
         if not hasCapability(vm, cap):
-          raiseVmValue(newErrorValue("capability denied for native " & entry.name & ": " & cap))
+          emitAudit(vm, "capability.denied", %*{
+            "capability": cap,
+            "context": "native:" & entry.name
+          })
+          raiseVmValue(vmDiagnostic(
+            vm,
+            "AIR.CAPABILITY.DENIED",
+            "capability denied for native " & entry.name & ": " & cap,
+            hints = @["Grant required native capability"],
+            repairTags = @["capability", "native"]
+          ))
     return entry.callback(vm, args)
 
   let fnObj = asFunctionObj(callee)
@@ -2724,14 +3115,23 @@ proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value =
       fnModule = vm.loadedModules[fnObj.moduleId]
 
     if fnModule == nil or fnObj.fnIndex < 0 or fnObj.fnIndex >= fnModule.functions.len:
-      raiseVmValue(newErrorValue("invalid function metadata"))
+      raiseVmValue(vmRuntimeError(vm, "invalid function metadata", "AIR.CALL.BAD_FUNCTION"))
 
     let fnMeta = fnModule.functions[fnObj.fnIndex]
-    let boundArgs = bindFunctionArgs(fnMeta, args, kwargs)
+    let boundArgs = bindFunctionArgs(vm, fnMeta, args, kwargs)
+
+    if FfAbstract in fnObj.flags:
+      raiseVmValue(vmDiagnostic(
+        vm,
+        "AIR.ABSTRACT.METHOD",
+        "abstract method not implemented: " & fnObj.name,
+        hints = @["Implement this method in a concrete subclass"],
+        repairTags = @["oop", "abstract-method"]
+      ))
 
     for i, paramType in fnObj.paramTypes:
       if i < boundArgs.len and paramType.len > 0 and not expectType(boundArgs[i], paramType):
-        raiseVmValue(newErrorValue("type mismatch for parameter " & fnObj.paramNames[i] & ": expected " & paramType & " got " & inferTypeName(boundArgs[i])))
+        raiseVmValue(vmRuntimeError(vm, "type mismatch for parameter " & fnObj.paramNames[i] & ": expected " & paramType & " got " & inferTypeName(boundArgs[i]), "AIR.CALL.TYPE_MISMATCH"))
 
     if fnObj.beforeHooks.len > 0:
       for hook in fnObj.beforeHooks:
@@ -2772,7 +3172,13 @@ proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value =
       discard invokeValue(vm, cls.ctor, args, instance, kwargs)
     return instance
 
-  raiseVmValue(newErrorValue("value is not callable: " & callee.toDebugString()))
+  raiseVmValue(vmDiagnostic(
+    vm,
+    "AIR.CALL.NOT_CALLABLE",
+    "value is not callable: " & callee.toDebugString(),
+    hints = @["Call only functions/classes/native callables"],
+    repairTags = @["call", "type"]
+  ))
 
 proc registerNative*(vm: var Vm; name: string; arity: int; fn: NativeProc; caps: seq[string] = @[]; isMacro = false) =
   let sid = internSymbol(name)
@@ -2793,13 +3199,19 @@ proc runModule*(vm: var Vm; module: AirModule): Value =
   if not vm.module.verified:
     let issues = verifyAirModule(vm.module)
     if issues.len > 0:
-      raiseVmValue(newErrorValue(issues[0]))
+      raiseVmValue(vmRuntimeError(vm, issues[0], "AIR.VERIFY.ERROR"))
     vm.module.verified = true
 
   vm.startedAtMs = nowMs()
   vm.cpuStepsUsed = 0
   vm.toolCallsUsed = 0
   vm.preparedToolSchemaId = -1
+  vm.auditEvents.setLen(0)
+  if vm.replayMode:
+    vm.replayCursor = 0
+  else:
+    vm.replayLog.setLen(0)
+    vm.replayCursor = 0
   vm.tasks = initOrderedTable[int, TaskNode]()
   vm.tasks[0] = TaskNode(
     id: 0,
@@ -2829,4 +3241,7 @@ proc runModule*(vm: var Vm; module: AirModule): Value =
   try:
     executeFunction(vm, mainObj, @[])
   except VmThrow as thrown:
-    raise newException(VmRuntimeError, "uncaught error: " & thrown.value.toDebugString())
+    let errObj = asErrorObj(thrown.value)
+    if errObj != nil:
+      raise newException(VmRuntimeError, errObj.message)
+    raise newException(VmRuntimeError, thrown.value.toDebugString())

@@ -66,6 +66,7 @@ type
     FfGenerator
     FfMacroLike
     FfMethod
+    FfAbstract
 
   FunctionObj* = ref object of HeapObject
     name*: string

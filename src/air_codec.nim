@@ -275,6 +275,7 @@ proc fnFlagsToBits(flags: set[ir.FunctionFlag]): uint32 =
   if ir.FFlagMacroLike in flags: result = result or (1'u32 shl 2)
   if ir.FFlagMethod in flags: result = result or (1'u32 shl 3)
   if ir.FFlagHasTry in flags: result = result or (1'u32 shl 4)
+  if ir.FFlagAbstract in flags: result = result or (1'u32 shl 5)
 
 proc bitsToFnFlags(bits: uint32): set[ir.FunctionFlag] =
   if (bits and (1'u32 shl 0)) != 0: result.incl(ir.FFlagAsync)
@@ -282,6 +283,7 @@ proc bitsToFnFlags(bits: uint32): set[ir.FunctionFlag] =
   if (bits and (1'u32 shl 2)) != 0: result.incl(ir.FFlagMacroLike)
   if (bits and (1'u32 shl 3)) != 0: result.incl(ir.FFlagMethod)
   if (bits and (1'u32 shl 4)) != 0: result.incl(ir.FFlagHasTry)
+  if (bits and (1'u32 shl 5)) != 0: result.incl(ir.FFlagAbstract)
 
 proc sectionId(s: string): array[4, char] =
   if s.len != 4:

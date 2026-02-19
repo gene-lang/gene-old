@@ -342,6 +342,28 @@ suite "Compiler - Classes":
     let code = mainFnCode(m)
     check code.hasOpcode(OpClassExtends)
 
+suite "Compiler - Protocols and Abstract":
+  test "protocol compiles descriptor map":
+    let m = compile("(protocol Printable (method to_s []))")
+    let code = mainFnCode(m)
+    check code.hasOpcode(OpMapNew)
+    check code.hasOpcode(OpArrNew)
+    check code.hasOpcode(OpMapSet)
+    check code.hasOpcode(OpStoreGlobal)
+
+  test "abstract method function is flagged":
+    let m = compile("""
+      (class Shape
+        (abstract method area []))
+    """)
+    var found = false
+    for fnMeta in m.functions:
+      if fnMeta.name == "Shape::area":
+        found = true
+        check FFlagMethod in fnMeta.flags
+        check FFlagAbstract in fnMeta.flags
+    check found == true
+
 suite "Compiler - Try/Catch":
   test "try-catch":
     let m = compile("""

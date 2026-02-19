@@ -1,4 +1,4 @@
-import std/[unittest, os, tables]
+import std/[unittest, os, tables, json]
 import ../src/types
 import ../src/parser
 import ../src/compiler
@@ -895,6 +895,142 @@ suite "VM - AOP bundles":
       called
     """)
     check asBool(r) == true
+
+suite "VM - Robustness":
+  test "capability denial returns structured diagnostic envelope":
+    let r = run("""
+      (fn worker [] 1)
+      (try
+        (thread/spawn worker)
+      catch e
+        e/message)
+    """)
+    let msg = asStringObj(r)
+    check msg != nil
+    let env = parseJson(msg.value)
+    check env["code"].getStr() == "AIR.CAPABILITY.DENIED"
+    check env["stage"].getStr() == "runtime"
+    check env.hasKey("repair_tags")
+
+  test "audit captures capability denials and tool calls":
+    let source = """
+      (fn worker [] 1)
+      (try
+        (thread/spawn worker)
+      catch e
+        nil)
+      (tool_unwrap (tool_call tool/echo {^msg "hi"}))
+    """
+    let prog = parseProgram(source)
+    let module = compileProgram(prog)
+    var vm = newVm()
+    registerDefaultNatives(vm)
+    grantCapability(vm, "cap.tool.call:tool/echo")
+    discard vm.runModule(module)
+
+    var sawCapDenied = false
+    var sawToolStart = false
+    var sawToolResult = false
+    for ev in vm.auditEvents:
+      if not ev.hasKey("kind"):
+        continue
+      let kind = ev["kind"].getStr()
+      if kind == "capability.denied":
+        sawCapDenied = true
+      elif kind == "tool.call.start":
+        sawToolStart = true
+      elif kind == "tool.call.result":
+        sawToolResult = true
+    check sawCapDenied == true
+    check sawToolStart == true
+    check sawToolResult == true
+
+  test "deterministic replay records and replays time/random":
+    let source = "[(now) (rand 1000)]"
+    let prog = parseProgram(source)
+    let module = compileProgram(prog)
+
+    var vm1 = newVm()
+    registerDefaultNatives(vm1)
+    grantCapability(vm1, "cap.clock.real")
+    grantCapability(vm1, "cap.rand.nondet")
+    let r1 = vm1.runModule(module)
+
+    check vm1.replayLog.len >= 2
+    var sawNow = false
+    var sawRand = false
+    for ev in vm1.replayLog:
+      if ev.kind == RekDetNow: sawNow = true
+      if ev.kind == RekDetRand: sawRand = true
+    check sawNow == true
+    check sawRand == true
+
+    var vm2 = newVm()
+    registerDefaultNatives(vm2)
+    grantCapability(vm2, "cap.clock.real")
+    grantCapability(vm2, "cap.rand.nondet")
+    beginReplay(vm2, vm1.replayLog)
+    let r2 = vm2.runModule(module)
+
+    let a1 = asArrayObj(r1)
+    let a2 = asArrayObj(r2)
+    check a1 != nil
+    check a2 != nil
+    check a1.items.len == 2
+    check a2.items.len == 2
+    check asInt(a1.items[0]) == asInt(a2.items[0])
+    check asInt(a1.items[1]) == asInt(a2.items[1])
+
+  test "deterministic replay bypasses external tool handler":
+    let source = "(tool_unwrap (tool_call tool/echo {^msg \"hi\"}))"
+    let prog = parseProgram(source)
+    let module = compileProgram(prog)
+
+    var vm1 = newVm()
+    registerDefaultNatives(vm1)
+    grantCapability(vm1, "cap.tool.call:tool/echo")
+    let r1 = vm1.runModule(module)
+    check vm1.replayLog.len >= 1
+
+    var vm2 = newVm()
+    grantCapability(vm2, "cap.tool.call:tool/echo")
+    beginReplay(vm2, vm1.replayLog)
+    let r2 = vm2.runModule(module)
+    check r1.toDebugString() == r2.toDebugString()
+
+suite "VM - Protocols and Abstract":
+  test "protocol descriptor is available at runtime":
+    let r = run("""
+      (protocol Printable
+        (method to_s []))
+      [Printable/kind Printable/name Printable/methods/0]
+    """)
+    let outArr = asArrayObj(r)
+    check outArr != nil
+    check outArr.items.len == 3
+    let kind = asStringObj(outArr.items[0])
+    let name = asStringObj(outArr.items[1])
+    check kind != nil
+    check name != nil
+    check kind.value == "protocol"
+    check name.value == "Printable"
+    check isSymbol(outArr.items[2])
+    check asSymbolName(outArr.items[2]) == "to_s"
+
+  test "abstract method call throws structured diagnostic":
+    let r = run("""
+      (class Shape
+        (abstract method area []))
+      (var s (new Shape))
+      (try
+        (s .area)
+      catch e
+        e/message)
+    """)
+    let msg = asStringObj(r)
+    check msg != nil
+    let env = parseJson(msg.value)
+    check env["code"].getStr() == "AIR.ABSTRACT.METHOD"
 
 suite "VM - Quotes":
   test "quote returns gene value":

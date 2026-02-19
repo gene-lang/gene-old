@@ -152,6 +152,7 @@ type
     FFlagMacroLike
     FFlagMethod
     FFlagHasTry
+    FFlagAbstract
 
   AirParam* = object
     name*: string

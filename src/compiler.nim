@@ -1,4 +1,4 @@
-import std/[strutils, tables, os]
+import std/[strutils, tables, os, json]
 import ./types
 import ./parser
 import ./ir
@@ -32,7 +32,19 @@ type
 
 proc fail(node: AstNode; msg: string): ref CompileError =
   new(result)
-  result.msg = "compile error at " & $node.line & ":" & $node.col & " - " & msg
+  result.msg = $(%*{
+    "code": "AIR.COMPILE.ERROR",
+    "severity": "error",
+    "stage": "compile",
+    "span": {
+      "file": "",
+      "line": node.line,
+      "column": node.col
+    },
+    "message": msg,
+    "hints": [],
+    "repair_tags": ["compile", "syntax"]
+  })
 
 proc mkSymbol(line, col: int; text: string): AstNode =
   AstNode(kind: AkSymbol, line: line, col: col, text: text)
@@ -783,6 +795,41 @@ proc compileEnumForm(ctx: FnContext; node: AstNode) =
       discard declareLocal(ctx, enumName)
     ctx.emit(OpStoreLocal, b = ctx.locals[enumName].slot.uint32)
 
+proc compileProtocolForm(ctx: FnContext; node: AstNode) =
+  let items = node.items
+  if items.len < 2 or items[1].kind != AkSymbol:
+    raise fail(node, "protocol requires a protocol name symbol")
+
+  let protoName = items[1].text
+  ctx.emit(OpMapNew)
+
+  discard ctx.emitConst(newStringValue("protocol"))
+  ctx.emit(OpMapSet, b = runtimeSym(ctx.m, "kind").uint32)
+
+  discard ctx.emitConst(newStringValue(protoName))
+  ctx.emit(OpMapSet, b = runtimeSym(ctx.m, "name").uint32)
+
+  ctx.emit(OpArrNew)
+  for i in 2..<items.len:
+    let member = items[i]
+    if member.kind != AkList or member.items.len < 3 or not isHeadSymbol(member.items[0], "method") or member.items[1].kind != AkSymbol:
+      raise fail(member, "protocol entries must be (method <name> [params])")
+    if member.items[2].kind != AkArray:
+      raise fail(member, "protocol method params must use []")
+    discard ctx.emitConst(valueSymbol(member.items[1].text))
+    ctx.emit(OpArrPush)
+  ctx.emit(OpArrEnd)
+  ctx.emit(OpMapSet, b = runtimeSym(ctx.m, "methods").uint32)
+  ctx.emit(OpMapEnd)
+
+  let protoSid = runtimeSym(ctx.m, protoName)
+  if ctx.isTopLevel:
+    ctx.emit(OpStoreGlobal, b = protoSid.uint32)
+  else:
+    if not ctx.locals.hasKey(protoName):
+      discard declareLocal(ctx, protoName)
+    ctx.emit(OpStoreLocal, b = ctx.locals[protoName].slot.uint32)
+
 proc emitStoreByName(ctx: FnContext; name: string) =
   let resolved = resolveVar(ctx, name)
   case resolved.kind
@@ -967,6 +1014,31 @@ proc compileClassForm(ctx: FnContext; node: AstNode) =
 
         discard compileFunctionForm(ctx, methodNode, forceMethod = true, forcedName = className & "::" & methodName, bindNamed = false)
         let fnIdx = ctx.m.functions.high
+        let sid = runtimeSym(ctx.m, methodName)
+        ctx.emit(OpMethodDef, b = sid.uint32, c = fnIdx.uint32)
+      elif head == "abstract":
+        if member.items.len < 4:
+          raise fail(member, "abstract form requires: (abstract method <name> [params])")
+        if member.items[1].kind != AkSymbol or member.items[1].text != "method":
+          raise fail(member, "only abstract method is currently supported")
+        if member.items[2].kind != AkSymbol:
+          raise fail(member, "abstract method requires a method name")
+        if member.items[3].kind == AkSymbol and member.items[3].text == "_":
+          raise fail(member, "abstract method parameter list must use [] for empty params")
+        if member.items[3].kind != AkArray:
+          raise fail(member, "abstract method parameters must use []")
+        if member.items.len > 4:
+          raise fail(member, "abstract method cannot include a body")
+
+        let methodName = member.items[2].text
+        var methodNode = AstNode(kind: AkList, line: member.line, col: member.col, items: @[])
+        methodNode.items.add(mkSymbol(member.line, member.col, "fn"))
+        methodNode.items.add(member.items[3])
+        methodNode.items.add(AstNode(kind: AkNil, line: member.line, col: member.col))
+
+        discard compileFunctionForm(ctx, methodNode, forceMethod = true, forcedName = className & "::" & methodName, bindNamed = false)
+        let fnIdx = ctx.m.functions.high
+        ctx.m.functions[fnIdx].flags.incl(FFlagAbstract)
         let sid = runtimeSym(ctx.m, methodName)
         ctx.emit(OpMethodDef, b = sid.uint32, c = fnIdx.uint32)
       elif head == "class":
@@ -1330,6 +1402,9 @@ proc compileSpecialForm(ctx: FnContext; node: AstNode): bool =
     true
   of "enum":
     compileEnumForm(ctx, node)
+    true
+  of "protocol":
+    compileProtocolForm(ctx, node)
     true
   of "break":
     if ctx.loops.len == 0:
