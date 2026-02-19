@@ -1,3 +1,6 @@
 gene
 nimble.develop
 nimble.paths
+tests/test_parser
+tests/test_compiler
+tests/test_vm

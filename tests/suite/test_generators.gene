@@ -1,0 +1,94 @@
+# test_generators.gene — fn with yield, resume, for-in over generators
+
+(var pass_count 0)
+(var fail_count 0)
+
+(fn assert_eq [actual expected label]
+  (if (actual == expected)
+    (do
+      (pass_count += 1)
+      (println "  PASS:" label))
+  else
+    (do
+      (fail_count += 1)
+      (println "  FAIL:" label "- expected" expected "got" actual))))
+
+(println "=== test_generators.gene ===")
+
+# Basic generator
+(println "--- Basic Generator ---")
+(fn gen3 []
+  (yield 1)
+  (yield 2)
+  (yield 3))
+
+(var g (gen3))
+(assert_eq (resume g) 1 "first yield = 1")
+(assert_eq (resume g) 2 "second yield = 2")
+(assert_eq (resume g) 3 "third yield = 3")
+
+# Generator with loop
+(println "--- Generator with Loop ---")
+(fn range [n]
+  (var i 0)
+  (loop
+    (if (i >= n) (break))
+    (yield i)
+    (i += 1)))
+
+(var g2 (range 5))
+(assert_eq (resume g2) 0 "range(5) first = 0")
+(assert_eq (resume g2) 1 "range(5) second = 1")
+(assert_eq (resume g2) 2 "range(5) third = 2")
+(assert_eq (resume g2) 3 "range(5) fourth = 3")
+(assert_eq (resume g2) 4 "range(5) fifth = 4")
+
+# For-in over generator
+(println "--- For-in over Generator ---")
+(var sum 0)
+(for x in (range 5)
+  (sum += x))
+(assert_eq sum 10 "for-in range(5) sum = 10")
+
+# Generator sum with larger range
+(var sum2 0)
+(for x in (range 10)
+  (sum2 += x))
+(assert_eq sum2 45 "for-in range(10) sum = 45")
+
+# Generator with parameters
+(println "--- Generator with Parameters ---")
+(fn range_from [start end_val]
+  (var i start)
+  (loop
+    (if (i >= end_val) (break))
+    (yield i)
+    (i += 1)))
+
+(var sum3 0)
+(for x in (range_from 5 10)
+  (sum3 += x))
+(assert_eq sum3 35 "range_from(5, 10) sum = 35")
+
+# Multiple independent generators
+(println "--- Multiple Generators ---")
+(var g_a (range 3))
+(var g_b (range 3))
+(var a1 (resume g_a))
+(var b1 (resume g_b))
+(var a2 (resume g_a))
+(var b2 (resume g_b))
+(assert_eq a1 0 "gen_a first = 0")
+(assert_eq b1 0 "gen_b first = 0")
+(assert_eq a2 1 "gen_a second = 1")
+(assert_eq b2 1 "gen_b second = 1")
+
+# Summary
+(println "")
+(println "=== Results ===")
+(println "  Passed:" pass_count)
+(println "  Failed:" fail_count)
+(if (fail_count == 0)
+  (println "  ALL TESTS PASSED")
+else
+  (println "  SOME TESTS FAILED"))

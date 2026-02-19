@@ -1,0 +1,103 @@
+# test_collections.gene — arrays, maps, gene values, spread
+
+(var pass_count 0)
+(var fail_count 0)
+
+(fn assert_eq [actual expected label]
+  (if (actual == expected)
+    (do
+      (pass_count += 1)
+      (println "  PASS:" label))
+  else
+    (do
+      (fail_count += 1)
+      (println "  FAIL:" label "- expected" expected "got" actual))))
+
+(println "=== test_collections.gene ===")
+
+# Arrays
+(println "--- Arrays ---")
+(var arr [1 2 3 4 5])
+(assert_eq arr/0 1 "arr/0 = 1")
+(assert_eq arr/4 5 "arr/4 = 5")
+(assert_eq arr/.length 5 "arr length = 5")
+(assert_eq (len arr) 5 "len(arr) = 5")
+
+# Empty array
+(var empty [])
+(assert_eq empty/.length 0 "empty array length = 0")
+
+# Mixed type array
+(var mixed [1 "hello" true nil])
+(assert_eq mixed/0 1 "mixed[0] = 1")
+(assert_eq mixed/1 "hello" "mixed[1] = hello")
+(assert_eq mixed/2 true "mixed[2] = true")
+(assert_eq mixed/3 nil "mixed[3] = nil")
+
+# Nested arrays
+(var nested [[1 2] [3 4]])
+(assert_eq nested/0/0 1 "nested[0][0] = 1")
+(assert_eq nested/0/1 2 "nested[0][1] = 2")
+(assert_eq nested/1/0 3 "nested[1][0] = 3")
+
+# Array indexing from end
+(var mod_arr [10 20 30])
+(assert_eq mod_arr/2 30 "arr[2] = 30")
+
+# Array spread
+(var a [1 2])
+(var b [3 4])
+(var combined [a... b...])
+(assert_eq (len combined) 4 "spread array length = 4")
+(assert_eq combined/0 1 "spread[0] = 1")
+(assert_eq combined/3 4 "spread[3] = 4")
+
+# Maps
+(println "--- Maps ---")
+(var m {^a 1 ^b 2 ^c 3})
+(assert_eq m/a 1 "map m/a = 1")
+(assert_eq m/b 2 "map m/b = 2")
+(assert_eq m/c 3 "map m/c = 3")
+
+# Empty map
+(var empty_map {})
+(empty_map/x = 42)
+(assert_eq empty_map/x 42 "set empty_map/x = 42")
+
+# Map modification
+(var m2 {^x 1})
+(m2/x = 99)
+(assert_eq m2/x 99 "modified map m2/x = 99")
+
+# Nested maps
+(var config {^db {^host "localhost" ^port 5432}})
+(assert_eq config/db/host "localhost" "nested map config/db/host")
+(assert_eq config/db/port 5432 "nested map config/db/port")
+
+# Gene values (quoted)
+(println "--- Gene Values ---")
+(var person `(Person ^name "Alice" ^age 30 child1 child2))
+(assert_eq person/.type `Person "gene type = Person")
+
+# For-in over array
+(println "--- Iteration ---")
+(var sum 0)
+(for x in [1 2 3 4 5]
+  (sum += x))
+(assert_eq sum 15 "sum of [1..5] = 15")
+
+# For-in over array collecting
+(var count 0)
+(for x in [10 20 30]
+  (count += 1))
+(assert_eq count 3 "counted 3 items")
+
+# Summary
+(println "")
+(println "=== Results ===")
+(println "  Passed:" pass_count)
+(println "  Failed:" fail_count)
+(if (fail_count == 0)
+  (println "  ALL TESTS PASSED")
+else
+  (println "  SOME TESTS FAILED"))

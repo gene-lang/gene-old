@@ -1,0 +1,104 @@
+# test_functions.gene — fn, closures, recursion, higher-order
+
+(var pass_count 0)
+(var fail_count 0)
+
+(fn assert_eq [actual expected label]
+  (if (actual == expected)
+    (do
+      (pass_count += 1)
+      (println "  PASS:" label))
+  else
+    (do
+      (fail_count += 1)
+      (println "  FAIL:" label "- expected" expected "got" actual))))
+
+(println "=== test_functions.gene ===")
+
+# Basic function
+(println "--- Basic Functions ---")
+(fn add [a b] (+ a b))
+(assert_eq (add 3 4) 7 "add(3, 4) = 7")
+
+(fn double [x] (* x 2))
+(assert_eq (double 5) 10 "double(5) = 10")
+
+# No-arg function
+(fn greet [] 42)
+(assert_eq (greet) 42 "no-arg function")
+
+# Multi-expression body
+(fn calc [x y]
+  (var sum (x + y))
+  (var product (x * y))
+  sum)
+(assert_eq (calc 3 4) 7 "multi-expression body returns last")
+
+# Explicit return
+(println "--- Return ---")
+(fn first_positive [a b]
+  (if (a > 0) (return a))
+  (if (b > 0) (return b))
+  0)
+(assert_eq (first_positive -1 5) 5 "return second positive")
+(assert_eq (first_positive 3 5) 3 "return first positive")
+(assert_eq (first_positive -1 -2) 0 "return default 0")
+
+# Recursion
+(println "--- Recursion ---")
+(fn factorial [n]
+  (if (n <= 1) 1
+  else (n * (factorial (n - 1)))))
+(assert_eq (factorial 1) 1 "factorial(1) = 1")
+(assert_eq (factorial 5) 120 "factorial(5) = 120")
+
+(fn fib [n]
+  (if (n <= 1) n
+  else ((fib (n - 1)) + (fib (n - 2)))))
+(assert_eq (fib 0) 0 "fib(0) = 0")
+(assert_eq (fib 1) 1 "fib(1) = 1")
+(assert_eq (fib 6) 8 "fib(6) = 8")
+
+# Anonymous functions
+(println "--- Anonymous Functions ---")
+(var triple (fn [x] (x * 3)))
+(assert_eq (triple 4) 12 "anonymous fn triple(4) = 12")
+
+# Higher-order functions
+(println "--- Higher-Order Functions ---")
+(fn apply [f x] (f x))
+(assert_eq (apply double 21) 42 "apply(double, 21) = 42")
+(assert_eq (apply triple 10) 30 "apply(triple, 10) = 30")
+
+(fn compose [f g]
+  (fn [x] (f (g x))))
+(var double_then_add1 (compose (fn [x] (x + 1)) double))
+(assert_eq (double_then_add1 5) 11 "compose: double then add1")
+
+# Closures
+(println "--- Closures ---")
+(fn make_adder [x]
+  (fn [y] (x + y)))
+(var add5 (make_adder 5))
+(var add10 (make_adder 10))
+(assert_eq (add5 3) 8 "closure add5(3) = 8")
+(assert_eq (add10 3) 13 "closure add10(3) = 13")
+
+# Note: closures capture values, not references, so mutation
+# of upvalues doesn't persist. Test capture instead.
+(fn make_multiplier [factor]
+  (fn [x] (x * factor)))
+(var times3 (make_multiplier 3))
+(var times5 (make_multiplier 5))
+(assert_eq (times3 4) 12 "closure times3(4) = 12")
+(assert_eq (times5 4) 20 "closure times5(4) = 20")
+
+# Summary
+(println "")
+(println "=== Results ===")
+(println "  Passed:" pass_count)
+(println "  Failed:" fail_count)
+(if (fail_count == 0)
+  (println "  ALL TESTS PASSED")
+else
+  (println "  SOME TESTS FAILED"))

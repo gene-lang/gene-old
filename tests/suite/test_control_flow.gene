@@ -1,0 +1,124 @@
+# test_control_flow.gene — if/elif/else, loop, for-in, break/continue
+
+(var pass_count 0)
+(var fail_count 0)
+
+(fn assert_eq [actual expected label]
+  (if (actual == expected)
+    (do
+      (pass_count += 1)
+      (println "  PASS:" label))
+  else
+    (do
+      (fail_count += 1)
+      (println "  FAIL:" label "- expected" expected "got" actual))))
+
+(fn assert_true [val label]
+  (assert_eq val true label))
+
+(println "=== test_control_flow.gene ===")
+
+# If/else
+(println "--- If/Else ---")
+(assert_eq (if true 1 else 2) 1 "if true => 1")
+(assert_eq (if false 1 else 2) 2 "if false => 2")
+(assert_eq (if true 42) 42 "if true => 42")
+
+# If as expression
+(var x (if true "yes" else "no"))
+(assert_eq x "yes" "if as expression")
+
+# Elif
+(println "--- Elif ---")
+(var val 5)
+(var result
+  (if (val > 10) "big"
+   elif (val > 3) "medium"
+   else "small"))
+(assert_eq result "medium" "elif chain: medium")
+
+(val = 15)
+(var result2
+  (if (val > 10) "big"
+   elif (val > 3) "medium"
+   else "small"))
+(assert_eq result2 "big" "elif chain: big")
+
+(val = 1)
+(var result3
+  (if (val > 10) "big"
+   elif (val > 3) "medium"
+   else "small"))
+(assert_eq result3 "small" "elif chain: small")
+
+# Nested if
+(println "--- Nested If ---")
+(assert_eq
+  (if true
+    (if false 1 else 2)
+  else 3)
+  2 "nested if")
+
+# Loop with break
+(println "--- Loop/Break ---")
+(var count 0)
+(loop
+  (count += 1)
+  (if (count >= 5) (break)))
+(assert_eq count 5 "loop breaks at 5")
+
+# Loop with continue
+(println "--- Loop/Continue ---")
+(var sum 0)
+(var i 0)
+(loop
+  (i += 1)
+  (if (i > 10) (break))
+  (if ((i % 2) == 0) (continue))
+  (sum += i))
+(assert_eq sum 25 "sum of odd 1-10 = 25")
+
+# For-in array
+(println "--- For-in ---")
+(var total 0)
+(for x in [10 20 30]
+  (total += x))
+(assert_eq total 60 "for-in sum = 60")
+
+# For-in collecting
+(var items [])
+(for x in [1 2 3 4 5]
+  (if (x > 3)
+    (do)))  # just iterate
+(var counted 0)
+(for x in [1 2 3 4 5]
+  (counted += 1))
+(assert_eq counted 5 "for-in counted 5 items")
+
+# For-in nested
+(println "--- Nested For-in ---")
+(var product_sum 0)
+(for a in [1 2 3]
+  (for b in [10 20]
+    (product_sum += (a * b))))
+(assert_eq product_sum 180 "nested for sum = 180")
+
+# Loop counter pattern
+(println "--- Loop Counter ---")
+(var n 0)
+(var factorial 1)
+(loop
+  (n += 1)
+  (factorial *= n)
+  (if (n >= 5) (break)))
+(assert_eq factorial 120 "loop factorial(5) = 120")
+
+# Summary
+(println "")
+(println "=== Results ===")
+(println "  Passed:" pass_count)
+(println "  Failed:" fail_count)
+(if (fail_count == 0)
+  (println "  ALL TESTS PASSED")
+else
+  (println "  SOME TESTS FAILED"))
