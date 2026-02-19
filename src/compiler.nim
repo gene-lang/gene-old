@@ -41,6 +41,21 @@ proc runtimeSym(m: AirModule; name: string): int =
   discard m.internSymbol(name)
   internSymbol(name)
 
+proc ensureToolSchema(m: AirModule; toolName: string): int =
+  for i, schema in m.toolSchemas:
+    if schema.name == toolName:
+      return i
+
+  m.toolSchemas.add(ToolSchema(
+    name: toolName,
+    requestSchema: "",
+    responseSchema: "",
+    timeoutMs: 30000,
+    retryPolicy: "retries:0",
+    requiredCap: "cap.tool.call:" & toolName
+  ))
+  m.toolSchemas.high
+
 proc parseIntMaybe(s: string; outVal: var int): bool =
   try:
     outVal = parseInt(s)
@@ -806,6 +821,13 @@ proc compileSpecialForm(ctx: FnContext; node: AstNode): bool =
       ctx.emit(OpConstNil)
     ctx.emit(OpYield)
     true
+  of "resume":
+    if items.len > 1:
+      compileExpr(ctx, items[1])
+      ctx.emit(OpResume)
+    else:
+      ctx.emit(OpConstNil)
+    true
   of "import":
     if items.len > 1 and items[1].kind == AkSymbol:
       let sid = runtimeSym(ctx.m, items[1].text)
@@ -839,6 +861,121 @@ proc compileSpecialForm(ctx: FnContext; node: AstNode): bool =
       else:
         ctx.emit(OpConstNil)
       ctx.emit(OpCapExit)
+    else:
+      ctx.emit(OpConstNil)
+    true
+  of "cap_assert":
+    if items.len > 1 and items[1].kind == AkSymbol:
+      let sid = runtimeSym(ctx.m, items[1].text)
+      ctx.emit(OpCapAssert, b = sid.uint32)
+    else:
+      ctx.emit(OpConstNil)
+    true
+  of "quota_set":
+    if items.len > 2:
+      compileExpr(ctx, items[1])
+      compileExpr(ctx, items[2])
+      ctx.emit(OpQuotaSet)
+    else:
+      ctx.emit(OpConstNil)
+    true
+  of "quota_check":
+    if items.len > 2:
+      compileExpr(ctx, items[1])
+      compileExpr(ctx, items[2])
+      ctx.emit(OpQuotaCheck)
+    else:
+      ctx.emit(OpConstNil)
+    true
+  of "checkpoint":
+    ctx.emit(OpCheckpointHint)
+    ctx.emit(OpConstNil)
+    true
+  of "state_save":
+    if items.len > 1:
+      compileExpr(ctx, items[1])
+      ctx.emit(OpStateSave)
+    else:
+      ctx.emit(OpConstNil)
+    true
+  of "state_restore":
+    if items.len > 1:
+      compileExpr(ctx, items[1])
+      ctx.emit(OpStateRestore)
+    else:
+      ctx.emit(OpConstNil)
+    true
+  of "task_scope":
+    let scopeSlot = declareLocal(ctx, "__task_scope_" & $node.line & "_" & $node.col)
+    ctx.emit(OpTaskScopeEnter)
+    ctx.emit(OpStoreLocal, b = scopeSlot.uint32)
+    ctx.emit(OpPop)
+    if items.len > 1:
+      compileBodyExprs(ctx, items[1..^1])
+    else:
+      ctx.emit(OpConstNil)
+    ctx.emit(OpPop)
+    ctx.emit(OpLoadLocal, b = scopeSlot.uint32)
+    ctx.emit(OpTaskJoin)
+    true
+  of "task_spawn":
+    if items.len < 2:
+      ctx.emit(OpConstNil)
+    else:
+      compileExpr(ctx, items[1])
+      for i in 2..<items.len:
+        compileExpr(ctx, items[i])
+      ctx.emit(OpTaskSpawn, c = max(items.len - 2, 0).uint32)
+    true
+  of "task_join":
+    if items.len > 1:
+      compileExpr(ctx, items[1])
+      ctx.emit(OpTaskJoin)
+    else:
+      ctx.emit(OpConstNil)
+    true
+  of "task_cancel":
+    if items.len > 1:
+      compileExpr(ctx, items[1])
+      ctx.emit(OpTaskCancel)
+    else:
+      ctx.emit(OpConstNil)
+    true
+  of "task_deadline":
+    if items.len > 2:
+      compileExpr(ctx, items[1])
+      compileExpr(ctx, items[2])
+      ctx.emit(OpTaskDeadline)
+    else:
+      ctx.emit(OpConstNil)
+    true
+  of "tool_call":
+    if items.len > 2 and items[1].kind == AkSymbol:
+      let schemaId = ensureToolSchema(ctx.m, items[1].text)
+      ctx.emit(OpToolPrep, b = schemaId.uint32)
+      compileExpr(ctx, items[2])
+      ctx.emit(OpToolCall)
+    else:
+      ctx.emit(OpConstNil)
+    true
+  of "tool_await":
+    if items.len > 1:
+      compileExpr(ctx, items[1])
+      ctx.emit(OpToolAwait)
+    else:
+      ctx.emit(OpConstNil)
+    true
+  of "tool_unwrap":
+    if items.len > 1:
+      compileExpr(ctx, items[1])
+      ctx.emit(OpToolResultUnwrap)
+    else:
+      ctx.emit(OpConstNil)
+    true
+  of "tool_retry":
+    if items.len > 1:
+      compileExpr(ctx, items[1])
+      ctx.emit(OpToolRetry)
     else:
       ctx.emit(OpConstNil)
     true

@@ -100,6 +100,9 @@ type
     state*: FutureState
     value*: Value
     error*: Value
+    toolSchemaId*: int
+    toolArgs*: Value
+    toolIdempotencyKey*: string
 
   GeneratorState* = enum
     GsPending
@@ -112,6 +115,16 @@ type
     fnValue*: Value
     args*: seq[Value]
     lastValue*: Value
+    started*: bool
+    finished*: bool
+    fnIndex*: int
+    ip*: int
+    stack*: seq[Value]
+    locals*: seq[Value]
+    upvalues*: OrderedTable[string, Value]
+    handlerCatchIps*: seq[int]
+    handlerStackDepths*: seq[int]
+    selfVal*: Value
 
   ErrorObj* = ref object of HeapObject
     message*: string
@@ -129,6 +142,12 @@ proc initRuntimeTables() =
 proc retainRoot[T: HeapObject](obj: T): T =
   gHeapRoots.add(obj)
   result = obj
+
+proc retainHeapObject*(obj: HeapObject) =
+  gHeapRoots.add(obj)
+
+proc heapObjectCount*(): int =
+  gHeapRoots.len
 
 proc packImmediate(tag: ImmediateTag; payload: uint64): Value {.inline.} =
   Value(raw: QNaNMask or (uint64(tag) shl TagShift) or (payload and PayloadMask))
@@ -307,11 +326,27 @@ proc newInstanceValue*(cls: Value): Value =
   valueFromPtr(obj)
 
 proc newFutureResolvedValue*(value: Value): Value =
-  let obj = retainRoot(FutureObj(kind: HkFuture, state: FsResolved, value: value, error: valueNil()))
+  let obj = retainRoot(FutureObj(
+    kind: HkFuture,
+    state: FsResolved,
+    value: value,
+    error: valueNil(),
+    toolSchemaId: -1,
+    toolArgs: valueNil(),
+    toolIdempotencyKey: ""
+  ))
   valueFromPtr(obj)
 
 proc newFutureRejectedValue*(err: Value): Value =
-  let obj = retainRoot(FutureObj(kind: HkFuture, state: FsRejected, value: valueNil(), error: err))
+  let obj = retainRoot(FutureObj(
+    kind: HkFuture,
+    state: FsRejected,
+    value: valueNil(),
+    error: err,
+    toolSchemaId: -1,
+    toolArgs: valueNil(),
+    toolIdempotencyKey: ""
+  ))
   valueFromPtr(obj)
 
 proc newGeneratorValue*(fnValue: Value; args: seq[Value]): Value =
@@ -320,7 +355,17 @@ proc newGeneratorValue*(fnValue: Value; args: seq[Value]): Value =
     state: GsPending,
     fnValue: fnValue,
     args: args,
-    lastValue: valueNil()
+    lastValue: valueNil(),
+    started: false,
+    finished: false,
+    fnIndex: -1,
+    ip: 0,
+    stack: @[],
+    locals: @[],
+    upvalues: initOrderedTable[string, Value](),
+    handlerCatchIps: @[],
+    handlerStackDepths: @[],
+    selfVal: valueNil()
   ))
   valueFromPtr(obj)
 
@@ -544,6 +589,8 @@ proc getMember*(target: Value; name: string): Value =
       case name
       of "state": newStringValue($g.state)
       of "last": g.lastValue
+      of "done": valueBool(g.finished or g.state == GsDone)
+      of "ip": valueInt(g.ip)
       else: valueNil()
     of HkKeyword:
       if name == "name": newStringValue(asKeywordObj(target).name) else: valueNil()

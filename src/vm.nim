@@ -1,4 +1,4 @@
-import std/[tables, strutils, times, math, sets]
+import std/[tables, strutils, times, math, sets, json, hashes, os, sequtils]
 import ./types
 import ./ir
 
@@ -8,7 +8,59 @@ type
   VmThrow* = ref object of CatchableError
     value*: Value
 
-  NativeProc* = proc(args: seq[Value]): Value {.nimcall.}
+  NativeProc* = proc(vm: var Vm; args: seq[Value]): Value {.nimcall.}
+
+  TaskState* = enum
+    TsReady
+    TsRunning
+    TsDone
+    TsCancelled
+    TsFailed
+
+  TaskNode* = ref object
+    id*: int
+    parent*: int
+    children*: seq[int]
+    state*: TaskState
+    deadlineUnix*: int64
+    cancelToken*: uint64
+    result*: Value
+    error*: Value
+    fnValue*: Value
+    args*: seq[Value]
+
+  ToolCallRequest* = object
+    toolName*: string
+    args*: Value
+    idempotencyKey*: string
+    retryPolicy*: string
+    maxAttempts*: int
+    attempt*: int
+    timeoutMs*: int
+    schemaId*: int
+
+  ToolCallResult* = object
+    ok*: bool
+    value*: Value
+    error*: Value
+
+  ToolHandler* = proc(vm: var Vm; req: ToolCallRequest): ToolCallResult {.nimcall.}
+
+  ToolRegistration* = object
+    schema*: ToolSchema
+    handler*: ToolHandler
+
+  VmQuotaKind* = enum
+    QkCpuSteps
+    QkHeapObjects
+    QkWallClockMs
+    QkToolCalls
+
+  VmQuotaConfig* = object
+    cpuStepLimit*: int64
+    heapObjectLimit*: int64
+    wallClockMsLimit*: int64
+    toolCallLimit*: int64
 
   NativeEntry* = object
     name*: string
@@ -35,6 +87,21 @@ type
     module*: AirModule
     globals*: OrderedTable[int, Value]
     natives*: OrderedTable[int, NativeEntry]
+    tasks*: OrderedTable[int, TaskNode]
+    taskScopeStack*: seq[int]
+    currentTaskId*: int
+    nextTaskId*: int
+    checkpointSlots*: OrderedTable[int, seq[byte]]
+    toolRegistry*: OrderedTable[string, ToolRegistration]
+    toolIdempotencyCache*: OrderedTable[string, Value]
+    preparedToolSchemaId*: int
+    pendingToolTicket*: int
+    nextToolTicket*: int
+    quota*: VmQuotaConfig
+    cpuStepsUsed*: int64
+    toolCallsUsed*: int64
+    startedAtMs*: int64
+    rootCapabilities*: HashSet[string]
     deterministic*: bool
     rngState*: uint64
     diagnostics*: seq[string]
@@ -45,6 +112,26 @@ proc newVm*(): Vm =
     module: nil,
     globals: initOrderedTable[int, Value](),
     natives: initOrderedTable[int, NativeEntry](),
+    tasks: initOrderedTable[int, TaskNode](),
+    taskScopeStack: @[],
+    currentTaskId: 0,
+    nextTaskId: 1,
+    checkpointSlots: initOrderedTable[int, seq[byte]](),
+    toolRegistry: initOrderedTable[string, ToolRegistration](),
+    toolIdempotencyCache: initOrderedTable[string, Value](),
+    preparedToolSchemaId: -1,
+    pendingToolTicket: -1,
+    nextToolTicket: 1,
+    quota: VmQuotaConfig(
+      cpuStepLimit: -1,
+      heapObjectLimit: -1,
+      wallClockMsLimit: -1,
+      toolCallLimit: -1
+    ),
+    cpuStepsUsed: 0,
+    toolCallsUsed: 0,
+    startedAtMs: epochTime().int64 * 1000,
+    rootCapabilities: initHashSet[string](),
     deterministic: false,
     rngState: 0x9E3779B97F4A7C15'u64,
     diagnostics: @[],
@@ -82,6 +169,27 @@ proc getGlobal(vm: Vm; symId: int): Value =
 
 proc setGlobal(vm: var Vm; symId: int; value: Value) =
   vm.globals[symId] = value
+
+proc setQuotaLimit*(vm: var Vm; kind: VmQuotaKind; value: int64) =
+  case kind
+  of QkCpuSteps:
+    vm.quota.cpuStepLimit = value
+  of QkHeapObjects:
+    vm.quota.heapObjectLimit = value
+  of QkWallClockMs:
+    vm.quota.wallClockMsLimit = value
+  of QkToolCalls:
+    vm.quota.toolCallLimit = value
+
+proc grantCapability*(vm: var Vm; cap: string) =
+  vm.rootCapabilities.incl(cap)
+
+proc revokeCapability*(vm: var Vm; cap: string) =
+  if cap in vm.rootCapabilities:
+    vm.rootCapabilities.excl(cap)
+
+proc clearCapabilities*(vm: var Vm) =
+  vm.rootCapabilities.clear()
 
 proc instantiateFunctionValue(vm: var Vm; fnIdx: int; frame: FrameCtx): Value =
   if vm.module == nil or fnIdx < 0 or fnIdx >= vm.module.functions.len:
@@ -138,6 +246,8 @@ proc asIntDefault(v: Value; defaultVal: int): int =
     return int(asFloat(v))
   defaultVal
 
+proc resumeValue*(vm: var Vm; value: Value): Value
+
 proc iteratorNew(iterable: Value): Value =
   let it = newMapValue()
   mapSet(it, newStringValue("__index"), valueInt(0))
@@ -162,10 +272,17 @@ proc iteratorNew(iterable: Value): Value =
     mapSet(it, newStringValue("__kind"), newStringValue("string"))
     return it
 
+  let g = asGeneratorObj(iterable)
+  if g != nil:
+    mapSet(it, newStringValue("__kind"), newStringValue("generator"))
+    mapSet(it, newStringValue("__has_buffer"), valueBool(false))
+    mapSet(it, newStringValue("__buffer"), valueNil())
+    return it
+
   mapSet(it, newStringValue("__kind"), newStringValue("empty"))
   it
 
-proc iteratorHasNext(it: Value): bool =
+proc iteratorHasNext(vm: var Vm; it: Value): bool =
   let kind = mapGet(it, newStringValue("__kind")).asString()
   let idx = asIntDefault(mapGet(it, newStringValue("__index")), 0)
 
@@ -180,10 +297,23 @@ proc iteratorHasNext(it: Value): bool =
   of "string":
     let s = asStringObj(mapGet(it, newStringValue("__data")))
     s != nil and idx < s.value.len
+  of "generator":
+    if isBool(mapGet(it, newStringValue("__has_buffer"))) and asBool(mapGet(it, newStringValue("__has_buffer"))):
+      return true
+    let gval = mapGet(it, newStringValue("__data"))
+    let g = asGeneratorObj(gval)
+    if g == nil or g.finished or g.state == GsDone:
+      return false
+    let nextValue = resumeValue(vm, gval)
+    if (isNil(nextValue) and (g.finished or g.state == GsDone)):
+      return false
+    mapSet(it, newStringValue("__buffer"), nextValue)
+    mapSet(it, newStringValue("__has_buffer"), valueBool(true))
+    true
   else:
     false
 
-proc iteratorNext(it: Value): Value =
+proc iteratorNext(vm: var Vm; it: Value): Value =
   let kind = mapGet(it, newStringValue("__kind")).asString()
   let idx = asIntDefault(mapGet(it, newStringValue("__index")), 0)
   mapSet(it, newStringValue("__index"), valueInt(idx + 1))
@@ -207,6 +337,14 @@ proc iteratorNext(it: Value): Value =
     if s == nil or idx < 0 or idx >= s.value.len:
       return valueNil()
     newStringValue($s.value[idx])
+  of "generator":
+    if isBool(mapGet(it, newStringValue("__has_buffer"))) and asBool(mapGet(it, newStringValue("__has_buffer"))):
+      let buffered = mapGet(it, newStringValue("__buffer"))
+      mapSet(it, newStringValue("__has_buffer"), valueBool(false))
+      mapSet(it, newStringValue("__buffer"), valueNil())
+      return buffered
+    let gval = mapGet(it, newStringValue("__data"))
+    resumeValue(vm, gval)
   else:
     valueNil()
 
@@ -219,37 +357,956 @@ proc xorshift64(state: var uint64): uint64 =
   x
 
 proc hasCapability(vm: Vm; cap: string): bool =
-  if vm.capabilityStack.len == 0:
+  if cap.len == 0:
     return true
-  cap in vm.capabilityStack[^1]
 
-proc executeFunction(vm: var Vm; fnObj: FunctionObj; args: seq[Value]; selfValue: Value = valueNil()): Value =
+  var activeCaps = vm.rootCapabilities
+  if vm.capabilityStack.len > 0:
+    activeCaps = vm.capabilityStack[^1]
+
+  if cap in activeCaps:
+    return true
+
+  # Prefix-style wildcard support: cap.tool.call:* grants all tool calls.
+  let wildIdx = cap.rfind(':')
+  if wildIdx >= 0:
+    let wildcard = cap[0..wildIdx] & "*"
+    if wildcard in activeCaps:
+      return true
+
+  false
+
+proc nowMs(): int64 =
+  epochTime().int64 * 1000
+
+proc checkQuota(vm: var Vm) =
+  inc(vm.cpuStepsUsed)
+  if vm.quota.cpuStepLimit >= 0 and vm.cpuStepsUsed > vm.quota.cpuStepLimit:
+    vm.quota.cpuStepLimit = vm.cpuStepsUsed + 64
+    raiseVmValue(newErrorValue("quota exceeded: cpu steps"))
+
+  if vm.quota.heapObjectLimit >= 0 and heapObjectCount().int64 > vm.quota.heapObjectLimit:
+    vm.quota.heapObjectLimit = heapObjectCount().int64 + 64
+    raiseVmValue(newErrorValue("quota exceeded: heap objects"))
+
+  if vm.quota.wallClockMsLimit >= 0:
+    let elapsed = nowMs() - vm.startedAtMs
+    if elapsed > vm.quota.wallClockMsLimit:
+      vm.quota.wallClockMsLimit = elapsed + 64
+      raiseVmValue(newErrorValue("quota exceeded: wall clock"))
+
+proc encodeHandlers(frame: FrameCtx; catchIps: var seq[int]; depths: var seq[int]) =
+  catchIps = @[]
+  depths = @[]
+  for h in frame.handlers:
+    catchIps.add(h.catchIp)
+    depths.add(h.stackDepth)
+
+proc decodeHandlers(catchIps: seq[int]; depths: seq[int]): seq[ExceptionHandler] =
+  result = @[]
+  let n = min(catchIps.len, depths.len)
+  for i in 0..<n:
+    result.add(ExceptionHandler(catchIp: catchIps[i], stackDepth: depths[i]))
+
+proc makeFrameFromGenerator(vm: var Vm; gen: GeneratorObj): FrameCtx =
+  let fnObj = asFunctionObj(gen.fnValue)
+  if fnObj == nil or vm.module == nil or fnObj.fnIndex < 0 or fnObj.fnIndex >= vm.module.functions.len:
+    return FrameCtx(
+      fnMeta: nil,
+      fnObj: nil,
+      ip: 0,
+      stack: @[],
+      locals: @[],
+      selfVal: valueNil(),
+      upvalues: initOrderedTable[string, Value](),
+      handlers: @[]
+    )
+
+  let fnMeta = vm.module.functions[fnObj.fnIndex]
+  result = FrameCtx(
+    fnMeta: fnMeta,
+    fnObj: fnObj,
+    ip: gen.ip,
+    stack: gen.stack,
+    locals: gen.locals,
+    selfVal: gen.selfVal,
+    upvalues: initOrderedTable[string, Value](),
+    handlers: decodeHandlers(gen.handlerCatchIps, gen.handlerStackDepths)
+  )
+
+  for k, v in gen.upvalues:
+    result.upvalues[k] = v
+
+proc persistFrameToGenerator(gen: GeneratorObj; frame: FrameCtx) =
+  if gen == nil:
+    return
+  gen.ip = frame.ip
+  gen.stack = frame.stack
+  gen.locals = frame.locals
+  gen.selfVal = frame.selfVal
+  gen.upvalues = initOrderedTable[string, Value]()
+  for k, v in frame.upvalues:
+    gen.upvalues[k] = v
+  encodeHandlers(frame, gen.handlerCatchIps, gen.handlerStackDepths)
+
+proc requireCapability(vm: Vm; cap: string; context: string) =
+  if cap.len == 0:
+    return
+  if not hasCapability(vm, cap):
+    raiseVmValue(newErrorValue("capability denied (" & context & "): " & cap))
+
+proc parseQuotaKind(value: Value): VmQuotaKind =
+  let s = value.asString().toLowerAscii()
+  case s
+  of "cpu", "steps", "cpusteps":
+    QkCpuSteps
+  of "heap", "memory", "heapobjects":
+    QkHeapObjects
+  of "time", "wall", "wallclock":
+    QkWallClockMs
+  of "tool", "toolcalls":
+    QkToolCalls
+  else:
+    QkCpuSteps
+
+proc quotaCurrent(vm: Vm; kind: VmQuotaKind): int64 =
+  case kind
+  of QkCpuSteps:
+    vm.cpuStepsUsed
+  of QkHeapObjects:
+    heapObjectCount().int64
+  of QkWallClockMs:
+    nowMs() - vm.startedAtMs
+  of QkToolCalls:
+    vm.toolCallsUsed
+
+proc quotaLimit(vm: Vm; kind: VmQuotaKind): int64 =
+  case kind
+  of QkCpuSteps:
+    vm.quota.cpuStepLimit
+  of QkHeapObjects:
+    vm.quota.heapObjectLimit
+  of QkWallClockMs:
+    vm.quota.wallClockMsLimit
+  of QkToolCalls:
+    vm.quota.toolCallLimit
+
+proc newTaskNode(vm: var Vm; parent: int; fnValue: Value; args: seq[Value]): TaskNode =
+  let id = vm.nextTaskId
+  inc(vm.nextTaskId)
+  result = TaskNode(
+    id: id,
+    parent: parent,
+    children: @[],
+    state: TsReady,
+    deadlineUnix: -1,
+    cancelToken: cast[uint64](id) xor vm.rngState,
+    result: valueNil(),
+    error: valueNil(),
+    fnValue: fnValue,
+    args: args
+  )
+  vm.tasks[id] = result
+  if parent > 0 and vm.tasks.hasKey(parent):
+    vm.tasks[parent].children.add(id)
+
+proc currentSupervisor(vm: Vm): int =
+  if vm.taskScopeStack.len > 0:
+    vm.taskScopeStack[^1]
+  else:
+    vm.currentTaskId
+
+proc cancelTaskRecursive(vm: var Vm; taskId: int) =
+  if not vm.tasks.hasKey(taskId):
+    return
+  let task = vm.tasks[taskId]
+  if task.state in {TsDone, TsFailed, TsCancelled}:
+    return
+  task.state = TsCancelled
+  task.error = newErrorValue("task cancelled")
+  for childId in task.children:
+    cancelTaskRecursive(vm, childId)
+
+proc runTaskNow(vm: var Vm; task: TaskNode) =
+  if task == nil:
+    return
+  if task.state == TsCancelled:
+    return
+  if task.deadlineUnix >= 0 and nowMs() > task.deadlineUnix:
+    task.state = TsCancelled
+    task.error = newErrorValue("task deadline exceeded")
+    return
+
+  task.state = TsRunning
+  let previousTaskId = vm.currentTaskId
+  vm.currentTaskId = task.id
+  try:
+    task.result = invokeValue(vm, task.fnValue, task.args)
+    if task.state != TsCancelled:
+      task.state = TsDone
+  except VmThrow as thrown:
+    task.state = TsFailed
+    task.error = thrown.value
+  finally:
+    vm.currentTaskId = previousTaskId
+
+proc joinTask(vm: var Vm; taskId: int): Value =
+  if taskId <= 0 or not vm.tasks.hasKey(taskId):
+    return valueNil()
+  let task = vm.tasks[taskId]
+  if task.state == TsReady:
+    if isNil(task.fnValue):
+      var last = valueNil()
+      for childId in task.children:
+        last = joinTask(vm, childId)
+      task.result = last
+      task.state = TsDone
+    else:
+      runTaskNow(vm, task)
+  case task.state
+  of TsDone:
+    task.result
+  of TsCancelled:
+    raiseVmValue(task.error)
+  of TsFailed:
+    raiseVmValue(task.error)
+  of TsReady, TsRunning:
+    valueNil()
+
+proc registerTool*(vm: var Vm; schema: ToolSchema; handler: ToolHandler) =
+  vm.toolRegistry[schema.name] = ToolRegistration(schema: schema, handler: handler)
+
+proc parseRetryCount(policy: string): int =
+  let normalized = policy.strip().toLowerAscii()
+  if normalized.len == 0:
+    return 0
+  if normalized.startsWith("retries:"):
+    try:
+      return parseInt(normalized.split(':')[1].strip())
+    except ValueError:
+      return 0
+  try:
+    parseInt(normalized)
+  except ValueError:
+    0
+
+proc validateToolArgs(schema: ToolSchema; args: Value): string =
+  let request = schema.requestSchema.strip()
+  if request.len == 0:
+    return ""
+  let mapArgs = asMapObj(args)
+  if mapArgs == nil:
+    return "tool args must be a map"
+
+  let normalized = request.toLowerAscii()
+  if normalized.startsWith("required:"):
+    let fields = normalized["required:".len .. ^1].split(',')
+    for f in fields:
+      let name = f.strip()
+      if name.len == 0:
+        continue
+      if not mapArgs.entries.hasKey(name):
+        return "missing required tool arg: " & name
+  ""
+
+proc buildToolIdempotencyKey(toolName: string; args: Value): string =
+  toolName & "#" & $hash(args.toDebugString())
+
+proc attachToolFutureMeta(futureVal: Value; schemaId: int; args: Value; idempotencyKey: string): Value =
+  let fut = asFutureObj(futureVal)
+  if fut != nil:
+    fut.toolSchemaId = schemaId
+    fut.toolArgs = args
+    fut.toolIdempotencyKey = idempotencyKey
+  futureVal
+
+proc executeToolCall(vm: var Vm; schemaId: int; args: Value): Value =
+  if vm.module == nil or schemaId < 0 or schemaId >= vm.module.toolSchemas.len:
+    return attachToolFutureMeta(newFutureRejectedValue(newErrorValue("invalid tool schema id")), schemaId, args, "")
+
+  let moduleSchema = vm.module.toolSchemas[schemaId]
+  let registration =
+    if vm.toolRegistry.hasKey(moduleSchema.name):
+      vm.toolRegistry[moduleSchema.name]
+    else:
+      ToolRegistration(schema: moduleSchema, handler: nil)
+  let schema = registration.schema
+
+  let cap = if schema.requiredCap.len > 0: schema.requiredCap else: "cap.tool.call:" & schema.name
+  requireCapability(vm, cap, "tool.call")
+
+  let validationErr = validateToolArgs(schema, args)
+  if validationErr.len > 0:
+    return attachToolFutureMeta(newFutureRejectedValue(newErrorValue(validationErr)), schemaId, args, "")
+
+  if vm.quota.toolCallLimit >= 0 and vm.toolCallsUsed >= vm.quota.toolCallLimit:
+    return attachToolFutureMeta(newFutureRejectedValue(newErrorValue("quota exceeded: tool calls")), schemaId, args, "")
+
+  if registration.handler == nil:
+    return attachToolFutureMeta(newFutureRejectedValue(newErrorValue("tool handler not registered: " & schema.name)), schemaId, args, "")
+
+  var idemKey = ""
+  let argMap = asMapObj(args)
+  if argMap != nil and argMap.entries.hasKey("idempotency_key"):
+    idemKey = argMap.entries["idempotency_key"].asString()
+  if idemKey.len == 0:
+    idemKey = buildToolIdempotencyKey(schema.name, args)
+
+  if vm.toolIdempotencyCache.hasKey(idemKey):
+    return attachToolFutureMeta(newFutureResolvedValue(vm.toolIdempotencyCache[idemKey]), schemaId, args, idemKey)
+
+  var req = ToolCallRequest(
+    toolName: schema.name,
+    args: args,
+    idempotencyKey: idemKey,
+    retryPolicy: schema.retryPolicy,
+    maxAttempts: max(1, parseRetryCount(schema.retryPolicy) + 1),
+    attempt: 0,
+    timeoutMs: schema.timeoutMs,
+    schemaId: schemaId
+  )
+
+  var lastErr = valueNil()
+  for attempt in 1..req.maxAttempts:
+    req.attempt = attempt
+    inc(vm.toolCallsUsed)
+    let res = registration.handler(vm, req)
+    if res.ok:
+      vm.toolIdempotencyCache[idemKey] = res.value
+      return attachToolFutureMeta(newFutureResolvedValue(res.value), schemaId, args, idemKey)
+    lastErr = if isNil(res.error): newErrorValue("tool call failed") else: res.error
+
+  attachToolFutureMeta(newFutureRejectedValue(lastErr), schemaId, args, idemKey)
+
+type
+  ObjEncodeCtx = object
+    objToId: Table[pointer, int]
+    objects: seq[JsonNode]
+
+  ObjDecodeCtx = object
+    objects: seq[HeapObject]
+    nodes: seq[JsonNode]
+
+proc encodeValue(v: Value; ctx: var ObjEncodeCtx): JsonNode
+proc decodeValue(vm: var Vm; node: JsonNode; ctx: var ObjDecodeCtx): Value
+
+proc encodeObject(obj: HeapObject; ctx: var ObjEncodeCtx): int =
+  if obj == nil:
+    return -1
+  let p = cast[pointer](obj)
+  if ctx.objToId.hasKey(p):
+    return ctx.objToId[p]
+
+  let id = ctx.objects.len
+  ctx.objToId[p] = id
+  var entry = %*{
+    "id": id,
+    "kind": $obj.kind
+  }
+  ctx.objects.add(entry)
+
+  case obj.kind
+  of HkString:
+    entry["value"] = %asStringObj(valueFromPtr(obj)).value
+  of HkKeyword:
+    entry["name"] = %asKeywordObj(valueFromPtr(obj)).name
+  of HkArray:
+    var items = newJArray()
+    for it in asArrayObj(valueFromPtr(obj)).items:
+      items.add(encodeValue(it, ctx))
+    entry["items"] = items
+  of HkMap:
+    var m = newJObject()
+    for k, v in asMapObj(valueFromPtr(obj)).entries:
+      m[k] = encodeValue(v, ctx)
+    entry["entries"] = m
+  of HkGene:
+    let g = asGeneObj(valueFromPtr(obj))
+    entry["geneType"] = encodeValue(g.geneType, ctx)
+    var props = newJObject()
+    for k, v in g.props:
+      props[k] = encodeValue(v, ctx)
+    entry["props"] = props
+    var children = newJArray()
+    for child in g.children:
+      children.add(encodeValue(child, ctx))
+    entry["children"] = children
+  of HkFunction:
+    let fn = asFunctionObj(valueFromPtr(obj))
+    entry["name"] = %fn.name
+    entry["fnIndex"] = %fn.fnIndex
+    entry["arity"] = %fn.arity
+    entry["paramNames"] = %fn.paramNames
+    entry["paramTypes"] = %fn.paramTypes
+    entry["upvalueNames"] = %fn.upvalueNames
+    var ups = newJObject()
+    for k, v in fn.upvalues:
+      ups[k] = encodeValue(v, ctx)
+    entry["upvalues"] = ups
+    var flags = newJArray()
+    for fl in fn.flags:
+      flags.add(%($fl))
+    entry["flags"] = flags
+  of HkNativeFn:
+    let n = asNativeFunctionObj(valueFromPtr(obj))
+    entry["name"] = %n.name
+    entry["arity"] = %n.arity
+  of HkClass:
+    let cls = asClassObj(valueFromPtr(obj))
+    entry["name"] = %cls.name
+    entry["superClass"] = encodeValue(cls.superClass, ctx)
+    entry["ctor"] = encodeValue(cls.ctor, ctx)
+    var methods = newJObject()
+    for k, v in cls.methods:
+      methods[k] = encodeValue(v, ctx)
+    entry["methods"] = methods
+  of HkInstance:
+    let inst = asInstanceObj(valueFromPtr(obj))
+    entry["cls"] = encodeValue(inst.cls, ctx)
+    var fields = newJObject()
+    for k, v in inst.fields:
+      fields[k] = encodeValue(v, ctx)
+    entry["fields"] = fields
+  of HkFuture:
+    let fut = asFutureObj(valueFromPtr(obj))
+    entry["state"] = %($fut.state)
+    entry["value"] = encodeValue(fut.value, ctx)
+    entry["error"] = encodeValue(fut.error, ctx)
+    entry["toolSchemaId"] = %fut.toolSchemaId
+    entry["toolArgs"] = encodeValue(fut.toolArgs, ctx)
+    entry["toolIdempotencyKey"] = %fut.toolIdempotencyKey
+  of HkGenerator:
+    let g = asGeneratorObj(valueFromPtr(obj))
+    entry["state"] = %($g.state)
+    entry["fnValue"] = encodeValue(g.fnValue, ctx)
+    entry["args"] = %g.args.mapIt(encodeValue(it, ctx))
+    entry["lastValue"] = encodeValue(g.lastValue, ctx)
+    entry["started"] = %g.started
+    entry["finished"] = %g.finished
+    entry["fnIndex"] = %g.fnIndex
+    entry["ip"] = %g.ip
+    entry["stack"] = %g.stack.mapIt(encodeValue(it, ctx))
+    entry["locals"] = %g.locals.mapIt(encodeValue(it, ctx))
+    var ups = newJObject()
+    for k, v in g.upvalues:
+      ups[k] = encodeValue(v, ctx)
+    entry["upvalues"] = ups
+    entry["handlerCatchIps"] = %g.handlerCatchIps
+    entry["handlerStackDepths"] = %g.handlerStackDepths
+    entry["selfVal"] = encodeValue(g.selfVal, ctx)
+  of HkError:
+    let e = asErrorObj(valueFromPtr(obj))
+    entry["message"] = %e.message
+
+  ctx.objects[id] = entry
+  id
+
+proc encodeValue(v: Value; ctx: var ObjEncodeCtx): JsonNode =
+  case valueKind(v)
+  of VkNil:
+    %*{"t": "nil"}
+  of VkBool:
+    %*{"t": "bool", "v": asBool(v)}
+  of VkInt:
+    %*{"t": "int", "v": asInt(v)}
+  of VkNumber:
+    %*{"t": "num", "v": asFloat(v)}
+  of VkSymbol:
+    %*{"t": "sym", "v": asSymbolName(v)}
+  of VkPointer:
+    let id = encodeObject(asHeapObject(v), ctx)
+    %*{"t": "obj", "id": id}
+  of VkUnknown:
+    %*{"t": "nil"}
+
+proc decodeObject(vm: var Vm; idx: int; ctx: var ObjDecodeCtx): HeapObject =
+  if idx < 0 or idx >= ctx.objects.len:
+    return nil
+  ctx.objects[idx]
+
+proc initPlaceholder(kindName: string): HeapObject =
+  case kindName
+  of $HkString:
+    StringObj(kind: HkString, value: "")
+  of $HkKeyword:
+    KeywordObj(kind: HkKeyword, name: "")
+  of $HkArray:
+    ArrayObj(kind: HkArray, items: @[])
+  of $HkMap:
+    MapObj(kind: HkMap, entries: initOrderedTable[string, Value]())
+  of $HkGene:
+    GeneObj(kind: HkGene, geneType: valueNil(), props: initOrderedTable[string, Value](), children: @[])
+  of $HkFunction:
+    FunctionObj(
+      kind: HkFunction,
+      name: "",
+      fnIndex: -1,
+      arity: 0,
+      paramNames: @[],
+      paramTypes: @[],
+      upvalueNames: @[],
+      upvalues: initOrderedTable[string, Value](),
+      flags: {}
+    )
+  of $HkNativeFn:
+    NativeFnObj(kind: HkNativeFn, name: "", arity: 0)
+  of $HkClass:
+    ClassObj(kind: HkClass, name: "", superClass: valueNil(), methods: initOrderedTable[string, Value](), ctor: valueNil())
+  of $HkInstance:
+    InstanceObj(kind: HkInstance, cls: valueNil(), fields: initOrderedTable[string, Value]())
+  of $HkFuture:
+    FutureObj(
+      kind: HkFuture,
+      state: FsPending,
+      value: valueNil(),
+      error: valueNil(),
+      toolSchemaId: -1,
+      toolArgs: valueNil(),
+      toolIdempotencyKey: ""
+    )
+  of $HkGenerator:
+    GeneratorObj(
+      kind: HkGenerator,
+      state: GsPending,
+      fnValue: valueNil(),
+      args: @[],
+      lastValue: valueNil(),
+      started: false,
+      finished: false,
+      fnIndex: -1,
+      ip: 0,
+      stack: @[],
+      locals: @[],
+      upvalues: initOrderedTable[string, Value](),
+      handlerCatchIps: @[],
+      handlerStackDepths: @[],
+      selfVal: valueNil()
+    )
+  of $HkError:
+    ErrorObj(kind: HkError, message: "")
+  else:
+    nil
+
+proc decodeValue(vm: var Vm; node: JsonNode; ctx: var ObjDecodeCtx): Value =
+  let t = node["t"].getStr()
+  case t
+  of "nil":
+    valueNil()
+  of "bool":
+    valueBool(node["v"].getBool())
+  of "int":
+    valueInt(node["v"].getBiggestInt())
+  of "num":
+    valueFloat(node["v"].getFloat())
+  of "sym":
+    valueSymbol(node["v"].getStr())
+  of "obj":
+    let id = node["id"].getInt()
+    let obj = decodeObject(vm, id, ctx)
+    if obj == nil: valueNil() else: valueFromPtr(obj)
+  else:
+    valueNil()
+
+proc decodeAllObjects(vm: var Vm; ctx: var ObjDecodeCtx) =
+  ctx.objects = newSeq[HeapObject](ctx.nodes.len)
+  for i, node in ctx.nodes:
+    let placeholder = initPlaceholder(node["kind"].getStr())
+    ctx.objects[i] = placeholder
+    if placeholder != nil:
+      retainHeapObject(placeholder)
+
+  for i, node in ctx.nodes:
+    let obj = ctx.objects[i]
+    if obj == nil:
+      continue
+    case obj.kind
+    of HkString:
+      StringObj(obj).value = node["value"].getStr()
+    of HkKeyword:
+      KeywordObj(obj).name = node["name"].getStr()
+    of HkArray:
+      var items: seq[Value] = @[]
+      for it in node["items"]:
+        items.add(decodeValue(vm, it, ctx))
+      ArrayObj(obj).items = items
+    of HkMap:
+      MapObj(obj).entries = initOrderedTable[string, Value]()
+      for k, v in node["entries"]:
+        MapObj(obj).entries[k] = decodeValue(vm, v, ctx)
+    of HkGene:
+      let g = GeneObj(obj)
+      g.geneType = decodeValue(vm, node["geneType"], ctx)
+      g.props = initOrderedTable[string, Value]()
+      for k, v in node["props"]:
+        g.props[k] = decodeValue(vm, v, ctx)
+      g.children = @[]
+      for child in node["children"]:
+        g.children.add(decodeValue(vm, child, ctx))
+    of HkFunction:
+      let fn = FunctionObj(obj)
+      fn.name = node["name"].getStr()
+      fn.fnIndex = node["fnIndex"].getInt()
+      fn.arity = node["arity"].getInt()
+      fn.paramNames = @[]
+      for p in node["paramNames"]:
+        fn.paramNames.add(p.getStr())
+      fn.paramTypes = @[]
+      for p in node["paramTypes"]:
+        fn.paramTypes.add(p.getStr())
+      fn.upvalueNames = @[]
+      for p in node["upvalueNames"]:
+        fn.upvalueNames.add(p.getStr())
+      fn.upvalues = initOrderedTable[string, Value]()
+      for k, v in node["upvalues"]:
+        fn.upvalues[k] = decodeValue(vm, v, ctx)
+      fn.flags = {}
+      for fl in node["flags"]:
+        let s = fl.getStr()
+        case s
+        of $FfAsync: fn.flags.incl(FfAsync)
+        of $FfGenerator: fn.flags.incl(FfGenerator)
+        of $FfMacroLike: fn.flags.incl(FfMacroLike)
+        of $FfMethod: fn.flags.incl(FfMethod)
+        else: discard
+    of HkNativeFn:
+      NativeFnObj(obj).name = node["name"].getStr()
+      NativeFnObj(obj).arity = node["arity"].getInt()
+    of HkClass:
+      let cls = ClassObj(obj)
+      cls.name = node["name"].getStr()
+      cls.superClass = decodeValue(vm, node["superClass"], ctx)
+      cls.ctor = decodeValue(vm, node["ctor"], ctx)
+      cls.methods = initOrderedTable[string, Value]()
+      for k, v in node["methods"]:
+        cls.methods[k] = decodeValue(vm, v, ctx)
+    of HkInstance:
+      let inst = InstanceObj(obj)
+      inst.cls = decodeValue(vm, node["cls"], ctx)
+      inst.fields = initOrderedTable[string, Value]()
+      for k, v in node["fields"]:
+        inst.fields[k] = decodeValue(vm, v, ctx)
+    of HkFuture:
+      let fut = FutureObj(obj)
+      let st = node["state"].getStr()
+      case st
+      of $FsPending: fut.state = FsPending
+      of $FsResolved: fut.state = FsResolved
+      of $FsRejected: fut.state = FsRejected
+      else: fut.state = FsPending
+      fut.value = decodeValue(vm, node["value"], ctx)
+      fut.error = decodeValue(vm, node["error"], ctx)
+      fut.toolSchemaId = if node.hasKey("toolSchemaId"): node["toolSchemaId"].getInt() else: -1
+      fut.toolArgs = if node.hasKey("toolArgs"): decodeValue(vm, node["toolArgs"], ctx) else: valueNil()
+      fut.toolIdempotencyKey = if node.hasKey("toolIdempotencyKey"): node["toolIdempotencyKey"].getStr() else: ""
+    of HkGenerator:
+      let g = GeneratorObj(obj)
+      let st = node["state"].getStr()
+      case st
+      of $GsPending: g.state = GsPending
+      of $GsRunning: g.state = GsRunning
+      of $GsSuspended: g.state = GsSuspended
+      of $GsDone: g.state = GsDone
+      else: g.state = GsPending
+      g.fnValue = decodeValue(vm, node["fnValue"], ctx)
+      g.args = @[]
+      for it in node["args"]:
+        g.args.add(decodeValue(vm, it, ctx))
+      g.lastValue = decodeValue(vm, node["lastValue"], ctx)
+      g.started = node["started"].getBool()
+      g.finished = node["finished"].getBool()
+      g.fnIndex = node["fnIndex"].getInt()
+      g.ip = node["ip"].getInt()
+      g.stack = @[]
+      for it in node["stack"]:
+        g.stack.add(decodeValue(vm, it, ctx))
+      g.locals = @[]
+      for it in node["locals"]:
+        g.locals.add(decodeValue(vm, it, ctx))
+      g.upvalues = initOrderedTable[string, Value]()
+      for k, v in node["upvalues"]:
+        g.upvalues[k] = decodeValue(vm, v, ctx)
+      g.handlerCatchIps = @[]
+      for x in node["handlerCatchIps"]:
+        g.handlerCatchIps.add(x.getInt())
+      g.handlerStackDepths = @[]
+      for x in node["handlerStackDepths"]:
+        g.handlerStackDepths.add(x.getInt())
+      g.selfVal = decodeValue(vm, node["selfVal"], ctx)
+    of HkError:
+      ErrorObj(obj).message = node["message"].getStr()
+
+proc frameToJson(frame: FrameCtx; ctx: var ObjEncodeCtx): JsonNode =
+  var node = newJObject()
+  node["fnIndex"] = %(if frame.fnObj != nil: frame.fnObj.fnIndex else: -1)
+  node["ip"] = %frame.ip
+  node["selfVal"] = encodeValue(frame.selfVal, ctx)
+  node["stack"] = %frame.stack.mapIt(encodeValue(it, ctx))
+  node["locals"] = %frame.locals.mapIt(encodeValue(it, ctx))
+  var ups = newJObject()
+  for k, v in frame.upvalues:
+    ups[k] = encodeValue(v, ctx)
+  node["upvalues"] = ups
+  var cips: seq[int] = @[]
+  var depths: seq[int] = @[]
+  encodeHandlers(frame, cips, depths)
+  node["handlerCatchIps"] = %cips
+  node["handlerStackDepths"] = %depths
+  node
+
+proc hydrateFunctionValue(vm: Vm; fnIndex: int): Value =
+  if vm.module == nil or fnIndex < 0 or fnIndex >= vm.module.functions.len:
+    return valueNil()
+  let meta = vm.module.functions[fnIndex]
+  let fnVal = newFunctionValue(meta.name, fnIndex, meta.arity)
+  let fnObj = asFunctionObj(fnVal)
+  if fnObj != nil:
+    for p in meta.params:
+      fnObj.paramNames.add(p.name)
+      fnObj.paramTypes.add(p.typeAnn)
+  fnVal
+
+proc jsonToFrame(vm: var Vm; node: JsonNode; ctx: var ObjDecodeCtx): FrameCtx =
+  let fnIndex = node["fnIndex"].getInt()
+  let fnVal = hydrateFunctionValue(vm, fnIndex)
+  let fnObj = asFunctionObj(fnVal)
+  result = FrameCtx(
+    fnMeta: (if vm.module != nil and fnIndex >= 0 and fnIndex < vm.module.functions.len: vm.module.functions[fnIndex] else: nil),
+    fnObj: fnObj,
+    ip: node["ip"].getInt(),
+    stack: @[],
+    locals: @[],
+    selfVal: decodeValue(vm, node["selfVal"], ctx),
+    upvalues: initOrderedTable[string, Value](),
+    handlers: @[]
+  )
+  for it in node["stack"]:
+    result.stack.add(decodeValue(vm, it, ctx))
+  for it in node["locals"]:
+    result.locals.add(decodeValue(vm, it, ctx))
+  for k, v in node["upvalues"]:
+    result.upvalues[k] = decodeValue(vm, v, ctx)
+  var cips: seq[int] = @[]
+  for x in node["handlerCatchIps"]:
+    cips.add(x.getInt())
+  var depths: seq[int] = @[]
+  for x in node["handlerStackDepths"]:
+    depths.add(x.getInt())
+  result.handlers = decodeHandlers(cips, depths)
+
+proc checkpointToBytes(vm: Vm; frame: FrameCtx): seq[byte] =
+  var ctx = ObjEncodeCtx(objToId: initTable[pointer, int](), objects: @[])
+  var root = newJObject()
+  root["version"] = %1
+  root["deterministic"] = %vm.deterministic
+  root["rngState"] = %($vm.rngState)
+  root["cpuStepsUsed"] = %vm.cpuStepsUsed
+  root["toolCallsUsed"] = %vm.toolCallsUsed
+  root["startedAtMs"] = %vm.startedAtMs
+  root["quota"] = %*{
+    "cpu": vm.quota.cpuStepLimit,
+    "heap": vm.quota.heapObjectLimit,
+    "time": vm.quota.wallClockMsLimit,
+    "tool": vm.quota.toolCallLimit
+  }
+  var globalsJson = newJObject()
+  for sid, value in vm.globals:
+    globalsJson[symbolName(sid)] = encodeValue(value, ctx)
+  root["globals"] = globalsJson
+
+  var rootCaps = newJArray()
+  for cap in vm.rootCapabilities:
+    rootCaps.add(%cap)
+  root["rootCapabilities"] = rootCaps
+
+  var capStack = newJArray()
+  for capSet in vm.capabilityStack:
+    var setNode = newJArray()
+    for cap in capSet:
+      setNode.add(%cap)
+    capStack.add(setNode)
+  root["capabilityStack"] = capStack
+
+  var tasksJson = newJArray()
+  for id, task in vm.tasks:
+    var t = newJObject()
+    t["id"] = %id
+    t["parent"] = %task.parent
+    t["children"] = %task.children
+    t["state"] = %($task.state)
+    t["deadlineUnix"] = %task.deadlineUnix
+    t["cancelToken"] = %($task.cancelToken)
+    t["result"] = encodeValue(task.result, ctx)
+    t["error"] = encodeValue(task.error, ctx)
+    t["fnValue"] = encodeValue(task.fnValue, ctx)
+    t["args"] = %task.args.mapIt(encodeValue(it, ctx))
+    tasksJson.add(t)
+  root["tasks"] = tasksJson
+  root["taskScopeStack"] = %vm.taskScopeStack
+  root["currentTaskId"] = %vm.currentTaskId
+  root["nextTaskId"] = %vm.nextTaskId
+
+  root["frame"] = frameToJson(frame, ctx)
+  root["objects"] = %ctx.objects
+
+  let payload = $root
+  result = @['G'.byte, 'C'.byte, 'H'.byte, 'K'.byte, 1.byte]
+  for ch in payload:
+    result.add(byte(ch.ord))
+
+proc restoreFromBytes(vm: var Vm; data: openArray[byte]; frame: var FrameCtx): bool =
+  if data.len < 5:
+    return false
+  if char(data[0]) != 'G' or char(data[1]) != 'C' or char(data[2]) != 'H' or char(data[3]) != 'K':
+    return false
+
+  var payload = newString(data.len - 5)
+  for i in 5..<data.len:
+    payload[i - 5] = char(data[i])
+
+  let root = parseJson(payload)
+  var decodeCtx = ObjDecodeCtx(nodes: @[], objects: @[])
+  for node in root["objects"]:
+    decodeCtx.nodes.add(node)
+  decodeAllObjects(vm, decodeCtx)
+
+  vm.globals = initOrderedTable[int, Value]()
+  for k, v in root["globals"]:
+    vm.globals[internSymbol(k)] = decodeValue(vm, v, decodeCtx)
+
+  vm.rootCapabilities = initHashSet[string]()
+  for cap in root["rootCapabilities"]:
+    vm.rootCapabilities.incl(cap.getStr())
+
+  vm.capabilityStack = @[]
+  for setNode in root["capabilityStack"]:
+    var hs = initHashSet[string]()
+    for cap in setNode:
+      hs.incl(cap.getStr())
+    vm.capabilityStack.add(hs)
+
+  vm.tasks = initOrderedTable[int, TaskNode]()
+  for t in root["tasks"]:
+    let task = TaskNode(
+      id: t["id"].getInt(),
+      parent: t["parent"].getInt(),
+      children: @[],
+      state: TsReady,
+      deadlineUnix: t["deadlineUnix"].getBiggestInt(),
+      cancelToken: parseUInt(t["cancelToken"].getStr()),
+      result: decodeValue(vm, t["result"], decodeCtx),
+      error: decodeValue(vm, t["error"], decodeCtx),
+      fnValue: decodeValue(vm, t["fnValue"], decodeCtx),
+      args: @[]
+    )
+    for c in t["children"]:
+      task.children.add(c.getInt())
+    for a in t["args"]:
+      task.args.add(decodeValue(vm, a, decodeCtx))
+    let st = t["state"].getStr()
+    case st
+    of $TsReady: task.state = TsReady
+    of $TsRunning: task.state = TsRunning
+    of $TsDone: task.state = TsDone
+    of $TsCancelled: task.state = TsCancelled
+    of $TsFailed: task.state = TsFailed
+    else: task.state = TsReady
+    vm.tasks[task.id] = task
+
+  vm.taskScopeStack = @[]
+  for x in root["taskScopeStack"]:
+    vm.taskScopeStack.add(x.getInt())
+  vm.currentTaskId = root["currentTaskId"].getInt()
+  vm.nextTaskId = root["nextTaskId"].getInt()
+
+  vm.deterministic = root["deterministic"].getBool()
+  vm.rngState = parseUInt(root["rngState"].getStr())
+  vm.cpuStepsUsed = root["cpuStepsUsed"].getBiggestInt()
+  vm.toolCallsUsed = root["toolCallsUsed"].getBiggestInt()
+  vm.startedAtMs = root["startedAtMs"].getBiggestInt()
+  vm.quota.cpuStepLimit = root["quota"]["cpu"].getBiggestInt()
+  vm.quota.heapObjectLimit = root["quota"]["heap"].getBiggestInt()
+  vm.quota.wallClockMsLimit = root["quota"]["time"].getBiggestInt()
+  vm.quota.toolCallLimit = root["quota"]["tool"].getBiggestInt()
+
+  frame = jsonToFrame(vm, root["frame"], decodeCtx)
+  true
+
+proc saveCheckpointToFile*(vm: Vm; path: string; frame: FrameCtx) =
+  let bytes = checkpointToBytes(vm, frame)
+  var content = newString(bytes.len)
+  for i, b in bytes:
+    content[i] = char(b)
+  writeFile(path, content)
+
+proc loadCheckpointFromFile*(vm: var Vm; path: string; frame: var FrameCtx): bool =
+  if not fileExists(path):
+    return false
+  let content = readFile(path)
+  var bytes = newSeq[byte](content.len)
+  for i, ch in content:
+    bytes[i] = byte(ord(ch))
+  restoreFromBytes(vm, bytes, frame)
+
+proc saveVmCheckpoint*(vm: Vm; path: string) =
+  var emptyFrame = FrameCtx(
+    fnMeta: nil,
+    fnObj: nil,
+    ip: 0,
+    stack: @[],
+    locals: @[],
+    selfVal: valueNil(),
+    upvalues: initOrderedTable[string, Value](),
+    handlers: @[]
+  )
+  saveCheckpointToFile(vm, path, emptyFrame)
+
+proc loadVmCheckpoint*(vm: var Vm; path: string): bool =
+  var frame: FrameCtx
+  loadCheckpointFromFile(vm, path, frame)
+
+proc executeFunction(
+  vm: var Vm;
+  fnObj: FunctionObj;
+  args: seq[Value];
+  selfValue: Value = valueNil();
+  resumeGen: GeneratorObj = nil
+): Value =
   if vm.module == nil:
     return valueNil()
   if fnObj.fnIndex < 0 or fnObj.fnIndex >= vm.module.functions.len:
     raise newException(VmRuntimeError, "invalid function index")
 
   let fnMeta = vm.module.functions[fnObj.fnIndex]
-  var frame = FrameCtx(
-    fnMeta: fnMeta,
-    fnObj: fnObj,
-    ip: 0,
-    stack: @[],
-    locals: newSeq[Value](max(fnMeta.localCount, args.len)),
-    selfVal: selfValue,
-    upvalues: initOrderedTable[string, Value](),
-    handlers: @[]
-  )
+  var frame: FrameCtx
+  if resumeGen != nil and resumeGen.started:
+    frame = makeFrameFromGenerator(vm, resumeGen)
+  else:
+    frame = FrameCtx(
+      fnMeta: fnMeta,
+      fnObj: fnObj,
+      ip: 0,
+      stack: @[],
+      locals: newSeq[Value](max(fnMeta.localCount, args.len)),
+      selfVal: selfValue,
+      upvalues: initOrderedTable[string, Value](),
+      handlers: @[]
+    )
 
-  for i in 0..<frame.locals.len:
-    frame.locals[i] = valueNil()
+    for i in 0..<frame.locals.len:
+      frame.locals[i] = valueNil()
 
-  for i in 0..<min(args.len, frame.locals.len):
-    frame.locals[i] = args[i]
+    for i in 0..<min(args.len, frame.locals.len):
+      frame.locals[i] = args[i]
 
-  for name in fnObj.upvalueNames:
-    if fnObj.upvalues.hasKey(name):
-      frame.upvalues[name] = fnObj.upvalues[name]
+    for name in fnObj.upvalueNames:
+      if fnObj.upvalues.hasKey(name):
+        frame.upvalues[name] = fnObj.upvalues[name]
+
+    if resumeGen != nil:
+      resumeGen.started = true
+      resumeGen.finished = false
+      resumeGen.fnIndex = fnObj.fnIndex
+      resumeGen.selfVal = selfValue
 
   template handleThrow(thrown: Value): untyped =
     if frame.handlers.len > 0:
@@ -267,6 +1324,7 @@ proc executeFunction(vm: var Vm; fnObj: FunctionObj; args: seq[Value]; selfValue
     inc(frame.ip)
 
     try:
+      checkQuota(vm)
       case inst.op
       of OpNop:
         discard
@@ -446,9 +1504,14 @@ proc executeFunction(vm: var Vm; fnObj: FunctionObj; args: seq[Value]; selfValue
           frame.ip = int(inst.b)
 
       of OpReturn:
-        if frame.stack.len > 0:
-          return popValue(frame)
-        return valueNil()
+        let retVal = if frame.stack.len > 0: popValue(frame) else: valueNil()
+        if resumeGen != nil:
+          resumeGen.lastValue = retVal
+          resumeGen.finished = true
+          resumeGen.state = GsDone
+          resumeGen.ip = frame.ip
+          resumeGen.stack = @[]
+        return retVal
 
       of OpTryBegin:
         frame.handlers.add(ExceptionHandler(catchIp: int(inst.b), stackDepth: frame.stack.len))
@@ -529,27 +1592,16 @@ proc executeFunction(vm: var Vm; fnObj: FunctionObj; args: seq[Value]; selfValue
         pushValue(frame, valueNil())
 
       of OpYield:
-        if frame.stack.len > 0:
-          return popValue(frame)
-        return valueNil()
+        let yielded = if frame.stack.len > 0: popValue(frame) else: valueNil()
+        if resumeGen != nil:
+          resumeGen.lastValue = yielded
+          resumeGen.state = GsSuspended
+          resumeGen.finished = false
+          persistFrameToGenerator(resumeGen, frame)
+        return yielded
       of OpResume:
         let genVal = popValue(frame)
-        let gen = asGeneratorObj(genVal)
-        if gen == nil:
-          pushValue(frame, valueNil())
-        elif gen.state == GsDone:
-          pushValue(frame, gen.lastValue)
-        else:
-          let fnVal = gen.fnValue
-          let fnObj = asFunctionObj(fnVal)
-          if fnObj == nil:
-            pushValue(frame, valueNil())
-          else:
-            gen.state = GsRunning
-            let resumed = executeFunction(vm, fnObj, gen.args)
-            gen.lastValue = resumed
-            gen.state = GsDone
-            pushValue(frame, resumed)
+        pushValue(frame, resumeValue(vm, genVal))
 
       of OpArrNew:
         pushValue(frame, newArrayValue())
@@ -735,7 +1787,54 @@ proc executeFunction(vm: var Vm; fnObj: FunctionObj; args: seq[Value]; selfValue
         let v = popValue(frame)
         pushValue(frame, newFutureResolvedValue(v))
 
-      of OpThreadSpawn, OpTaskScopeEnter, OpTaskSpawn, OpTaskJoin, OpTaskCancel, OpTaskDeadline:
+      of OpThreadSpawn:
+        requireCapability(vm, "cap.thread.spawn", "thread.spawn")
+        pushValue(frame, valueNil())
+      of OpTaskScopeEnter:
+        requireCapability(vm, "cap.thread.spawn", "task.scope")
+        let parent = currentSupervisor(vm)
+        let scope = newTaskNode(vm, parent, valueNil(), @[])
+        vm.taskScopeStack.add(scope.id)
+        pushValue(frame, valueInt(scope.id))
+      of OpTaskSpawn:
+        requireCapability(vm, "cap.thread.spawn", "task.spawn")
+        let argc = int(inst.c)
+        let taskArgs = popArgs(frame, argc)
+        let fnValue = popValue(frame)
+        let parent = currentSupervisor(vm)
+        let task = newTaskNode(vm, parent, fnValue, taskArgs)
+        pushValue(frame, valueInt(task.id))
+      of OpTaskJoin:
+        if frame.stack.len > 0:
+          let taskIdVal = popValue(frame)
+          let taskId = if isInt(taskIdVal): int(asInt(taskIdVal)) else: -1
+          if taskId > 0:
+            pushValue(frame, joinTask(vm, taskId))
+          else:
+            let scopeId = if vm.taskScopeStack.len > 0: vm.taskScopeStack[^1] else: -1
+            var last = valueNil()
+            if scopeId > 0 and vm.tasks.hasKey(scopeId):
+              for childId in vm.tasks[scopeId].children:
+                last = joinTask(vm, childId)
+            pushValue(frame, last)
+            if vm.taskScopeStack.len > 0:
+              vm.taskScopeStack.setLen(vm.taskScopeStack.len - 1)
+        else:
+          pushValue(frame, valueNil())
+      of OpTaskCancel:
+        requireCapability(vm, "cap.thread.spawn", "task.cancel")
+        let taskIdVal = popValue(frame)
+        let taskId = if isInt(taskIdVal): int(asInt(taskIdVal)) else: -1
+        if taskId > 0:
+          cancelTaskRecursive(vm, taskId)
+        pushValue(frame, valueNil())
+      of OpTaskDeadline:
+        let deadlineVal = popValue(frame)
+        let taskIdVal = popValue(frame)
+        let taskId = if isInt(taskIdVal): int(asInt(taskIdVal)) else: -1
+        let deltaMs = if isInt(deadlineVal): asInt(deadlineVal) else: 0
+        if taskId > 0 and vm.tasks.hasKey(taskId):
+          vm.tasks[taskId].deadlineUnix = nowMs() + deltaMs
         pushValue(frame, valueNil())
 
       of OpCapEnter:
@@ -743,6 +1842,12 @@ proc executeFunction(vm: var Vm; fnObj: FunctionObj; args: seq[Value]; selfValue
         let idx = int(inst.b)
         if idx >= 0 and idx < vm.module.effects.len:
           for cap in vm.module.effects[idx].capabilities:
+            caps.incl(cap)
+        if vm.capabilityStack.len == 0:
+          for cap in vm.rootCapabilities:
+            caps.incl(cap)
+        else:
+          for cap in vm.capabilityStack[^1]:
             caps.incl(cap)
         vm.capabilityStack.add(caps)
       of OpCapExit:
@@ -752,15 +1857,63 @@ proc executeFunction(vm: var Vm; fnObj: FunctionObj; args: seq[Value]; selfValue
         let capName = symbolName(int(inst.b))
         if not hasCapability(vm, capName):
           handleThrow(newErrorValue("capability denied: " & capName))
-      of OpQuotaSet, OpQuotaCheck, OpCheckpointHint, OpStateSave, OpStateRestore:
-        discard
+      of OpQuotaSet:
+        let amount = popValue(frame)
+        let kindVal = popValue(frame)
+        let kind = parseQuotaKind(kindVal)
+        var limitValue: int64
+        if isInt(amount):
+          limitValue = asInt(amount)
+        else:
+          try:
+            limitValue = parseInt(amount.asString()).int64
+          except ValueError:
+            limitValue = -1
+        setQuotaLimit(vm, kind, limitValue)
+        pushValue(frame, valueNil())
+      of OpQuotaCheck:
+        let amount = popValue(frame)
+        let kindVal = popValue(frame)
+        let kind = parseQuotaKind(kindVal)
+        let required = if isInt(amount): asInt(amount) else: 0
+        let limit = quotaLimit(vm, kind)
+        if limit >= 0 and quotaCurrent(vm, kind) + required > limit:
+          handleThrow(newErrorValue("quota check failed"))
+        pushValue(frame, valueBool(true))
+      of OpCheckpointHint:
+        vm.diagnostics.add("checkpoint hint at ip=" & $(frame.ip - 1))
+      of OpStateSave:
+        let slotVal = popValue(frame)
+        let slot = if isInt(slotVal): int(asInt(slotVal)) else: 0
+        vm.checkpointSlots[slot] = checkpointToBytes(vm, frame)
+        pushValue(frame, valueInt(slot))
+      of OpStateRestore:
+        let slotVal = popValue(frame)
+        let slot = if isInt(slotVal): int(asInt(slotVal)) else: -1
+        if slot >= 0 and vm.checkpointSlots.hasKey(slot):
+          var restoredFrame: FrameCtx
+          if restoreFromBytes(vm, vm.checkpointSlots[slot], restoredFrame):
+            let resumeIp = frame.ip
+            frame = restoredFrame
+            frame.ip = resumeIp
+            pushValue(frame, valueInt(slot))
+          else:
+            handleThrow(newErrorValue("checkpoint restore failed"))
+        else:
+          handleThrow(newErrorValue("checkpoint slot not found"))
 
       of OpToolPrep:
+        vm.preparedToolSchemaId = int(inst.b)
         pushValue(frame, valueInt(inst.b.int))
       of OpToolCall:
         let req = popValue(frame)
-        discard req
-        pushValue(frame, newFutureRejectedValue(newErrorValue("tool runtime not configured")))
+        var schemaId = vm.preparedToolSchemaId
+        if frame.stack.len > 0 and isInt(peekValue(frame)):
+          let tokenId = int(asInt(popValue(frame)))
+          if schemaId < 0:
+            schemaId = tokenId
+        vm.preparedToolSchemaId = -1
+        pushValue(frame, executeToolCall(vm, schemaId, req))
       of OpToolAwait:
         let future = popValue(frame)
         let fut = asFutureObj(future)
@@ -771,9 +1924,27 @@ proc executeFunction(vm: var Vm; fnObj: FunctionObj; args: seq[Value]; selfValue
         else:
           pushValue(frame, valueNil())
       of OpToolResultUnwrap:
-        discard
+        let future = popValue(frame)
+        let fut = asFutureObj(future)
+        if fut == nil:
+          pushValue(frame, future)
+        elif fut.state == FsResolved:
+          pushValue(frame, fut.value)
+        elif fut.state == FsRejected:
+          handleThrow(fut.error)
+        else:
+          pushValue(frame, valueNil())
       of OpToolRetry:
-        discard
+        let future = popValue(frame)
+        let fut = asFutureObj(future)
+        if fut == nil:
+          pushValue(frame, future)
+        else:
+          let schemaId = fut.toolSchemaId
+          if schemaId < 0:
+            handleThrow(newErrorValue("tool retry without schema metadata"))
+          else:
+            pushValue(frame, executeToolCall(vm, schemaId, fut.toolArgs))
 
       of OpDetSeed:
         vm.rngState = uint64(inst.b) xor (uint64(inst.c) shl 32)
@@ -807,10 +1978,10 @@ proc executeFunction(vm: var Vm; fnObj: FunctionObj; args: seq[Value]; selfValue
         pushValue(frame, iteratorNew(iterable))
       of OpIterHasNext:
         let it = popValue(frame)
-        pushValue(frame, valueBool(iteratorHasNext(it)))
+        pushValue(frame, valueBool(iteratorHasNext(vm, it)))
       of OpIterNext:
         let it = popValue(frame)
-        pushValue(frame, iteratorNext(it))
+        pushValue(frame, iteratorNext(vm, it))
 
       of OpHalt:
         if frame.stack.len > 0:
@@ -824,9 +1995,40 @@ proc executeFunction(vm: var Vm; fnObj: FunctionObj; args: seq[Value]; selfValue
       handleThrow(thrown.value)
 
   if frame.stack.len > 0:
-    popValue(frame)
+    let outValue = popValue(frame)
+    if resumeGen != nil:
+      resumeGen.lastValue = outValue
+      resumeGen.finished = true
+      resumeGen.state = GsDone
+    outValue
   else:
+    if resumeGen != nil:
+      resumeGen.finished = true
+      resumeGen.state = GsDone
     valueNil()
+
+proc resumeValue*(vm: var Vm; value: Value): Value =
+  let gen = asGeneratorObj(value)
+  if gen == nil:
+    return value
+
+  if gen.finished or gen.state == GsDone:
+    return gen.lastValue
+
+  let fnObj = asFunctionObj(gen.fnValue)
+  if fnObj == nil:
+    return valueNil()
+
+  gen.state = GsRunning
+  let outValue = executeFunction(vm, fnObj, gen.args, gen.selfVal, gen)
+
+  if gen.state == GsRunning:
+    gen.state = GsDone
+    gen.finished = true
+    gen.lastValue = outValue
+    return valueNil()
+
+  outValue
 
 proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value = valueNil()): Value =
   if isNil(callee):
@@ -846,7 +2048,11 @@ proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value =
     let entry = vm.natives[sid]
     if entry.arity >= 0 and args.len != entry.arity:
       raiseVmValue(newErrorValue("native arity mismatch for " & entry.name))
-    return entry.callback(args)
+    if entry.caps.len > 0:
+      for cap in entry.caps:
+        if not hasCapability(vm, cap):
+          raiseVmValue(newErrorValue("capability denied for native " & entry.name & ": " & cap))
+    return entry.callback(vm, args)
 
   let fnObj = asFunctionObj(callee)
   if fnObj != nil:
@@ -858,7 +2064,15 @@ proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value =
         raiseVmValue(newErrorValue("type mismatch for parameter " & fnObj.paramNames[i] & ": expected " & paramType & " got " & inferTypeName(args[i])))
 
     if FfGenerator in fnObj.flags:
-      return newGeneratorValue(callee, args)
+      let genVal = newGeneratorValue(callee, args)
+      let gen = asGeneratorObj(genVal)
+      if gen != nil:
+        gen.selfVal = selfValue
+        gen.fnIndex = fnObj.fnIndex
+        for name in fnObj.upvalueNames:
+          if fnObj.upvalues.hasKey(name):
+            gen.upvalues[name] = fnObj.upvalues[name]
+      return genVal
 
     return executeFunction(vm, fnObj, args, selfValue)
 
@@ -886,6 +2100,27 @@ proc runModule*(vm: var Vm; module: AirModule): Value =
   vm.module = module
   if vm.module == nil or vm.module.mainFn < 0 or vm.module.mainFn >= vm.module.functions.len:
     return valueNil()
+
+  vm.startedAtMs = nowMs()
+  vm.cpuStepsUsed = 0
+  vm.toolCallsUsed = 0
+  vm.preparedToolSchemaId = -1
+  vm.tasks = initOrderedTable[int, TaskNode]()
+  vm.tasks[0] = TaskNode(
+    id: 0,
+    parent: -1,
+    children: @[],
+    state: TsRunning,
+    deadlineUnix: -1,
+    cancelToken: 0,
+    result: valueNil(),
+    error: valueNil(),
+    fnValue: valueNil(),
+    args: @[]
+  )
+  vm.currentTaskId = 0
+  vm.nextTaskId = 1
+  vm.taskScopeStack = @[]
 
   let mainMeta = vm.module.functions[vm.module.mainFn]
   let mainVal = newFunctionValue(mainMeta.name, vm.module.mainFn, mainMeta.arity)
