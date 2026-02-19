@@ -3027,7 +3027,7 @@ proc executeFunction(
 
       of OpTypeof:
         let v = popValue(frame)
-        pushValue(frame, valueSymbol(inferTypeName(v).toLowerAscii()))
+        pushValue(frame, valueSymbol(inferTypeName(v)))
       of OpIsType:
         let v = popValue(frame)
         let expected = symbolName(int(inst.b))

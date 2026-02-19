@@ -794,27 +794,27 @@ suite "VM - Native functions":
 suite "VM - typeof":
   test "typeof int":
     let r = run("(typeof 42)")
-    check asSymbolName(r) == "int"
+    check asSymbolName(r) == "Int"
 
   test "typeof string":
     let r = run("(typeof \"hello\")")
-    check asSymbolName(r) == "string"
+    check asSymbolName(r) == "String"
 
   test "typeof bool":
     let r = run("(typeof true)")
-    check asSymbolName(r) == "bool"
+    check asSymbolName(r) == "Bool"
 
   test "typeof nil":
     let r = run("(typeof nil)")
-    check asSymbolName(r) == "nil"
+    check asSymbolName(r) == "Nil"
 
   test "typeof array":
     let r = run("(typeof [1 2])")
-    check asSymbolName(r) == "array"
+    check asSymbolName(r) == "Array"
 
   test "typeof char":
     let r = run("(typeof 'a')")
-    check asSymbolName(r) == "char"
+    check asSymbolName(r) == "Char"
 
 suite "VM - String operations":
   test "string concatenation via append":

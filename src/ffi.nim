@@ -122,7 +122,7 @@ proc nativeTypeof(vm: var Vm; args: seq[Value]): Value =
   discard vm
   if args.len == 0:
     return valueSymbol("nil")
-  valueSymbol(inferTypeName(args[0]).toLowerAscii())
+  valueSymbol(inferTypeName(args[0]))
 
 proc nativeNow(vm: var Vm; args: seq[Value]): Value =
   discard args
