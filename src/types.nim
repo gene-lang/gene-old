@@ -76,6 +76,9 @@ type
     paramTypes*: seq[string]
     upvalueNames*: seq[string]
     upvalues*: OrderedTable[string, Value]
+    beforeHooks*: seq[Value]
+    afterHooks*: seq[Value]
+    aroundHooks*: seq[Value]
     flags*: set[FunctionFlag]
 
   NativeFnObj* = ref object of HeapObject
@@ -305,6 +308,9 @@ proc newFunctionValue*(name: string; fnIndex: int; arity: int; moduleId = -1): V
     paramTypes: @[],
     upvalueNames: @[],
     upvalues: initOrderedTable[string, Value](),
+    beforeHooks: @[],
+    afterHooks: @[],
+    aroundHooks: @[],
     flags: {}
   ))
   valueFromPtr(obj)

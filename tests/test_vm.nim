@@ -817,13 +817,31 @@ suite "VM - Modules":
     check asInt(arr.items[2]) == 42
 
 suite "VM - AOP bundles":
-  test "aspect bundle is callable":
+  test "aspect bundle applies before advice":
     let r = run("""
+      (var hit false)
+      (class C
+        (method m [a] a))
       (aspect X [cls m1]
-        (before m1 [a...] nil))
-      (X 1 2)
+        (before m1 [a...]
+          (hit = true)))
+      (X C `m)
+      (var c (new C))
+      (c .m 42)
+      hit
     """)
-    check isNil(r)
+    check asBool(r) == true
+
+  test "standalone before advice wraps function":
+    let r = run("""
+      (var called false)
+      (fn f [x] x)
+      (before f [x]
+        (called = true))
+      (f 9)
+      called
+    """)
+    check asBool(r) == true
 
 suite "VM - Quotes":
   test "quote returns gene value":

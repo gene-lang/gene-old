@@ -510,7 +510,17 @@ suite "Compiler - Modules and AOP":
     let code = mainFnCode(m)
     check code.hasOpcode(OpCallKw)
 
+  test "before advice emits decorator apply":
+    let m = compile("(fn f [x] x) (before f [x] nil)")
+    let code = mainFnCode(m)
+    check code.hasOpcode(OpDecoratorApply)
+
   test "aspect defines callable bundle":
     let m = compile("(aspect X [cls m1] (before m1 [a...] nil))")
     check m.functions.len >= 2
-    check m.functions[1].name == "X"
+    var found = false
+    for fnMeta in m.functions:
+      if fnMeta.name == "X":
+        found = true
+        break
+    check found == true

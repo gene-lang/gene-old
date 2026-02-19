@@ -368,6 +368,34 @@ proc instantiateFunctionValue(vm: var Vm; fnIdx: int; frame: FrameCtx): Value =
 proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value = valueNil(); kwargs: Value = valueNil()): Value
 proc kwargsHasEntries(kwargs: Value): bool
 
+proc adviceMethodName(target: Value): string =
+  if isSymbol(target):
+    return asSymbolName(target)
+  let s = asStringObj(target)
+  if s != nil:
+    return s.value
+  let kw = asKeywordObj(target)
+  if kw != nil:
+    return kw.name
+  if isNil(target):
+    return ""
+  target.asString()
+
+proc cloneFunctionWithoutAround(fnObj: FunctionObj): Value =
+  let outFn = newFunctionValue(fnObj.name, fnObj.fnIndex, fnObj.arity, fnObj.moduleId)
+  let dst = asFunctionObj(outFn)
+  dst.paramNames = fnObj.paramNames
+  dst.paramTypes = fnObj.paramTypes
+  dst.upvalueNames = fnObj.upvalueNames
+  dst.upvalues = initOrderedTable[string, Value]()
+  for k, v in fnObj.upvalues:
+    dst.upvalues[k] = v
+  dst.beforeHooks = fnObj.beforeHooks
+  dst.afterHooks = fnObj.afterHooks
+  dst.aroundHooks = @[]
+  dst.flags = fnObj.flags
+  outFn
+
 proc asIntDefault(v: Value; defaultVal: int): int =
   if isInt(v):
     return int(asInt(v))
@@ -922,6 +950,9 @@ proc encodeObject(obj: HeapObject; ctx: var ObjEncodeCtx): int =
     for k, v in fn.upvalues:
       ups[k] = encodeValue(v, ctx)
     entry["upvalues"] = ups
+    entry["beforeHooks"] = %fn.beforeHooks.mapIt(encodeValue(it, ctx))
+    entry["afterHooks"] = %fn.afterHooks.mapIt(encodeValue(it, ctx))
+    entry["aroundHooks"] = %fn.aroundHooks.mapIt(encodeValue(it, ctx))
     var flags = newJArray()
     for fl in fn.flags:
       flags.add(%($fl))
@@ -1026,6 +1057,9 @@ proc initPlaceholder(kindName: string): HeapObject =
       paramTypes: @[],
       upvalueNames: @[],
       upvalues: initOrderedTable[string, Value](),
+      beforeHooks: @[],
+      afterHooks: @[],
+      aroundHooks: @[],
       flags: {}
     )
   of $HkNativeFn:
@@ -1140,6 +1174,18 @@ proc decodeAllObjects(vm: var Vm; ctx: var ObjDecodeCtx) =
       fn.upvalues = initOrderedTable[string, Value]()
       for k, v in node["upvalues"]:
         fn.upvalues[k] = decodeValue(vm, v, ctx)
+      fn.beforeHooks = @[]
+      if node.hasKey("beforeHooks"):
+        for h in node["beforeHooks"]:
+          fn.beforeHooks.add(decodeValue(vm, h, ctx))
+      fn.afterHooks = @[]
+      if node.hasKey("afterHooks"):
+        for h in node["afterHooks"]:
+          fn.afterHooks.add(decodeValue(vm, h, ctx))
+      fn.aroundHooks = @[]
+      if node.hasKey("aroundHooks"):
+        for h in node["aroundHooks"]:
+          fn.aroundHooks.add(decodeValue(vm, h, ctx))
       fn.flags = {}
       for fl in node["flags"]:
         let s = fl.getStr()
@@ -1973,8 +2019,52 @@ proc executeFunction(
         if cls != nil:
           let fnVal = instantiateFunctionValue(vm, int(inst.b), frame)
           cls.ctor = fnVal
-      of OpPropDef, OpDecoratorApply, OpInterceptEnter, OpInterceptExit:
+      of OpPropDef, OpInterceptEnter, OpInterceptExit:
         discard
+      of OpDecoratorApply:
+        let hookVal = popValue(frame)
+        let targetVal = popValue(frame)
+        let mode = int(inst.mode)
+
+        case mode
+        of 0, 2, 4:
+          # function-level advice attachment
+          let fnObj = asFunctionObj(targetVal)
+          if fnObj == nil:
+            handleThrow(newErrorValue("decorator target is not a function"))
+          case mode
+          of 0:
+            fnObj.beforeHooks.add(hookVal)
+          of 2:
+            fnObj.afterHooks.add(hookVal)
+          of 4:
+            fnObj.aroundHooks.add(hookVal)
+          else:
+            discard
+          pushValue(frame, targetVal)
+        of 1, 3, 5:
+          # class method-level advice attachment
+          let clsVal = popValue(frame)
+          let methodName = adviceMethodName(targetVal)
+          if methodName.len == 0:
+            handleThrow(newErrorValue("invalid advised method name"))
+          let methodVal = getMember(clsVal, methodName)
+          let fnObj = asFunctionObj(methodVal)
+          if fnObj == nil:
+            handleThrow(newErrorValue("advised member is not a function: " & methodName))
+          case mode
+          of 1:
+            fnObj.beforeHooks.add(hookVal)
+          of 3:
+            fnObj.afterHooks.add(hookVal)
+          of 5:
+            fnObj.aroundHooks.add(hookVal)
+          else:
+            discard
+          setMember(clsVal, methodName, methodVal)
+          pushValue(frame, methodVal)
+        else:
+          pushValue(frame, valueNil())
 
       of OpImport:
         let aliasSid = int(inst.b)
@@ -2454,18 +2544,37 @@ proc invokeValue(vm: var Vm; callee: Value; args: seq[Value]; selfValue: Value =
       if i < boundArgs.len and paramType.len > 0 and not expectType(boundArgs[i], paramType):
         raiseVmValue(newErrorValue("type mismatch for parameter " & fnObj.paramNames[i] & ": expected " & paramType & " got " & inferTypeName(boundArgs[i])))
 
-    if FfGenerator in fnObj.flags:
-      let genVal = newGeneratorValue(callee, boundArgs)
-      let gen = asGeneratorObj(genVal)
-      if gen != nil:
-        gen.selfVal = selfValue
-        gen.fnIndex = fnObj.fnIndex
-        for name in fnObj.upvalueNames:
-          if fnObj.upvalues.hasKey(name):
-            gen.upvalues[name] = fnObj.upvalues[name]
-      return genVal
+    if fnObj.beforeHooks.len > 0:
+      for hook in fnObj.beforeHooks:
+        discard invokeValue(vm, hook, boundArgs, selfValue)
 
-    return executeFunction(vm, fnObj, boundArgs, selfValue)
+    var callResult: Value
+    if fnObj.aroundHooks.len > 0:
+      # Around hooks receive original args plus a target callable.
+      var aroundArgs = boundArgs
+      aroundArgs.add(cloneFunctionWithoutAround(fnObj))
+      callResult = invokeValue(vm, fnObj.aroundHooks[^1], aroundArgs, selfValue)
+    else:
+      if FfGenerator in fnObj.flags:
+        let genVal = newGeneratorValue(callee, boundArgs)
+        let gen = asGeneratorObj(genVal)
+        if gen != nil:
+          gen.selfVal = selfValue
+          gen.fnIndex = fnObj.fnIndex
+          for name in fnObj.upvalueNames:
+            if fnObj.upvalues.hasKey(name):
+              gen.upvalues[name] = fnObj.upvalues[name]
+        callResult = genVal
+      else:
+        callResult = executeFunction(vm, fnObj, boundArgs, selfValue)
+
+    if fnObj.afterHooks.len > 0:
+      for hook in fnObj.afterHooks:
+        var afterArgs = boundArgs
+        afterArgs.add(callResult)
+        callResult = invokeValue(vm, hook, afterArgs, selfValue)
+
+    return callResult
 
   let cls = asClassObj(callee)
   if cls != nil:

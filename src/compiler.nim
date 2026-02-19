@@ -707,6 +707,59 @@ proc compileCaseForm(ctx: FnContext; node: AstNode) =
   for p in endPatches:
     ctx.fn.patchB(p, endPc)
 
+proc emitStoreByName(ctx: FnContext; name: string) =
+  let resolved = resolveVar(ctx, name)
+  case resolved.kind
+  of VskLocal:
+    ctx.emit(OpStoreLocal, b = resolved.idx.uint32)
+  of VskUpvalue:
+    ctx.emit(OpStoreUpvalue, b = resolved.idx.uint32)
+  of VskGlobal:
+    ctx.emit(OpStoreGlobal, b = resolved.idx.uint32)
+
+proc compileAdviceForm(ctx: FnContext; node: AstNode; kind: string) =
+  let items = node.items
+  if items.len < 3:
+    raise fail(node, kind & " requires target and params")
+
+  let target = items[1]
+  let paramsNode = items[2]
+
+  var hookFn = AstNode(kind: AkList, line: node.line, col: node.col, items: @[])
+  hookFn.items.add(mkSymbol(node.line, node.col, "fn"))
+  hookFn.items.add(paramsNode)
+  if items.len <= 3:
+    hookFn.items.add(AstNode(kind: AkNil, line: node.line, col: node.col))
+  else:
+    for i in 3..<items.len:
+      hookFn.items.add(items[i])
+
+  let classAdvice = ctx.locals.hasKey("cls")
+  if classAdvice:
+    ctx.emit(OpLoadLocal, b = ctx.locals["cls"].slot.uint32)
+
+  compileExpr(ctx, target)
+  discard compileFunctionForm(ctx, hookFn, bindNamed = false)
+
+  var mode: uint8 = 0
+  case kind
+  of "before":
+    mode = if classAdvice: 1'u8 else: 0'u8
+  of "after":
+    mode = if classAdvice: 3'u8 else: 2'u8
+  of "around":
+    mode = if classAdvice: 5'u8 else: 4'u8
+  else:
+    discard
+
+  ctx.emit(OpDecoratorApply, mode = mode)
+
+  if (not classAdvice) and target.kind == AkSymbol and not target.text.contains('/'):
+    emitStoreByName(ctx, target.text)
+
+  ctx.emit(OpPop)
+  ctx.emit(OpConstNil)
+
 proc compileTryForm(ctx: FnContext; node: AstNode) =
   let items = node.items
   var catchIdx = -1
@@ -1304,8 +1357,7 @@ proc compileSpecialForm(ctx: FnContext; node: AstNode): bool =
     discard compileFunctionForm(ctx, fnNode)
     true
   of "before", "around", "after":
-    # AOP forms are accepted as standalone syntax and currently compile to no-op values.
-    ctx.emit(OpConstNil)
+    compileAdviceForm(ctx, node, head)
     true
   of "capabilities":
     if items.len > 1 and items[1].kind == AkArray:

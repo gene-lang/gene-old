@@ -21,8 +21,16 @@
 
 # Aspect bundle callable
 (t .section "Aspect Bundle")
+(var hit false)
+(class C
+  (method m [a]
+    a))
 (aspect X [cls m1]
-  (before m1 [a...] nil))
-(t .assert_eq (X Utils `inc) nil "aspect bundle call returns nil")
+  (before m1 [a...]
+    (hit = true)))
+(X C `m)
+(var c (new C))
+(c .m 1)
+(t .assert_eq hit true "aspect bundle applies before advice")
 
 (t .done)
