@@ -112,7 +112,7 @@
 (println (! true))          # => false
 
 (println (false || true && true)) # = (false || (true && true))
-(println (false || ! true)) # = (false || (true && true))
+(println (! false && true)) # Invalid: ! false must be wrapped in ()
 
 # =============================================================================
 # 5. STRINGS
@@ -196,6 +196,28 @@ else
 (fn add [a b]
   (a + b))
 (println (add 3 4))          # => 7
+
+(fn add [a = 1 b]
+  (a + b))
+(println (add 4))            # => 5
+
+(fn add [^^a b]  # a defaults to true
+  (if a b))
+(println (add 4))            # => 4
+(println (add ^!a 4))        # => nil
+
+(fn add [^!a b]  # a defaults to true
+  (if a b))
+(println (add 4))            # => nil
+(println (add ^^a 4))        # => 4
+
+(fn add [^a b]
+  (a + b))
+(println (add ^a 3 4))       # => 7
+
+(fn add [^a = 1 b]
+  (a + b))
+(println (add 4))            # => 5
 
 # With type annotations (gradual typing)
 (fn add_typed [a: Int b: Int] -> Int
@@ -287,6 +309,13 @@ else
 (m/a = 10)                    # Modify value
 (println m/a)                 # => 10
 
+{^^a} # => {^a true}
+{^!a} # => {^a nil}
+
+{^a^b 1} # => {^a {^b 1}}
+{^a^^b}  # => {^a {^b true}}
+{^a^!b}  # => {^a {^b nil}}
+
 # Nested maps
 (var config {^db {^host "localhost" ^port 5432}})
 (println config/db/host)      # => "localhost"
@@ -305,6 +334,17 @@ else
 
 # --- Gene values (constructed) ---
 (var node `(div ^id "main" (p "Hello") (p "World")))
+
+(x ^^a) # => (x ^a true)
+(x ^!a) # => (x ^a nil)
+
+(x ^a^b 1) # => (x ^a {^b 1})
+(x ^a^^b)  # => (x ^a (^b true))
+(x ^a^!b)  # => (x ^a (^b nil))
+
+(x ^a 1 b c) # = (x b ^a 1 c) = (x b c ^a 1)
+(x ^a 1 b ^c 2) # => Invalid code, properties can not be split by children
+(x ^a #@f 1 ^b 2 c) # = (x ^a (f 1) ^b 2 c)
 
 # =============================================================================
 # 9. MEMBER ACCESS (/ syntax)
@@ -338,16 +378,16 @@ else
     (/x = x)                 # /x = self.x
     (/y = y))
 
-  (method get_x _             # _ means no params
+  (method get_x []
     /x)
 
-  (method get_y _
+  (method get_y []
     /y)
 
-  (method distance _
+  (method distance []
     (sqrt ((/x * /x) + (/y * /y))))
 
-  (method to_s _
+  (method to_s []
     ("Point(" .append (str /x) ", " (str /y) ")"))
 )
 
@@ -360,15 +400,15 @@ else
 (class Animal
   (ctor [name]
     (/name = name))
-  (method speak _
+  (method speak []
     "..."))
 
 (class Dog < Animal
-  (method speak _
+  (method speak []
     "Woof!"))
 
 (class Cat < Animal
-  (method speak _
+  (method speak []
     "Meow!"))
 
 (var d (new Dog "Rex"))
@@ -377,13 +417,13 @@ else
 
 # --- Super calls ---
 (class LoudDog < Dog
-  (method speak _
+  (method speak []
     ((super .speak) .append "!!!")))
 
 # --- Nested classes (class as namespace) ---
 (class Outer
   (class Inner
-    (method hello _
+    (method hello []
       "Hi from Inner")))
 
 # --- Macro constructor (receives unevaluated args) ---
@@ -401,11 +441,11 @@ else
 
 # --- Abstract methods [PLANNED] ---
 # (class Shape
-#   (abstract method area _))
+#   (abstract method area []))
 
 # --- Interfaces/Protocols [PLANNED] ---
 # (protocol Printable
-#   (method to_s _))
+#   (method to_s []))
 
 # =============================================================================
 # 11. EXCEPTION HANDLING
@@ -413,16 +453,16 @@ else
 
 (try
   (1 / 0)
-catch _                       # catch all exceptions
+catch _
   (println "Error:" $ex))     # $ex is the exception
 
 # Catch specific types [PLANNED]
 # (try
 #   (risky_op)
-# catch TypeError e
-#   (println "Type error:" e)
-# catch _ e
-#   (println "Other error:" e)
+# catch TypeError
+#   (println "Type error:" $ex)
+# catch _
+#   (println "Other error:" $ex)
 # finally
 #   (cleanup))
 
@@ -792,7 +832,7 @@ catch _                       # catch all exceptions
       (/cache/endpoint = result)
       result))
 
-  (method clear_cache _
+  (method clear_cache []
     (/cache = {})))
 
 (var api (new API "https://api.example.com"))
