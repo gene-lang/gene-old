@@ -197,6 +197,7 @@ type
     toolSchemas*: seq[ToolSchema]
     diagnostics*: seq[string]
     mainFn*: int
+    verified*: bool
 
 proc newInst*(op: AirOpcode; mode: uint8 = 0; a: uint8 = 0; b: uint32 = 0; c: uint32 = 0; d: uint32 = 0): AirInst =
   AirInst(op: op, mode: mode, a: a, b: b, c: c, d: d)
@@ -227,7 +228,8 @@ proc newAirModule*(sourcePath = "<memory>"): AirModule =
     effects: @[],
     toolSchemas: @[],
     diagnostics: @[],
-    mainFn: -1
+    mainFn: -1,
+    verified: false
   )
 
 proc internString*(m: AirModule; s: string): int =

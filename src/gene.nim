@@ -1,14 +1,19 @@
 import os, strutils
 import types, parser, ir, compiler, vm, ffi
+import air_codec, air_verify
 
 proc printUsage() =
   echo "Gene CLI"
   echo "Usage: gene <run|eval|repl|compile> [args]"
 
 proc cmdRun(path: string): int =
-  let source = readFile(path)
-  let ast = parseProgram(source, path)
-  let module = compileProgram(ast, path)
+  var module: AirModule
+  if path.toLowerAscii().endsWith(".gair"):
+    module = readAirModule(path)
+  else:
+    let source = readFile(path)
+    let ast = parseProgram(source, path)
+    module = compileProgram(ast, path)
   var runtime = newVm()
   registerDefaultNatives(runtime)
   discard runtime.runModule(module)
@@ -50,7 +55,11 @@ proc cmdCompile(inputPath: string; outputPath: string): int =
   let source = readFile(inputPath)
   let ast = parseProgram(source, inputPath)
   let module = compileProgram(ast, inputPath)
-  writeFile(outputPath, module.prettyPrint())
+  let issues = verifyAirModule(module)
+  if issues.len > 0:
+    echo "AIR verify error: ", issues[0]
+    return 2
+  writeAirModule(module, outputPath)
   return 0
 
 proc main*(): int =

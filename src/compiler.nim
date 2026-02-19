@@ -37,6 +37,12 @@ proc fail(node: AstNode; msg: string): ref CompileError =
 proc mkSymbol(line, col: int; text: string): AstNode =
   AstNode(kind: AkSymbol, line: line, col: col, text: text)
 
+proc mkString(line, col: int; text: string): AstNode =
+  AstNode(kind: AkString, line: line, col: col, text: text)
+
+proc mkKeyword(line, col: int; text: string): AstNode =
+  AstNode(kind: AkKeyword, line: line, col: col, text: text)
+
 proc runtimeSym(m: AirModule; name: string): int =
   discard m.internSymbol(name)
   internSymbol(name)
@@ -707,6 +713,76 @@ proc compileCaseForm(ctx: FnContext; node: AstNode) =
   for p in endPatches:
     ctx.fn.patchB(p, endPc)
 
+proc compileEnumForm(ctx: FnContext; node: AstNode) =
+  let items = node.items
+  if items.len < 2 or items[1].kind != AkSymbol:
+    raise fail(node, "enum requires an enum name symbol")
+
+  let enumName = items[1].text
+  ctx.emit(OpMapNew)
+
+  for i in 2..<items.len:
+    let variant = items[i]
+    if variant.kind == AkSymbol:
+      discard ctx.emitConst(valueSymbol(enumName & "/" & variant.text))
+      let sid = runtimeSym(ctx.m, variant.text)
+      ctx.emit(OpMapSet, b = sid.uint32)
+      continue
+
+    if variant.kind == AkList and variant.items.len > 0 and variant.items[0].kind == AkSymbol:
+      let variantName = variant.items[0].text
+
+      var paramsNode = AstNode(kind: AkArray, line: variant.line, col: variant.col, items: @[])
+      for pIdx in 1..<variant.items.len:
+        if variant.items[pIdx].kind != AkSymbol:
+          raise fail(variant.items[pIdx], "ADT constructor params must be symbols")
+        paramsNode.items.add(variant.items[pIdx])
+
+      var valuesArray = AstNode(kind: AkArray, line: variant.line, col: variant.col, items: @[])
+      for pIdx in 1..<variant.items.len:
+        valuesArray.items.add(variant.items[pIdx])
+
+      var bodyMap = AstNode(kind: AkMap, line: variant.line, col: variant.col, entries: @[])
+      bodyMap.entries.add(MapEntry(
+        key: mkKeyword(variant.line, variant.col, "enum"),
+        value: mkString(variant.line, variant.col, enumName)
+      ))
+      bodyMap.entries.add(MapEntry(
+        key: mkKeyword(variant.line, variant.col, "tag"),
+        value: mkString(variant.line, variant.col, variantName)
+      ))
+      bodyMap.entries.add(MapEntry(
+        key: mkKeyword(variant.line, variant.col, "values"),
+        value: valuesArray
+      ))
+
+      var fnNode = AstNode(kind: AkList, line: variant.line, col: variant.col, items: @[])
+      fnNode.items.add(mkSymbol(variant.line, variant.col, "fn"))
+      fnNode.items.add(paramsNode)
+      fnNode.items.add(bodyMap)
+      discard compileFunctionForm(
+        ctx,
+        fnNode,
+        forcedName = enumName & "::" & variantName,
+        bindNamed = false
+      )
+
+      let sid = runtimeSym(ctx.m, variantName)
+      ctx.emit(OpMapSet, b = sid.uint32)
+      continue
+
+    raise fail(variant, "enum variant must be a symbol or constructor list")
+
+  ctx.emit(OpMapEnd)
+
+  let enumSid = runtimeSym(ctx.m, enumName)
+  if ctx.isTopLevel:
+    ctx.emit(OpStoreGlobal, b = enumSid.uint32)
+  else:
+    if not ctx.locals.hasKey(enumName):
+      discard declareLocal(ctx, enumName)
+    ctx.emit(OpStoreLocal, b = ctx.locals[enumName].slot.uint32)
+
 proc emitStoreByName(ctx: FnContext; name: string) =
   let resolved = resolveVar(ctx, name)
   case resolved.kind
@@ -1252,6 +1328,9 @@ proc compileSpecialForm(ctx: FnContext; node: AstNode): bool =
   of "case":
     compileCaseForm(ctx, node)
     true
+  of "enum":
+    compileEnumForm(ctx, node)
+    true
   of "break":
     if ctx.loops.len == 0:
       raise fail(node, "break used outside loop")
@@ -1429,6 +1508,22 @@ proc compileSpecialForm(ctx: FnContext; node: AstNode): bool =
     ctx.emit(OpPop)
     ctx.emit(OpLoadLocal, b = scopeSlot.uint32)
     ctx.emit(OpTaskJoin)
+    true
+  of "thread/spawn":
+    if items.len < 2:
+      ctx.emit(OpConstNil)
+    else:
+      compileExpr(ctx, items[1])
+      for i in 2..<items.len:
+        compileExpr(ctx, items[i])
+      ctx.emit(OpThreadSpawn, c = max(items.len - 2, 0).uint32)
+    true
+  of "thread/join":
+    if items.len > 1:
+      compileExpr(ctx, items[1])
+      ctx.emit(OpTaskJoin)
+    else:
+      ctx.emit(OpConstNil)
     true
   of "task_spawn":
     if items.len < 2:

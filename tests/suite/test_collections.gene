@@ -79,6 +79,17 @@
 (var nil_cfg nil)
 (t .assert_eq nil_cfg?/db?/host nil "nil-safe path returns nil")
 
+# Enums / ADTs
+(t .section "Enums")
+(enum Color Red Green Blue)
+(t .assert_eq Color/Red `Color/Red "enum variant symbol")
+
+(enum Option (Some value) None)
+(var maybe_x (Option/Some 7))
+(t .assert_eq maybe_x/tag "Some" "ADT constructor tag")
+(t .assert_eq maybe_x/values/0 7 "ADT constructor payload")
+(t .assert_eq Option/None `Option/None "ADT none variant")
+
 # Gene values (quoted)
 (t .section "Gene Values")
 (var person `(Person ^name "Alice" ^age 30 child1 child2))

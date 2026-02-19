@@ -281,6 +281,34 @@ suite "VM - Loops":
     check asInt(outArr.items[0]) == 9
     check asInt(outArr.items[1]) == 7
 
+suite "VM - Threads":
+  test "thread spawn and join":
+    let r = run("""
+      (cap_grant "cap.thread.spawn")
+      (fn worker [] (+ 40 2))
+      (var t (thread/spawn worker))
+      (thread/join t)
+    """)
+    check asInt(r) == 42
+
+  test "thread spawn with args":
+    let r = run("""
+      (cap_grant "cap.thread.spawn")
+      (fn add [a b] (a + b))
+      (var t (thread/spawn add 3 4))
+      (thread/join t)
+    """)
+    check asInt(r) == 7
+
+  test "thread spawn rejects captured closures":
+    expect CatchableError:
+      discard run("""
+        (cap_grant "cap.thread.spawn")
+        (var x 1)
+        (var f (fn [] x))
+        (thread/spawn f)
+      """)
+
 suite "VM - Case":
   test "case when else":
     let r = run("""
@@ -293,6 +321,31 @@ suite "VM - Case":
     let s = asStringObj(r)
     check s != nil
     check s.value == "two"
+
+suite "VM - Enums":
+  test "simple enum variant":
+    let r = run("""
+      (enum Color Red Green Blue)
+      Color/Red
+    """)
+    check isSymbol(r)
+    check asSymbolName(r) == "Color/Red"
+
+  test "ADT enum constructor":
+    let r = run("""
+      (enum Option (Some value) None)
+      (var x (Option/Some 7))
+      [x/tag x/values/0 Option/None]
+    """)
+    let outArr = asArrayObj(r)
+    check outArr != nil
+    check outArr.items.len == 3
+    let tag = asStringObj(outArr.items[0])
+    check tag != nil
+    check tag.value == "Some"
+    check asInt(outArr.items[1]) == 7
+    check isSymbol(outArr.items[2])
+    check asSymbolName(outArr.items[2]) == "Option/None"
 
 suite "VM - Functions":
   test "simple function call":

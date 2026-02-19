@@ -227,6 +227,29 @@ suite "Compiler - Loops":
     check code.hasOpcode(OpCmpLt)
     check code.hasOpcode(OpJump)
 
+suite "Compiler - Concurrency":
+  test "thread spawn emits OpThreadSpawn":
+    let m = compile("(thread/spawn (fn [] 1))")
+    let code = mainFnCode(m)
+    check code.hasOpcode(OpThreadSpawn)
+
+  test "thread join emits OpTaskJoin":
+    let m = compile("(thread/join t)")
+    let code = mainFnCode(m)
+    check code.hasOpcode(OpTaskJoin)
+
+suite "Compiler - Enums":
+  test "simple enum compiles to map construction":
+    let m = compile("(enum Color Red Green Blue)")
+    let code = mainFnCode(m)
+    check code.hasOpcode(OpMapNew)
+    check code.hasOpcode(OpMapSet)
+    check code.hasOpcode(OpStoreGlobal)
+
+  test "ADT enum compiles constructor function":
+    let m = compile("(enum Option (Some value) None)")
+    check m.functions.len >= 2
+
 suite "Compiler - Functions":
   test "named function":
     let m = compile("(fn add [a b] (+ a b))")

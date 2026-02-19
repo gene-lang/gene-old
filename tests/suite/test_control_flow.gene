@@ -122,6 +122,13 @@
 (t .assert_eq rsum 9 "repeat honors continue and break")
 (t .assert_eq rseen 7 "repeat break exits early")
 
+# Threads
+(t .section "Threads")
+(cap_grant "cap.thread.spawn")
+(fn worker [] 42)
+(var th (thread/spawn worker))
+(t .assert_eq (thread/join th) 42 "thread spawn/join returns result")
+
 # Case/when/else
 (t .section "Case")
 (var cval 2)
