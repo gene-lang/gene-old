@@ -20,3 +20,11 @@ task suite, "Run Gene test suite":
   for f in listFiles("tests/suite"):
     if f.endsWith(".gene"):
       exec "bin/gene " & f
+
+task bench, "Run call benchmarks (release)":
+  exec "nim c -d:release -o:bin/bench_calls benchmarks/bench_calls.nim"
+  exec "bin/bench_calls"
+
+task benchd, "Run call benchmarks (debug)":
+  exec "nim c -o:bin/bench_calls benchmarks/bench_calls.nim"
+  exec "bin/bench_calls"
