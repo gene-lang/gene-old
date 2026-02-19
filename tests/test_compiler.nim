@@ -482,6 +482,11 @@ suite "Compiler - Member access":
     let code = mainFnCode(m)
     check code.hasOpcode(OpGetMember)
 
+  test "dot path emits zero-arg method call":
+    let m = compile("x/.bar")
+    let code = mainFnCode(m)
+    check code.hasOpcode(OpCallMethod)
+
   test "self access /x":
     let m = compile("""
       (class Foo

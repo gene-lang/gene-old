@@ -791,6 +791,19 @@ proc asIntDefault(v: Value; defaultVal: int): int =
     return int(asFloat(v))
   defaultVal
 
+proc isMethodCallTarget(v: Value): bool =
+  if isNil(v):
+    return false
+  if isSymbol(v):
+    return true
+  if asFunctionObj(v) != nil:
+    return true
+  if asNativeFunctionObj(v) != nil:
+    return true
+  if asClassObj(v) != nil:
+    return true
+  false
+
 proc resumeValue*(vm: var Vm; value: Value): Value
 
 proc invokeArrayMethod(vm: var Vm; receiver: Value; methodName: string; args: seq[Value]; kwargs: Value): tuple[handled: bool, value: Value] =
@@ -2429,6 +2442,9 @@ proc executeFunction(
             pushValue(frame, getMember(receiver, methodName))
           else:
             handleThrow(vmRuntimeError(vm, "method not found: " & methodName, "AIR.OOP.METHOD_NOT_FOUND"))
+        elif argc == 0 and not isMethodCallTarget(methodValue):
+          # Allow path sugar `obj/.field` to read non-callable members.
+          pushValue(frame, methodValue)
         else:
           let callResult = invokeValue(vm, methodValue, args, receiver)
           pushValue(frame, callResult)
@@ -2457,6 +2473,8 @@ proc executeFunction(
             pushValue(frame, getMember(receiver, methodName))
           else:
             handleThrow(vmRuntimeError(vm, "method not found: " & methodName, "AIR.OOP.METHOD_NOT_FOUND"))
+        elif argc == 0 and not kwargsHasEntries(kwargs) and not isMethodCallTarget(methodValue):
+          pushValue(frame, methodValue)
         else:
           let callResult = invokeValue(vm, methodValue, args, receiver, kwargs)
           pushValue(frame, callResult)

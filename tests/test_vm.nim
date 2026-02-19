@@ -470,6 +470,14 @@ suite "VM - Arrays":
     """)
     check asInt(r) == 10
 
+  test "array index assignment":
+    let r = run("""
+      (var arr [10 20 30])
+      (arr/0 = 42)
+      arr/0
+    """)
+    check asInt(r) == 42
+
   test "array length":
     let r = run("""
       (var arr [1 2 3 4 5])
@@ -582,6 +590,25 @@ suite "VM - Classes":
       (p .sum)
     """)
     check asInt(r) == 7
+
+  test "slash-dot method call sugar":
+    let r = run("""
+      (class Counter
+        (ctor [start]
+          (/value = start))
+        (method inc []
+          (/value += 1)
+          /value)
+        (method read []
+          /value))
+      (var c (new Counter 9))
+      {^first c/.inc ^second c/.inc ^current c/.read}
+    """)
+    let m = asMapObj(r)
+    check m != nil
+    check asInt(m.entries["first"]) == 10
+    check asInt(m.entries["second"]) == 11
+    check asInt(m.entries["current"]) == 11
 
   test "class method with args":
     let r = run("""

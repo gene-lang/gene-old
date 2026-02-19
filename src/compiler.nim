@@ -166,7 +166,7 @@ proc compilePathLookup(ctx: FnContext; symbolText: string) =
       if parsed.nilSafe:
         ctx.emit(OpGetMemberNil, b = sid.uint32)
       else:
-        ctx.emit(OpGetMember, b = sid.uint32)
+        ctx.emit(OpCallMethod, b = sid.uint32, c = 0)
     else:
       let sid = runtimeSym(ctx.m, segment)
       if parsed.nilSafe:
@@ -230,6 +230,8 @@ proc compileLValueStore(ctx: FnContext; lhs: AstNode; valueExpr: AstNode; compou
 
     if compoundOp.len > 0:
       let lastSeg = parts[^1]
+      # Preserve the assignment target while reading the previous value.
+      ctx.emit(OpDup)
       var tmpIdx: int
       if parseIntMaybe(lastSeg, tmpIdx):
         ctx.emit(OpGetChild, b = tmpIdx.uint32)
@@ -252,6 +254,7 @@ proc compileLValueStore(ctx: FnContext; lhs: AstNode; valueExpr: AstNode; compou
     var leafIdx: int
     if parseIntMaybe(leaf, leafIdx):
       discard ctx.emitConst(valueInt(leafIdx))
+      ctx.emit(OpSwap)
       ctx.emit(OpSetMemberDynamic)
     else:
       let sid = runtimeSym(ctx.m, leaf)
