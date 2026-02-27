@@ -20,7 +20,7 @@ must_haves:
     - "The JSON envelope is emitted at the point where gene-old currently calls format_runtime_exception"
     - "Existing test_exception.nim tests continue to pass after the change"
     - "A new test asserts the structured fields are present in the error output"
-    - "Source location (file, line, col) is populated from SourceTrace when available"
+    - "Source location (filename, line, column) is populated from SourceTrace when available"
   artifacts:
     - path: "src/gene/vm/diagnostics.nim"
       provides: "make_diagnostic_message, infer_diag_code helpers"
@@ -85,7 +85,10 @@ proc current_trace(self: ptr VirtualMachine): SourceTrace =
   nil
 ```
 
-SourceTrace has fields: file, line, col (check src/gene/types/type_defs.nim for exact fields).
+SourceTrace fields (confirmed from src/gene/types/type_defs.nim):
+- `filename`: string
+- `line`: int
+- `column`: int
 
 From src/gene/vm/exceptions.nim (call sites that raise with format_runtime_exception):
 ```nim
@@ -136,7 +139,7 @@ Implement the following procs:
    - Pattern: `"failed to load extension"` -> `"GENE.EXT.LOAD_FAILED"`
    - Default: `"GENE.RUNTIME.ERROR"`
 
-2. `proc make_diagnostic_message(code, message: string; stage = "runtime"; file = ""; line = 0; col = 0; hints: seq[string] = @[]): string`
+2. `proc make_diagnostic_message(code, message: string; stage = "runtime"; file = ""; line = 0; column = 0; hints: seq[string] = @[]): string`
    - Builds a JSON object string using std/json (`newJObject`, `%`, `%*`)
    - Fields: `code`, `severity` (always `"error"`), `stage`, `span` (`{file, line, column}`), `message`, `hints` (array), `repair_tags` (array, always `["runtime"]`)
    - Returns `$root` (the JSON string)
@@ -148,10 +151,10 @@ Implement the following procs:
 
 Note: gene-old uses Nim's `std/json`. Add `import std/json` at the top of diagnostics.nim. The file is included (not imported) via vm.nim's include chain, so it can reference VirtualMachine and SourceTrace directly.
 
-Check `src/gene/types/type_defs.nim` for the exact fields on `SourceTrace` before implementing — look for `file`/`path`, `line`, `col`/`column` field names.
+SourceTrace fields are confirmed as `filename` (string), `line` (int), and `column` (int) — use these exact names.
   </action>
-  <verify>nim c -c src/gene/vm/diagnostics.nim 2>&1 | head -20 || echo "compile check via include from test"</verify>
-  <done>diagnostics.nim exists with make_diagnostic_message, infer_diag_code, and is_diagnostic_envelope procs; no compile errors when included.</done>
+  <verify>nim c -r tests/test_exception.nim 2>&1 | tail -20</verify>
+  <done>diagnostics.nim exists with make_diagnostic_message, infer_diag_code, and is_diagnostic_envelope procs; test_exception.nim compiles and passes (exercises diagnostics.nim transitively).</done>
 </task>
 
 <task type="auto">
@@ -200,18 +203,16 @@ proc format_runtime_exception(self: ptr VirtualMachine, value: Value): string =
   else:
     detail = $value
   # Return structured JSON envelope instead of plain string
-  let (file, line, col) = if trace != nil: (trace.file, trace.line, trace.col) else: ("", 0, 0)
-  # NOTE: check exact SourceTrace field names; adjust file/line/col access accordingly
+  # SourceTrace fields: filename (string), line (int), column (int)
+  let (file, line, column) = if trace != nil: (trace.filename, trace.line, trace.column) else: ("", 0, 0)
   make_diagnostic_message(
     code = infer_diag_code(detail),
     message = detail,
     file = file,
     line = line,
-    col = col
+    column = column
   )
 ```
-
-**Important:** Check the actual SourceTrace field names in `src/gene/types/type_defs.nim` before writing the accessor. The field may be `path` not `file`, or `column` not `col`. Use grep to verify before implementing.
 
 **Step 3: Update tests/test_exception.nim.**
 

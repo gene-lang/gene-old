@@ -4,7 +4,7 @@ plan: 03
 type: execute
 wave: 2
 depends_on:
-  - 01-structured-diagnostics-PLAN.md
+  - "01"
 files_modified:
   - src/gene/vm/verifier.nim
   - src/gene/compiler.nim
@@ -127,7 +127,13 @@ proc load_gir*(path: string): CompilationUnit = ...
   <name>Task 1: Implement verifier.nim with stack-depth and jump-target checks</name>
   <files>src/gene/vm/verifier.nim</files>
   <action>
-Create `src/gene/vm/verifier.nim`. This module is included from vm.nim (via the include chain) and can reference the types already in scope. Alternatively it can be a standalone importable module - check whether compiler.nim and gir.nim are in the include chain or import separately, and follow the same pattern.
+Create `src/gene/vm/verifier.nim` as a standalone importable module. Both `compiler.nim` and `gir.nim` need to `import` it independently (they are not in the vm.nim include chain), so verifier.nim must be a proper module with its own imports — not relying on being included from vm.nim.
+
+At the top of the file add:
+```nim
+import ../types
+```
+Adjust the relative path as needed depending on where verifier.nim sits relative to the types module. Confirm the correct path by checking how other standalone modules under `src/gene/vm/` import types.
 
 **Type definitions:**
 
@@ -235,15 +241,9 @@ proc verify_compilation_unit*(cu: CompilationUnit): VerifyResult =
   verify_stack_depths(cu, result)
   result.ok = result.issues.len == 0
 ```
-
-The file must `import` (not include) the types module so compiler.nim and gir.nim can import it directly:
-```nim
-import ../types
-```
-Adjust import path as needed based on where verifier.nim sits relative to the types module.
   </action>
   <verify>nim c --mm:orc -c src/gene/vm/verifier.nim 2>&1 | head -20</verify>
-  <done>verifier.nim compiles cleanly; exports VerifyResult and verify_compilation_unit.</done>
+  <done>verifier.nim compiles cleanly as a standalone module; exports VerifyResult and verify_compilation_unit.</done>
 </task>
 
 <task type="auto">
@@ -277,7 +277,7 @@ when not defined(GENE_NO_VERIFY):
     )
 ```
 
-Note: `make_diagnostic_message` comes from diagnostics.nim (plan 01). If plan 01 is not yet applied, use a plain string error instead and leave a TODO comment. The `when not defined(GENE_NO_VERIFY)` guard allows disabling verification in tests that intentionally produce bad bytecode for other reasons.
+Note: `make_diagnostic_message` comes from diagnostics.nim (plan 01, which is a prerequisite — depends_on: ["01"]). The `when not defined(GENE_NO_VERIFY)` guard allows disabling verification in tests that intentionally produce bad bytecode for other reasons.
 
 **Step 2: Wire verifier into gir.nim.**
 

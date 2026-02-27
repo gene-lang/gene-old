@@ -17,7 +17,7 @@ requirements:
 
 must_haves:
   truths:
-    - "gene-old no longer statically imports genex modules at the top of vm.nim"
+    - "gene-old no longer statically imports the sqlite and http genex modules at the top of vm.nim (html, logging, test, and ai/bindings static imports remain intact)"
     - "A stable C-ABI struct (GeneHostApi) is defined for extension registration"
     - "The existing extension loader in vm/extension.nim is upgraded to use the new ABI"
     - "At least sqlite and http can be built as shared libraries via nimble buildext and loaded at runtime"
@@ -30,7 +30,7 @@ must_haves:
       provides: "Updated load_extension using GeneHostApi with ABI version check"
       contains: "GeneExtAbiVersion"
     - path: "src/gene/vm.nim"
-      provides: "Static genex imports removed; runtime loading used instead"
+      provides: "Static sqlite and http imports removed; html/logging/test/ai/bindings static imports untouched"
       contains: "no longer: import ../genex/http"
   key_links:
     - from: "src/gene/vm/extension.nim"
@@ -44,11 +44,11 @@ must_haves:
 ---
 
 <objective>
-Define a stable C-ABI extension contract for gene-old, replace the static genex imports in vm.nim with runtime dynamic loading, and migrate at least the sqlite and http extensions to the new ABI.
+Define a stable C-ABI extension contract for gene-old, replace the static sqlite and http genex imports in vm.nim with runtime dynamic loading, and migrate those two extensions to the new ABI.
 
-Purpose: Directly fixes the top tech debt item from CONCERNS.md ("VM statically imports multiple genex modules as a temporary workaround"). After this plan, extensions are independent shared libraries loaded at runtime without recompiling gene-old. This enables third-party extensions and modular deployment.
+Purpose: Directly fixes the top tech debt item from CONCERNS.md ("VM statically imports multiple genex modules as a temporary workaround"). After this plan, sqlite and http are independent shared libraries loaded at runtime without recompiling gene-old. This enables third-party extensions and modular deployment. The remaining static imports (html, logging, test, ai/bindings) are out of scope for this plan to avoid breaking their registration paths.
 
-Output: New extension_abi.nim type contract; upgraded extension.nim loader with ABI version checking; sqlite.nim and http.nim adapted to export gene_init; static imports removed from vm.nim.
+Output: New extension_abi.nim type contract; upgraded extension.nim loader with ABI version checking; sqlite.nim and http.nim adapted to export gene_init; sqlite and http static imports removed from vm.nim (others remain).
 </objective>
 
 <execution_context>
@@ -88,6 +88,8 @@ when not defined(GENE_NO_STDLIB):
 when defined(GENE_LLM):
   import "../genex/llm"
 ```
+
+This plan removes ONLY the `http` and `sqlite` lines. The `html`, `logging`, `test`, and `ai/bindings` lines must remain untouched because their registration paths are not yet migrated.
 
 Reference ABI from gene/src/native_abi.nim:
 ```nim
@@ -195,7 +197,7 @@ nim c --mm:orc src/gene/vm/extension_abi.nim
 </task>
 
 <task type="auto">
-  <name>Task 2: Upgrade extension.nim loader and remove static vm.nim imports</name>
+  <name>Task 2: Upgrade extension.nim loader, remove only sqlite/http static imports, migrate those two extensions</name>
   <files>
     src/gene/vm/extension.nim
     src/gene/vm.nim
@@ -204,6 +206,16 @@ nim c --mm:orc src/gene/vm/extension_abi.nim
     tests/test_ext.nim
   </files>
   <action>
+**Step 0: Audit tests/test_ext.nim before making any changes.**
+
+Read `tests/test_ext.nim` and identify:
+- Which tests use sqlite functionality
+- Which tests use http functionality
+- Which tests use html, logging, test, or ai/bindings functionality
+- Whether any test imports the namespace via static path vs dynamic load
+
+Record this in a comment at the top of the test file update. This audit ensures no test relying on statically-registered namespaces is broken by the scope-limited removal.
+
 **Step 1: Update src/gene/vm/extension.nim to use GeneHostAbi.**
 
 The existing `load_extension` proc uses the old `Init`/`SetGlobals` approach. Upgrade it to use the new ABI:
@@ -241,24 +253,40 @@ proc register_fn_callback(reg: ptr GeneExtFnReg; user_data: pointer): int32 {.cd
 
 Note: The cdecl-to-nimcall bridge is the trickiest part. The simplest approach is to store the GeneExtNativeFn pointer in a Value and call it via a nimcall wrapper proc that does the cast. See how existing NativeFn is stored: `r.native_fn = the_fn` where `r` is `new_ref(VkNativeFn)`.
 
-**Step 2: Remove static imports from src/gene/vm.nim.**
+**Step 2: Remove ONLY the sqlite and http static imports from src/gene/vm.nim.**
 
 Find the block (around line 85-94):
 ```nim
 # Temporarily import http and sqlite modules until extension loading is fixed
 when not defined(GENE_NO_STDLIB):
   import "../genex/http"
-  ...
+  import "../genex/sqlite"
+  import "../genex/html"
+  import "../genex/logging"
+  import "../genex/test"
+  import "../genex/ai/bindings"
+when defined(GENE_LLM):
+  import "../genex/llm"
 ```
 
-Replace it with a comment:
+Remove ONLY the `import "../genex/http"` and `import "../genex/sqlite"` lines. Leave `html`, `logging`, `test`, and `ai/bindings` exactly as they are — their registration paths are not yet migrated and removing them would break those namespaces.
+
+Update the comment to reflect the partial migration:
 ```nim
-# Extensions are now loaded at runtime via src/gene/vm/extension.nim
+# http and sqlite are now loaded at runtime via src/gene/vm/extension.nim
 # Use: (import genex/sqlite) or (import genex/http) in Gene programs
-# Extensions must be pre-built: nimble buildext
+# Prerequisite: nimble buildext (builds .dylib files)
+# TODO: migrate html, logging, test, ai/bindings to dynamic ABI in a future plan
+when not defined(GENE_NO_STDLIB):
+  import "../genex/html"
+  import "../genex/logging"
+  import "../genex/test"
+  import "../genex/ai/bindings"
+when defined(GENE_LLM):
+  import "../genex/llm"
 ```
 
-Also update the vm_modules.nim or wherever stdlib registration happens: the genex namespaces that were previously pre-registered via static imports now need to be loaded on demand. Check `src/gene/vm/vm_modules.nim` to see how the genex namespaces were registered and whether removing the imports breaks anything.
+Also update the vm_modules.nim or wherever sqlite/http namespace registration happens: these namespaces were previously pre-registered via static imports and now need to be loaded on demand via `load_extension`. Check `src/gene/vm/vm_modules.nim` to see how the genex namespaces were registered and update accordingly for sqlite and http only.
 
 **Step 3: Minimal adaptation of src/genex/sqlite.nim and src/genex/http.nim.**
 
@@ -284,13 +312,14 @@ If adapting the full gene_init is too complex in this plan, a minimal viable app
 
 **Step 4: Update tests/test_ext.nim.**
 
-Verify that the existing test_ext.nim tests still pass. If any tests relied on the static import path, update them to use the dynamic load path. Check what test_ext.nim currently tests and add a comment noting which tests exercise the new ABI.
+Based on the audit from Step 0, update test_ext.nim so that sqlite and http tests use the dynamic load path. Tests for html, logging, test, and ai/bindings must remain unchanged and continue to pass through the static registration path.
 
 Run: `nim c -r tests/test_ext.nim`
   </action>
   <verify>nim c -r tests/test_ext.nim 2>&1 | tail -20</verify>
   <done>
-    - vm.nim no longer has the static genex import block (search: grep "Temporarily import" src/gene/vm.nim should return empty)
+    - vm.nim no longer has the sqlite and http static import lines (search: `grep "genex/http\|genex/sqlite" src/gene/vm.nim` should return empty)
+    - vm.nim still has the html, logging, test, and ai/bindings static imports
     - extension.nim has a gene_init lookup path and GeneHostAbi struct
     - sqlite.nim and http.nim export gene_init
     - test_ext.nim passes
@@ -302,15 +331,16 @@ Run: `nim c -r tests/test_ext.nim`
 
 <verification>
 Run from /Users/gcao/gene-workspace/gene-old:
-1. `grep -n "Temporarily import" src/gene/vm.nim` - should return empty (imports removed)
-2. `nim c -r tests/test_ext.nim` - extension tests pass
-3. `nim c -r tests/test_native.nim` - native function tests unaffected
-4. `nimble buildext` - builds libsqlite.dylib, libhttp.dylib successfully
-5. `nim c -r tests/test_basic.nim` - no regressions in core VM
+1. `grep -n "genex/http\|genex/sqlite" src/gene/vm.nim` - should return empty (those two imports removed)
+2. `grep -n "genex/html\|genex/logging\|genex/test\|genex/ai" src/gene/vm.nim` - should still show these imports (untouched)
+3. `nim c -r tests/test_ext.nim` - extension tests pass
+4. `nim c -r tests/test_native.nim` - native function tests unaffected
+5. `nimble buildext` - builds libsqlite.dylib, libhttp.dylib successfully
+6. `nim c -r tests/test_basic.nim` - no regressions in core VM
 </verification>
 
 <success_criteria>
-- vm.nim has no static genex imports (the "Temporarily import" comment block is gone)
+- vm.nim has no static sqlite or http imports; html/logging/test/ai/bindings imports remain
 - extension_abi.nim defines GENE_EXT_ABI_VERSION and GeneHostAbi
 - load_extension in extension.nim supports gene_init entry point with ABI version check
 - sqlite.nim and http.nim export gene_init satisfying the new ABI
