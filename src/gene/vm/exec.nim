@@ -5209,6 +5209,38 @@ proc exec*(self: ptr VirtualMachine): Value =
           continue
         {.pop.}
 
+      of IkCallSuperMethodKw:
+        {.push checks: off}
+        # arg0 = method name, arg1 = (total_items << 16) | kw_count
+        let method_name = inst.arg0.str
+        let kw_count = (inst.arg1.int64 and 0xFFFF).int
+        let expected = ((inst.arg1.int64 shr 16) and 0xFFFF).int
+        let call_info = self.pop_call_base_info(expected)
+        let total_items = call_info.count
+        let keyword_items = kw_count * 2
+        if total_items < keyword_items:
+          not_allowed("IkCallSuperMethodKw expected at least " & $(keyword_items) & " stack args, got " & $total_items)
+        let pos_count = total_items - keyword_items
+
+        var args = newSeq[Value](pos_count)
+        for i in countdown(pos_count - 1, 0):
+          args[i] = self.frame.pop()
+
+        var kw_pairs = newSeq[(Key, Value)](kw_count)
+        for i in countdown(kw_count - 1, 0):
+          let value = self.frame.pop()
+          let key_val = self.frame.pop()
+          kw_pairs[i] = (cast[Key](key_val), value)
+
+        let (instance, parent_class) = self.resolve_current_instance_and_parent()
+        let saved_frame = self.frame
+        if self.call_super_method_resolved(parent_class, instance, method_name, args, method_name.ends_with("!"), kw_pairs):
+          if self.frame == saved_frame:
+            self.pc.inc()
+          inst = self.cu.instructions[self.pc].addr
+          continue
+        {.pop.}
+
       of IkCallSuperCtor, IkCallSuperCtorMacro:
         {.push checks: off}
         let expected = inst.arg1.int
@@ -5222,6 +5254,38 @@ proc exec*(self: ptr VirtualMachine): Value =
         let (instance, parent_class) = self.resolve_current_instance_and_parent()
         let saved_frame = self.frame
         if self.call_super_constructor(parent_class, instance, args, inst.kind == IkCallSuperCtorMacro):
+          if self.frame == saved_frame:
+            self.pc.inc()
+          inst = self.cu.instructions[self.pc].addr
+          continue
+        {.pop.}
+
+      of IkCallSuperCtorKw:
+        {.push checks: off}
+        # arg0 = ctor/ctor! name, arg1 = (total_items << 16) | kw_count
+        let ctor_name = inst.arg0.str
+        let kw_count = (inst.arg1.int64 and 0xFFFF).int
+        let expected = ((inst.arg1.int64 shr 16) and 0xFFFF).int
+        let call_info = self.pop_call_base_info(expected)
+        let total_items = call_info.count
+        let keyword_items = kw_count * 2
+        if total_items < keyword_items:
+          not_allowed("IkCallSuperCtorKw expected at least " & $(keyword_items) & " stack args, got " & $total_items)
+        let pos_count = total_items - keyword_items
+
+        var args = newSeq[Value](pos_count)
+        for i in countdown(pos_count - 1, 0):
+          args[i] = self.frame.pop()
+
+        var kw_pairs = newSeq[(Key, Value)](kw_count)
+        for i in countdown(kw_count - 1, 0):
+          let value = self.frame.pop()
+          let key_val = self.frame.pop()
+          kw_pairs[i] = (cast[Key](key_val), value)
+
+        let (instance, parent_class) = self.resolve_current_instance_and_parent()
+        let saved_frame = self.frame
+        if self.call_super_constructor(parent_class, instance, args, ctor_name.ends_with("!"), kw_pairs):
           if self.frame == saved_frame:
             self.pc.inc()
           inst = self.cu.instructions[self.pc].addr

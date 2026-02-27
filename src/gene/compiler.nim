@@ -354,9 +354,7 @@ proc compile_symbol(self: Compiler, input: Value) =
           self.emit(Instruction(kind: IkSelf))
         return
       elif symbol_str == "super":
-        # Push runtime super proxy (handled by IkSuper at execution time)
-        self.emit(Instruction(kind: IkSuper))
-        return
+        not_allowed("super can only be used in call form: (super .member ...)")
       elif symbol_str.startsWith("@") and symbol_str.len > 1:
         # Handle @shorthand syntax: @test -> (@ "test"), @0 -> (@ 0)
         let prop_name = symbol_str[1..^1]

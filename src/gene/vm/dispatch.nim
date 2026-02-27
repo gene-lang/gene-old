@@ -814,7 +814,7 @@ proc resolve_current_instance_and_parent(self: ptr VirtualMachine): tuple[instan
 
   (instance, current_class.parent)
 
-proc call_super_constructor(self: ptr VirtualMachine, parent_class: Class, instance: Value, args: openArray[Value], expect_macro: bool): bool =
+proc call_super_constructor(self: ptr VirtualMachine, parent_class: Class, instance: Value, args: openArray[Value], expect_macro: bool, kw_pairs: seq[(Key, Value)] = @[]): bool =
   ## Invoke a superclass constructor without allocation.
   if parent_class == nil:
     not_allowed("No parent class available for super")
@@ -848,11 +848,18 @@ proc call_super_constructor(self: ptr VirtualMachine, parent_class: Class, insta
         scope.ref_count.inc()
     else:
       scope = new_scope(f.scope_tracker, f.parent_scope)
-      if args.len > 0:
-        var user_args = newSeq[Value](args.len)
-        for i in 0..<args.len:
-          user_args[i] = args[i]
-        process_args_direct(f.matcher, cast[ptr UncheckedArray[Value]](user_args[0].addr), user_args.len, false, scope)
+      var user_args = newSeq[Value](args.len)
+      for i in 0..<args.len:
+        user_args[i] = args[i]
+      let args_ptr =
+        if user_args.len > 0:
+          cast[ptr UncheckedArray[Value]](user_args[0].addr)
+        else:
+          cast[ptr UncheckedArray[Value]](nil)
+      if kw_pairs.len > 0:
+        process_args_direct_kw(f.matcher, args_ptr, user_args.len, kw_pairs, scope)
+      else:
+        process_args_direct(f.matcher, args_ptr, user_args.len, false, scope)
       assign_property_params(f.matcher, scope, instance)
 
     var new_frame = new_frame()
@@ -892,6 +899,18 @@ proc call_super_constructor(self: ptr VirtualMachine, parent_class: Class, insta
   of VkNativeFn:
     if expect_macro:
       not_allowed("Superclass constructor is not macro-like")
+    if kw_pairs.len > 0:
+      var native_args = newSeq[Value](args.len + 1)
+      var kw_map = new_map_value()
+      for (k, v) in kw_pairs:
+        map_data(kw_map)[k] = v
+      native_args[0] = kw_map
+      for i in 0..<args.len:
+        native_args[i + 1] = args[i]
+      let result = call_native_fn(ctor.ref.native_fn, self, native_args, true)
+      self.frame.push(result)
+      return true
+
     let result = call_native_fn(ctor.ref.native_fn, self, args)
     self.frame.push(result)
     return true

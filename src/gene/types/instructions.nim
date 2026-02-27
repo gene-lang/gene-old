@@ -85,7 +85,8 @@ proc `$`*(self: Instruction): string =
         result = fmt"{self.label.int32.to_hex()} {($self.kind)[2..^1]:<20} {$self.arg0} {target_label.int:04X}"
       else:
         result = fmt"         {($self.kind)[2..^1]:<20} {$self.arg0} {target_label.int:04X}"
-    of IkCallSuperMethod, IkCallSuperMethodMacro, IkCallSuperCtor, IkCallSuperCtorMacro:
+    of IkCallSuperMethod, IkCallSuperMethodMacro, IkCallSuperMethodKw,
+       IkCallSuperCtor, IkCallSuperCtorMacro, IkCallSuperCtorKw:
       if self.label.int > 0:
         result = fmt"{self.label.int32.to_hex()} {($self.kind)[2..^1]:<20} {$self.arg0} {self.arg1}"
       else:

@@ -527,10 +527,5 @@ proc compile_new(self: Compiler, gene: ptr Gene) =
   self.emit(Instruction(kind: IkNew, arg1: is_macro_new.int32))
 
 proc compile_super(self: Compiler, gene: ptr Gene) =
-  # Super: returns the parent class
-  # Usage: (super .method args...)
-  if gene.children.len > 0:
-    not_allowed("super takes no arguments")
-  
-  # Push the parent class
-  self.emit(Instruction(kind: IkSuper))
+  discard gene
+  not_allowed("super can only be used in call form: (super .member ...)")

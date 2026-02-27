@@ -41,6 +41,23 @@ test_vm """
   ((new Child) .m ^x 42)
 """, 42.to_value()
 
+# Super call to parent constructor should forward keyword args
+
+test_vm """
+  (class Base
+    (ctor [^x ^y]
+      (/sum = (+ x y))
+    )
+  )
+  (class Child < Base
+    (ctor [^x ^y]
+      (super .ctor ^x x ^y y)
+    )
+  )
+  (var c (new Child ^x 3 ^y 4))
+  c/sum
+""", 7.to_value()
+
 # Super call to parent macro method should preserve unevaluated args
 
 test_vm """
@@ -73,3 +90,17 @@ test_vm """
   c/body
 """, proc(v: Value) =
   check v.kind == VkGene
+
+# Bare super proxies are not supported; use (super .member ...).
+
+test_vm_error """
+  (class Base
+    (method m [] 1)
+  )
+  (class Child < Base
+    (method m []
+      super
+    )
+  )
+  ((new Child) .m)
+"""

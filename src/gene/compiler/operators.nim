@@ -695,10 +695,8 @@ proc compile_gene(self: Compiler, input: Value) =
     self.compile_literal(gene.type)
     return
   
-  # Special case: super calls (positional-only fast path).
-  # If keyword arguments are present, fall through so `super` becomes a runtime proxy
-  # and keyword pairs can be forwarded via unified method call dispatch.
-  if gene.type.kind == VkSymbol and gene.type.str == "super" and gene.props.len == 0:
+  # Special case: super calls use dedicated super-call instructions.
+  if gene.type.kind == VkSymbol and gene.type.str == "super":
     if gene.children.len == 0:
       not_allowed("super requires a member")
     let member = gene.children[0]
@@ -715,32 +713,56 @@ proc compile_gene(self: Compiler, input: Value) =
     let arg_start = 1
     let arg_count = gene.children.len - arg_start
 
-    let old_tail = self.tail_position
-    self.tail_position = false
-    for i in arg_start..<gene.children.len:
-      let arg = gene.children[i]
-      # For macro super calls, forward plain symbols as-is (already unevaluated)
-      let needs_quote = is_macro and arg.kind != VkSymbol
-      if needs_quote:
-        self.quote_level.inc()
-      self.compile(arg)
-      if needs_quote:
-        self.quote_level.dec()
-    self.tail_position = old_tail
+    if gene.props.len == 0:
+      let old_tail = self.tail_position
+      self.tail_position = false
+      for i in arg_start..<gene.children.len:
+        let arg = gene.children[i]
+        # For macro super calls, forward plain symbols as-is (already unevaluated)
+        let needs_quote = is_macro and arg.kind != VkSymbol
+        if needs_quote:
+          self.quote_level.inc()
+        self.compile(arg)
+        if needs_quote:
+          self.quote_level.dec()
+      self.tail_position = old_tail
 
-    let inst_kind =
-      if is_ctor:
-        if is_macro: IkCallSuperCtorMacro else: IkCallSuperCtor
-      else:
-        if is_macro: IkCallSuperMethodMacro else: IkCallSuperMethod
+      let inst_kind =
+        if is_ctor:
+          if is_macro: IkCallSuperCtorMacro else: IkCallSuperCtor
+        else:
+          if is_macro: IkCallSuperMethodMacro else: IkCallSuperMethod
 
-    self.emit(
-      Instruction(
-        kind: inst_kind,
-        arg0: member_name.to_symbol_value(),
-        arg1: arg_count.int32,
+      self.emit(
+        Instruction(
+          kind: inst_kind,
+          arg0: member_name.to_symbol_value(),
+          arg1: arg_count.int32,
+        )
       )
-    )
+    else:
+      # Keyword super-call layout mirrors IkUnifiedMethodCallKw:
+      # [kw_key1, kw_val1, ..., kw_keyN, kw_valN, pos_arg1, ..., pos_argM]
+      if is_macro:
+        self.quote_level.inc()
+
+      for k, v in gene.props:
+        self.emit(Instruction(kind: IkPushValue, arg0: cast[Value](k)))
+        self.compile(v)
+
+      for i in arg_start..<gene.children.len:
+        self.compile(gene.children[i])
+
+      if is_macro:
+        self.quote_level.dec()
+
+      let kw_count = gene.props.len
+      let total_items = arg_count + kw_count * 2
+      if kw_count > 0xFFFF or total_items > 0xFFFF:
+        not_allowed("Too many keyword arguments for super call")
+      let packed = ((total_items shl 16) or kw_count).int32
+      let inst_kind = if is_ctor: IkCallSuperCtorKw else: IkCallSuperMethodKw
+      self.emit(Instruction(kind: inst_kind, arg0: member_name.to_symbol_value(), arg1: packed))
     return
 
   let is_quoted_symbol_method_call = gene.type.kind == VkQuote and gene.type.ref.quote.kind == VkSymbol and

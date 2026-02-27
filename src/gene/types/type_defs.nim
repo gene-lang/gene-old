@@ -711,8 +711,10 @@ type
     IkDefineProp        # Define a typed property on a class
     IkCallSuperMethod   # Call superclass eager method
     IkCallSuperMethodMacro # Call superclass macro method
+    IkCallSuperMethodKw # Call superclass method with keyword args (macro inferred from method name suffix)
     IkCallSuperCtor     # Call superclass constructor (eager)
     IkCallSuperCtorMacro # Call superclass constructor (macro)
+    IkCallSuperCtorKw   # Call superclass constructor with keyword args (macro inferred from method name suffix)
     IkSuper             # Push the parent method as a bound method (legacy proxy)
 
     IkMapStart
