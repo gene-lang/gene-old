@@ -640,6 +640,12 @@ proc resolve_native_module(module_path: string, importer_dir: string, package_ro
       let native_candidate = candidate & native_ext_suffix()
       if fileExists(native_candidate):
         return canonical_path(native_candidate)
+      let ext_dir_candidate = canonical_path(joinPath(base, "build", "extensions", normalized))
+      if fileExists(ext_dir_candidate):
+        return ext_dir_candidate
+      let ext_dir_native = ext_dir_candidate & native_ext_suffix()
+      if fileExists(ext_dir_native):
+        return canonical_path(ext_dir_native)
 
   if package_root.len > 0:
     let base = splitFile(normalized).name
@@ -647,6 +653,10 @@ proc resolve_native_module(module_path: string, importer_dir: string, package_ro
     let build_native = build_base & native_ext_suffix()
     if fileExists(build_native):
       return canonical_path(build_native)
+    let build_ext_base = joinPath(package_root, "build", "extensions", base)
+    let build_ext_native = build_ext_base & native_ext_suffix()
+    if fileExists(build_ext_native):
+      return canonical_path(build_ext_native)
 
   return ""
 
@@ -827,7 +837,7 @@ proc extension_library_path(name: string): string =
   else:
     result = "build" / ("lib" & name & ".so")
 
-proc ensure_genex_extension(vm: ptr VirtualMachine, part: string): Value =
+proc ensure_genex_extension*(vm: ptr VirtualMachine, part: string): Value =
   ## Ensure a genex extension is loaded when accessing genex/<part>.
   if App == NIL or App.kind != VkApplication:
     return NIL

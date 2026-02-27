@@ -818,17 +818,12 @@ proc exec*(self: ptr VirtualMachine): Value =
               # Auto-load extensions when accessing genex/name
               var member = value.ref.ns[name]
               if member == NIL:
-                # Try to load the extension
                 let symbol_index = cast[uint64](name) and PAYLOAD_MASK
                 let ext_name = get_symbol(symbol_index.int)
-                let ext_path = "build/lib" & ext_name & ".dylib"
-                when not defined(noExtensions):
-                  try:
-                    let ext_ns = load_extension(self, ext_path)
-                    value.ref.ns[name] = ext_ns.to_value()
-                    member = ext_ns.to_value()
-                  except CatchableError:
-                    discard
+                member = ensure_genex_extension(self, ext_name)
+                if member == NIL:
+                  # Avoid repeated failed lookup attempts.
+                  value.ref.ns[name] = NIL
               retain(member)
               self.frame.push(member)
             else:
