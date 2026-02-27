@@ -632,7 +632,9 @@ proc exec*(self: ptr VirtualMachine): Value =
                 self.frame.push(r)
           of VkGene:
             # Evaluate a gene expression - compile and execute it
-            let compiled = compile_init(value)
+            let parent_scope_tracker =
+              if self.frame.scope != nil: self.frame.scope.tracker else: nil
+            let compiled = compile_init(value, parent_scope_tracker = parent_scope_tracker)
             # Save current state
             let saved_cu = self.cu
             let saved_pc = self.pc
@@ -647,7 +649,9 @@ proc exec*(self: ptr VirtualMachine): Value =
           of VkQuote:
             # Evaluate a quoted expression by compiling and executing the quoted value
             let quoted_value = value.ref.quote
-            let compiled = compile_init(quoted_value)
+            let parent_scope_tracker =
+              if self.frame.scope != nil: self.frame.scope.tracker else: nil
+            let compiled = compile_init(quoted_value, parent_scope_tracker = parent_scope_tracker)
             # Save current state
             let saved_cu = self.cu
             let saved_pc = self.pc
