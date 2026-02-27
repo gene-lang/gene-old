@@ -82,58 +82,6 @@ test_vm """
   (a + b)
 """, 3
 
-# TODO: match is not implemented in VM yet
-# test_vm """
-#   (var x (_ 1))
-#   (match [a b = nil] x)
-#   b
-# """, Value(kind: VkNil)
-
-# TODO: match is not implemented in VM yet
-# test_vm """
-#   (match
-#     [:if cond :then logic1 :else logic2]
-#     [:if 0    :then 1      :else 2]
-#   )
-#   cond
-# """, 0
-
-# TODO: match is not implemented in VM yet
-# test_vm """
-#   (match
-#     [:if cond :then logic1 :else logic2]
-#     [:if 0    :then 1      :else 2]
-#   )
-#   logic1
-# """, 1
-
-# TODO: match is not implemented in VM yet
-# test_vm """
-#   (match
-#     [:if cond :then logic1 :else logic2]
-#     [:if 0    :then 1      :else 2]
-#   )
-#   logic2
-# """, 2
-
-# TODO: match is not implemented in VM yet
-# test_vm """
-#   (match
-#     [:if cond :then logic1... :else logic2...]
-#     [:if 0    :then 1 2       :else 3 4]
-#   )
-#   logic1
-# """, @[1, 2]
-
-# TODO: match is not implemented in VM yet
-# test_vm """
-#   (match
-#     [:if cond :then logic1... :else logic2...]
-#     [:if 0    :then 1 2       :else 3 4]
-#   )
-#   logic2
-# """, @[3, 4]
-
 # proc test_arg_matching*(pattern: string, input: string, callback: proc(result: MatchResult)) =
 #   var pattern = cleanup(pattern)
 #   var input = cleanup(input)
