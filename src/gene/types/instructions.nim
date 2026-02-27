@@ -60,6 +60,7 @@ proc replace_traces_range*(self: CompilationUnit, start_pos, end_pos: int, repla
 proc `$`*(self: Instruction): string =
   case self.kind
     of IkPushValue, IkVar, IkVarResolve, IkVarAssign,
+       IkVarDestructure,
        IkAddValue, IkVarAddValue, IkVarSubValue, IkVarMulValue, IkVarDivValue, IkVarModValue,
        IkIncVar, IkDecVar,
        IkLtValue, IkVarLtValue, IkVarLeValue, IkVarGtValue, IkVarGeValue, IkVarEqValue,

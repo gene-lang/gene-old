@@ -82,6 +82,34 @@ test_vm """
   (a + b)
 """, 3
 
+test_vm """
+  (var [a = 1 b] [2])
+  [a b]
+""", proc(r: Value) =
+  check r.kind == VkArray
+  check array_data(r).len == 2
+  check array_data(r)[0] == 1
+  check array_data(r)[1] == 2
+
+test_vm """
+  (var payload `(payload ^a 10 ^x 99 20 30 40))
+  (var [^a b c... ^rest...] payload)
+  [a b c rest/x]
+""", proc(r: Value) =
+  check r.kind == VkArray
+  check array_data(r).len == 4
+  check array_data(r)[0] == 10
+  check array_data(r)[1] == 20
+  check array_data(r)[2].kind == VkArray
+  check array_data(array_data(r)[2]).len == 2
+  check array_data(array_data(r)[2])[0] == 30
+  check array_data(array_data(r)[2])[1] == 40
+  check array_data(r)[3] == 99
+
+test_vm_error """
+  (var [^a b c...] [1 2 3])
+"""
+
 # proc test_arg_matching*(pattern: string, input: string, callback: proc(result: MatchResult)) =
 #   var pattern = cleanup(pattern)
 #   var input = cleanup(input)

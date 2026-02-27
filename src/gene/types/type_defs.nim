@@ -820,6 +820,7 @@ type
     # VM builtins
     IkVmDurationStart
     IkVmDuration
+    IkVarDestructure  # Matcher-based var destructuring (arg0=[pattern, [target-indices]])
 
   # Keep the size of Instruction to 2*8 = 16 bytes
   Instruction* = object

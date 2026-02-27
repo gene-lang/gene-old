@@ -233,6 +233,25 @@ proc exec*(self: ptr VirtualMachine): Value =
         self.frame.push(value)
         {.pop.}
 
+      of IkVarDestructure:
+        let source = self.frame.pop()
+        let payload = inst.arg0
+        if payload.kind != VkArray:
+          not_allowed("IkVarDestructure expects payload [pattern [indices]]")
+        let parts = array_data(payload)
+        if parts.len != 2:
+          not_allowed("IkVarDestructure payload must contain pattern and index array")
+        let pattern = parts[0]
+        let raw_indices = parts[1]
+        if raw_indices.kind != VkArray:
+          not_allowed("IkVarDestructure payload indices must be an array")
+        var target_indices: seq[int16] = @[]
+        for item in array_data(raw_indices):
+          if item.kind notin {VkInt, VkFloat}:
+            not_allowed("IkVarDestructure index must be numeric")
+          target_indices.add(item.int64.int16)
+        bind_destructure_pattern(pattern, source, self.frame.scope, target_indices)
+
       of IkVarResolve:
         {.push checks: off}
         # when not defined(release):

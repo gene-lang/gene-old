@@ -366,28 +366,38 @@ proc compile_var(self: Compiler, gene: ptr Gene) =
     else:
       self.emit(Instruction(kind: IkPushValue, arg0: NIL))
 
-    for i, elem in array_data(name):
-      if elem.kind != VkSymbol:
-        not_allowed("Unsupported destructuring pattern element type: " & $elem.kind & " (only symbols supported)")
+    # Use the same matcher semantics as function parameter binding.
+    let matcher = new_arg_matcher(name)
+    var target_indices = new_array_value()
+    var has_bindings = false
 
-      # Duplicate the source array, then extract one item.
-      self.emit(Instruction(kind: IkDup))
-      self.emit(Instruction(kind: IkGetChild, arg0: i.to_value()))
+    for param in matcher.children:
+      var bind_name = ""
+      try:
+        bind_name = cast[Value](param.name_key).str
+      except CatchableError:
+        bind_name = ""
 
-      if elem.str == "_":
-        # Wildcard binding: discard extracted value.
-        self.emit(Instruction(kind: IkPop))
+      if bind_name.len == 0 or bind_name == "_":
+        array_data(target_indices).add((-1).to_value())
         continue
 
+      let key = bind_name.to_key()
       let var_index = self.scope_tracker.next_index
-      self.scope_tracker.mappings[elem.str.to_key()] = var_index
-      self.add_scope_start()
+      self.scope_tracker.mappings[key] = var_index
       self.scope_tracker.next_index.inc()
-      self.emit(Instruction(kind: IkVar, arg0: var_index.to_value()))
-      self.emit(Instruction(kind: IkPop))
+      if self.declared_names.len > 0:
+        self.declared_names[^1][key] = true
+      array_data(target_indices).add(var_index.to_value())
+      has_bindings = true
 
-    # Drop the original destructuring source and return nil.
-    self.emit(Instruction(kind: IkPop))
+    if has_bindings:
+      self.add_scope_start()
+
+    var payload = new_array_value()
+    array_data(payload).add(name)
+    array_data(payload).add(target_indices)
+    self.emit(Instruction(kind: IkVarDestructure, arg0: payload))
     self.emit(Instruction(kind: IkPushNil))
     return
 

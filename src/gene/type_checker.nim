@@ -1285,11 +1285,34 @@ proc define_pattern_bindings(self: TypeChecker, pattern: Value, value_type: Type
       self.define(name, value_type)
   of VkArray:
     var elem_type = ANY_TYPE
+    var prop_value_type = ANY_TYPE
     let resolved = self.resolve(value_type)
-    if resolved != nil and resolved.kind == TkApplied and resolved.ctor == "Array" and resolved.args.len > 0:
-      elem_type = resolved.args[0]
-    for item in array_data(pattern):
-      self.define_pattern_bindings(item, elem_type)
+    if resolved != nil and resolved.kind == TkApplied:
+      if resolved.ctor == "Array" and resolved.args.len > 0:
+        elem_type = resolved.args[0]
+      elif resolved.ctor == "Map" and resolved.args.len > 1:
+        prop_value_type = resolved.args[1]
+
+    let matcher = new_arg_matcher(pattern)
+    for child in matcher.children:
+      var bind_name = ""
+      try:
+        bind_name = cast[Value](child.name_key).str
+      except CatchableError:
+        bind_name = ""
+      if bind_name.len == 0 or bind_name == "_":
+        continue
+
+      if child.kind == MatchProp or child.is_prop:
+        if child.is_splat:
+          self.define(bind_name, TypeExpr(kind: TkApplied, ctor: "Map", args: @[ANY_TYPE, prop_value_type]))
+        else:
+          self.define(bind_name, prop_value_type)
+      else:
+        if child.is_splat:
+          self.define(bind_name, TypeExpr(kind: TkApplied, ctor: "Array", args: @[elem_type]))
+        else:
+          self.define(bind_name, elem_type)
   of VkMap:
     var map_value_type = ANY_TYPE
     let resolved = self.resolve(value_type)

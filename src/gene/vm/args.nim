@@ -211,4 +211,45 @@ proc process_args*(matcher: RootMatcher, args: Value, scope: Scope) =
     process_args_core(matcher, pos_ptr, positional.len, keywords, scope)
   else:
     process_args_core(matcher, cast[ptr UncheckedArray[Value]](nil), 0, @[], scope)
-  
+
+proc split_destructure_input(input: Value): tuple[positional: seq[Value], keywords: seq[(Key, Value)]] =
+  ## Adapt a runtime value to matcher-style positional/keyword inputs.
+  ## This lets `(var [pattern] value)` share the same binding semantics as function args.
+  result.positional = @[]
+  result.keywords = @[]
+  case input.kind
+  of VkGene:
+    result.positional = input.gene.children
+    for k, v in input.gene.props:
+      result.keywords.add((k, v))
+  of VkArray:
+    result.positional = array_data(input)
+  of VkMap:
+    for k, v in map_data(input):
+      result.keywords.add((k, v))
+  else:
+    result.positional = @[input]
+
+proc bind_destructure_pattern*(pattern: Value, input: Value, scope: Scope, target_indices: seq[int16]) =
+  ## Bind a var-destructuring pattern using the same matcher pipeline as function args.
+  if scope.is_nil:
+    not_allowed("Destructuring target scope is nil")
+
+  let matcher = new_arg_matcher(pattern)
+  let (positional, keywords) = split_destructure_input(input)
+  let pos_ptr = if positional.len > 0: cast[ptr UncheckedArray[Value]](positional[0].addr)
+                else: cast[ptr UncheckedArray[Value]](nil)
+
+  let temp_scope = new_scope(new_scope_tracker())
+  try:
+    process_args_core(matcher, pos_ptr, positional.len, keywords, temp_scope)
+    let count = min(target_indices.len, temp_scope.members.len)
+    for i in 0..<count:
+      let target = target_indices[i]
+      if target >= 0:
+        let idx = target.int
+        while scope.members.len <= idx:
+          scope.members.add(NIL)
+        scope.members[idx] = temp_scope.members[i]
+  finally:
+    temp_scope.free()
