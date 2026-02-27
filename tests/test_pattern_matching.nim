@@ -82,12 +82,6 @@ test_vm """
   (a + b)
 """, 3
 
-# Compatibility lowering: (match pattern value) -> (var pattern value)
-test_vm """
-  (match [a b] [1 2])
-  (a + b)
-""", 3
-
 # TODO: match is not implemented in VM yet
 # test_vm """
 #   (var x (_ 1))

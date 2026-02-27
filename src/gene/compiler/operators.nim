@@ -1094,20 +1094,6 @@ proc compile_gene(self: Compiler, input: Value) =
         self.compile_super(gene)
         return
       of "match":
-        if gene.children.len == 2 and gene.props.len == 0:
-          # Compatibility window: lower (match pattern value) to (var pattern value).
-          if self.output.is_nil or not self.output.type_check:
-            let location = trace_location(gene.trace)
-            let warning = "Warning: match is deprecated; use (var pattern value)"
-            if location.len > 0:
-              stderr.writeLine(location & ": " & warning)
-            else:
-              stderr.writeLine(warning)
-          var lowered = new_gene("var".to_symbol_value())
-          lowered.trace = gene.trace
-          lowered.children = gene.children
-          self.compile_var(lowered)
-          return
         let location = trace_location(gene.trace)
         let message = "match has been removed; use (var pattern value) for binding or (case ...) for branching"
         if location.len > 0:
