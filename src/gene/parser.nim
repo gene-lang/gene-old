@@ -458,7 +458,7 @@ proc read_unquoted(self: var Parser): Value =
   if ch == '=':
     self.bufpos.inc()
     return "%=".to_symbol_value()
-  if ch == EndOfFile or ch in {' ', '\t', '\L', '\c', '(', ')', '[', ']', '{', '}'}:
+  if ch == EndOfFile or ch in {' ', '\t', '\L', '\c', ')', ']', '}'}:
     return "%".to_symbol_value()
 
   # Special logic for %_

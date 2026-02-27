@@ -246,6 +246,13 @@ test_parser "%_foo", proc(r: Value) =
   check r.ref.unquote == to_symbol_value("foo")
   check r.ref.unquote_discard == true
 
+test_parser "%(1 + 2)", proc(r: Value) =
+  check r.ref.kind == VkUnquote
+  check r.ref.unquote.kind == VkGene
+  check r.ref.unquote.gene.type == 1
+  check r.ref.unquote.gene.children[0] == to_symbol_value("+")
+  check r.ref.unquote.gene.children[1] == 2
+
 # Additional tests for Gene expressions
 test_parser "`(1 + 2)", proc(r: Value) =
   check r.ref.kind == VkQuote

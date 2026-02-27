@@ -9,9 +9,9 @@ import ./helpers
 # Interpret: (%a b)
 # Render: ($render `(%a b)) => (<value of a> b)
 
-# TODO: Enable when expression evaluation in templates is implemented
+# TODO: Keep disabled until eval resolves module-local symbols in compiled genes.
 # test_vm """
-#   (var tpl :(%f b))
+#   (var tpl `(%f b))
 #   (fn f [a] (a + 1))
 #   (var x ($render tpl)) # => (<function f> b)
 #   (var b 2)
@@ -35,22 +35,20 @@ test_vm """
   check r.gene_children[0] == 1
   check r.gene_children[1] == 2
 
-# TODO: Enable when expression evaluation in templates is implemented
-# test_vm """
-#   (var tpl :[%(f b)])
-#   (fn f [a] (a + 1))
-#   (var b 1)
-#   ($render tpl)
-# """, @[2]
+test_vm """
+  (var tpl `[%(f b)])
+  (fn f [a] (a + 1))
+  (var b 1)
+  ($render tpl)
+""", @[2]
 
-# TODO: Enable when expression evaluation in templates is implemented
-# test_vm """
-#   (var tpl :{^p %(f b)})
-#   (fn f [a] (a + 1))
-#   (var b 1)
-#   ($render tpl)
-# """, proc(r: Value) =
-#   check map_data(r)["p".to_key()] == 2
+test_vm """
+  (var tpl `{^p %(f b)})
+  (fn f [a] (a + 1))
+  (var b 1)
+  ($render tpl)
+""", proc(r: Value) =
+  check map_data(r)["p".to_key()] == 2
 
 test_vm """
   (var i 1)

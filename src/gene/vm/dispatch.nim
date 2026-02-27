@@ -180,6 +180,49 @@ proc value_to_callable*(value: Value): Callable =
   else:
     not_allowed("Cannot convert " & $value.kind & " to Callable")
 
+proc resolve_template_symbol(self: ptr VirtualMachine, symbol: Value): Value =
+  let key = symbol.str.to_key()
+
+  if self.frame.scope != nil and self.frame.scope.tracker != nil:
+    let var_index = self.frame.scope.tracker.locate(key)
+    if var_index.local_index >= 0:
+      var scope = self.frame.scope
+      var parent_index = var_index.parent_index
+
+      while parent_index > 0 and scope != nil:
+        parent_index.dec()
+        scope = scope.parent
+
+      if scope != nil and var_index.local_index < scope.members.len:
+        return scope.members[var_index.local_index]
+
+  if self.frame.ns != nil and self.frame.ns.members.hasKey(key):
+    return self.frame.ns.members[key]
+
+  if self.thread_local_ns != nil and self.thread_local_ns.members.hasKey(key):
+    return self.thread_local_ns.members[key]
+
+  # Preserve prior fallback behavior for unresolved template variables.
+  return symbol
+
+proc eval_template_unquote(self: ptr VirtualMachine, expr: Value): Value =
+  case expr.kind:
+  of VkSymbol:
+    return self.resolve_template_symbol(expr)
+  of VkInt, VkFloat, VkBool, VkString, VkChar, VkNil, VkVoid:
+    return expr
+  else:
+    let parent_scope_tracker =
+      if self.frame.scope != nil: self.frame.scope.tracker else: nil
+    let compiled = compile_init(expr, parent_scope_tracker = parent_scope_tracker)
+    let saved_cu = self.cu
+    let saved_pc = self.pc
+    self.cu = compiled
+    let result = self.exec()
+    self.cu = saved_cu
+    self.pc = saved_pc
+    return result
+
 proc render_template(self: ptr VirtualMachine, tpl: Value): Value =
   # Render a template by recursively processing quote/unquote values
   case tpl.kind:
@@ -191,67 +234,7 @@ proc render_template(self: ptr VirtualMachine, tpl: Value): Value =
       # An unquoted value - evaluate it in the current context
       let expr = tpl.ref.unquote
       let discard_result = tpl.ref.unquote_discard
-
-      # For now, evaluate simple cases directly without creating new frames
-      # TODO: Implement full expression evaluation
-      var r: Value = NIL
-
-      case expr.kind:
-        of VkSymbol:
-          # Look up the symbol in the current scope using the scope tracker
-          let key = expr.str.to_key()
-
-          # Use the scope tracker to find the variable
-          let var_index = self.frame.scope.tracker.locate(key)
-
-          if var_index.local_index >= 0:
-            # Found in scope - navigate to the correct scope
-            var scope = self.frame.scope
-            var parent_index = var_index.parent_index
-
-            while parent_index > 0 and scope != nil:
-              parent_index.dec()
-              scope = scope.parent
-
-            if scope != nil and var_index.local_index < scope.members.len:
-              r = scope.members[var_index.local_index]
-            else:
-              # Not found, default to symbol
-              r = expr
-          else:
-            # Not in scope, check namespace
-            if self.frame.ns.members.hasKey(key):
-              r = self.frame.ns.members[key]
-            else:
-              # Default to the symbol itself
-              r = expr
-
-        of VkGene:
-          # For gene expressions, recursively render the parts
-          let gene = expr.gene
-          let rendered_type = self.render_template(gene.type)
-
-          # Create a new gene with rendered parts
-          let new_gene = new_gene(rendered_type)
-
-          # Render properties
-          for k, v in gene.props:
-            new_gene.props[k] = self.render_template(v)
-
-          # Render children
-          for child in gene.children:
-            new_gene.children.add(self.render_template(child))
-
-          # For now, return the rendered gene without evaluating
-          # TODO: Implement full expression evaluation
-          r = new_gene.to_gene_value()
-
-        of VkInt, VkFloat, VkBool, VkString, VkChar:
-          # Literal values pass through unchanged
-          r = expr
-        else:
-          # For other types, recursively render
-          r = self.render_template(expr)
+      let r = self.eval_template_unquote(expr)
 
       if discard_result:
         # %_ means discard the r

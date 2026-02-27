@@ -116,7 +116,8 @@ proc emit(self: Compiler, instr: Instruction) =
 proc compile*(self: Compiler, input: Value)
 proc compile*(f: Function, eager_functions: bool)
 proc compile*(b: Block, eager_functions: bool)
-proc compile_init*(input: Value, local_defs = false, module_path = ""): CompilationUnit
+proc compile_init*(input: Value, local_defs = false, module_path = "",
+                   parent_scope_tracker: ScopeTracker = nil): CompilationUnit
 proc predeclare_local_defs(self: Compiler, nodes: seq[Value])
 # Forward declarations for procs in included submodules (misc, async, modules)
 # needed by compile_gene which is defined before the include points

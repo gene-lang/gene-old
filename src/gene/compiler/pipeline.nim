@@ -4,7 +4,8 @@
 ## parse_and_compile (all overloads), parse_and_compile_repl.
 ## Included from compiler.nim — shares its scope.
 
-proc compile_init*(input: Value, local_defs = false, module_path = ""): CompilationUnit =
+proc compile_init*(input: Value, local_defs = false, module_path = "",
+                   parent_scope_tracker: ScopeTracker = nil): CompilationUnit =
   let self = Compiler(
     output: new_compilation_unit(),
     tail_position: false,
@@ -13,6 +14,8 @@ proc compile_init*(input: Value, local_defs = false, module_path = ""): Compilat
   )
   self.output.module_path = module_path
   self.local_definitions = local_defs
+  if parent_scope_tracker != nil:
+    self.scope_trackers.add(parent_scope_tracker)
   self.output.skip_return = true
   self.emit(Instruction(kind: IkStart))
   self.start_scope()
@@ -40,6 +43,8 @@ proc compile_init*(input: Value, local_defs = false, module_path = ""): Compilat
     raise new_exception(types.Exception, message)
 
   self.end_scope()
+  if parent_scope_tracker != nil and self.scope_trackers.len > 0:
+    discard self.scope_trackers.pop()
   self.emit(Instruction(kind: IkEnd))
   self.output.optimize_noops()  # Optimize BEFORE resolving jumps
   # self.output.peephole_optimize()  # Apply peephole optimizations (temporarily disabled)
