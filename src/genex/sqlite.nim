@@ -18,6 +18,7 @@ var connection_class_global: Class
 type
   SQLiteConnection* = ref object of DatabaseConnection
     conn*: DbConn
+    lock*: Lock
 
 # Global table to store connections by ID (shared across worker threads)
 var connection_table: Table[system.int64, SQLiteConnection]
@@ -70,6 +71,7 @@ proc vm_open(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count:
 
   # Create wrapper
   var wrapper = SQLiteConnection(conn: conn, closed: false)
+  initLock(wrapper.lock)
 
   # Store in global table
   var conn_id: system.int64
@@ -112,14 +114,16 @@ proc vm_query(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count
   let stmt_text = sql_arg.str
   let params = collect_params(args, arg_count, has_keyword_args, 2)
 
-  var result = new_array_value(@[])
+  var wrapper: SQLiteConnection
   {.cast(gcsafe).}:
-    acquire(connection_lock)
-    try:
+    withLock(connection_lock):
       if not connection_table.hasKey(conn_id):
         raise new_exception(types.Exception, "Connection not found")
+      wrapper = connection_table[conn_id]
 
-      let wrapper = connection_table[conn_id]
+  var result = new_array_value(@[])
+  {.cast(gcsafe).}:
+    withLock(wrapper.lock):
       if wrapper.closed:
         raise new_exception(types.Exception, "Connection is closed")
 
@@ -136,8 +140,6 @@ proc vm_query(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count
         raise new_exception(types.Exception, "SQL execution failed: " & e.msg)
       finally:
         finalize_stmt(prepared)
-    finally:
-      release(connection_lock)
 
   return result
 
@@ -163,13 +165,14 @@ proc vm_exec(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count:
   let stmt_text = sql_arg.str
   let params = collect_params(args, arg_count, has_keyword_args, 2)
 
+  var wrapper: SQLiteConnection
   {.cast(gcsafe).}:
-    acquire(connection_lock)
-    try:
+    withLock(connection_lock):
       if not connection_table.hasKey(conn_id):
         raise new_exception(types.Exception, "Connection not found")
+      wrapper = connection_table[conn_id]
 
-      let wrapper = connection_table[conn_id]
+    withLock(wrapper.lock):
       if wrapper.closed:
         raise new_exception(types.Exception, "Connection is closed")
 
@@ -187,8 +190,6 @@ proc vm_exec(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count:
         raise new_exception(types.Exception, "SQL execution failed: " & e.msg)
       finally:
         finalize_stmt(prepared)
-    finally:
-      release(connection_lock)
 
   return NIL
 
@@ -208,22 +209,20 @@ proc vm_close(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count
 
   let conn_id = instance_props(self)[conn_id_key].to_int()
 
+  var wrapper: SQLiteConnection
   {.cast(gcsafe).}:
-    acquire(connection_lock)
-    try:
+    withLock(connection_lock):
       if not connection_table.hasKey(conn_id):
         raise new_exception(types.Exception, "Connection not found")
+      wrapper = connection_table[conn_id]
 
-      let wrapper = connection_table[conn_id]
-
+    withLock(wrapper.lock):
       if not wrapper.closed:
         try:
           db_sqlite.close(wrapper.conn)
           wrapper.closed = true
         except:
           raise new_exception(types.Exception, "Failed to close connection: " & getCurrentExceptionMsg())
-    finally:
-      release(connection_lock)
 
   return NIL
 
