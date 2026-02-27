@@ -4,6 +4,37 @@ import std/tempfiles
 import gene/gir
 import commands/run as run_command
 
+proc skip_gir_string(stream: Stream) =
+  let str_len = stream.readUint32()
+  if str_len > 0:
+    discard stream.readStr(str_len.int)
+
+proc find_gir_source_hash_offset(gir_path: string): int =
+  var reader = newFileStream(gir_path, fmRead)
+  doAssert reader != nil, "Failed to open GIR for source-hash offset lookup"
+  defer:
+    reader.close()
+
+  var magic: array[4, char]
+  doAssert reader.readData(magic[0].addr, 4) == 4, "Failed to read GIR magic"
+  discard reader.readUint32()
+  skip_gir_string(reader)
+  skip_gir_string(reader)
+  discard reader.readInt64()
+  discard reader.readBool()
+  discard reader.readBool()
+  result = reader.getPosition().int
+
+proc overwrite_gir_source_hash(gir_path: string, new_hash: int64) =
+  let source_hash_offset = find_gir_source_hash_offset(gir_path)
+  var stream = newFileStream(gir_path, fmReadWriteExisting)
+  doAssert stream != nil, "Failed to open GIR for source-hash overwrite"
+  defer:
+    stream.close()
+
+  stream.setPosition(source_hash_offset)
+  stream.write(new_hash)
+
 suite "Run CLI":
   test "run falls back to source when cached GIR is unreadable":
     let source_path = absolutePath("tmp/run_cli_fallback.gene")
@@ -42,7 +73,7 @@ suite "Run CLI":
     check first.success
     check fileExists(gir_path)
 
-    var stream = newFileStream(gir_path, fmReadWrite)
+    var stream = newFileStream(gir_path, fmReadWriteExisting)
     check stream != nil
     stream.setPosition(4)
     stream.write(1'u32)
@@ -82,6 +113,39 @@ suite "Run CLI":
     let cache_after = getFileInfo(gir_path).lastWriteTime
 
     check cache_after == cache_before
+
+  test "run invalidates stale GIR source hash caches and recompiles":
+    let source_path = absolutePath("tmp/run_cli_hash_invalidation.gene")
+    createDir(parentDir(source_path))
+    writeFile(source_path, "(var x 13)\nx")
+
+    let gir_path = get_gir_path(source_path, "build")
+    if fileExists(gir_path):
+      removeFile(gir_path)
+
+    defer:
+      if fileExists(source_path):
+        removeFile(source_path)
+      if fileExists(gir_path):
+        removeFile(gir_path)
+
+    let first = run_command.handle("run", @[source_path])
+    check first.success
+    check fileExists(gir_path)
+
+    let original_hash = load_gir_file(gir_path).header.source_hash
+    let corrupted_hash = cast[int64](original_hash) + 1'i64
+    overwrite_gir_source_hash(gir_path, corrupted_hash)
+    check cast[int64](load_gir_file(gir_path).header.source_hash) == corrupted_hash
+
+    # Ensure timestamp precision can observe a rewrite if recompilation happens.
+    sleep(1100)
+
+    let second = run_command.handle("run", @[source_path])
+    check second.success
+
+    let refreshed = load_gir_file(gir_path)
+    check refreshed.header.source_hash == original_hash
 
   test "run resolves package imports from lockfile deps graph":
     let root = createTempDir("gene_run_pkg_lock_", "")

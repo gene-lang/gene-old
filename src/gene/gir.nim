@@ -43,6 +43,14 @@ type
     type_registry*: ModuleTypeRegistry
     type_aliases*: Table[string, TypeId]
 
+proc compute_source_hash(source_content: string): Hash =
+  let raw_hash = cast[uint64](hash(source_content))
+  let truncated = raw_hash and 0x7FFF_FFFF_FFFF_FFFF'u64
+  result = cast[Hash](truncated.int)
+
+proc compute_source_hash_for_file(source_path: string): Hash =
+  compute_source_hash(readFile(source_path))
+
 # Serialization helpers
 proc write_string(stream: Stream, s: string) =
   stream.write(s.len.uint32)
@@ -610,10 +618,7 @@ proc save_gir*(cu: CompilationUnit, path: string, source_path: string = "", debu
   
   # Calculate source hash if provided
   if source_path != "" and fileExists(source_path):
-    let source_content = readFile(source_path)
-    let raw_hash = cast[uint64](hash(source_content))
-    let truncated = raw_hash and 0x7FFF_FFFF_FFFF_FFFF'u64
-    header.source_hash = cast[Hash](truncated.int)
+    header.source_hash = compute_source_hash_for_file(source_path)
     let info = getFileInfo(source_path)
     header.timestamp = info.lastWriteTime.toUnix()
   else:
@@ -847,23 +852,40 @@ proc is_gir_up_to_date*(gir_path: string, source_path: string): bool =
   if not fileExists(gir_path):
     return false
 
-  # Verify GIR version matches current runtime
-  var stream = newFileStream(gir_path, fmRead)
-  if stream == nil:
-    return false
-  defer: stream.close()
-  var magic: array[4, char]
-  if stream.readData(magic[0].addr, 4) != 4:
-    return false
-  if magic != ['G', 'E', 'N', 'E']:
-    return false
-  let version = stream.readUint32()
-  if version != GIR_VERSION:
-    return false
+  var cached_source_hash: Hash
+  try:
+    # Verify GIR version matches current runtime.
+    var stream = newFileStream(gir_path, fmRead)
+    if stream == nil:
+      return false
+    defer: stream.close()
 
-  # Verify compiler version so semantic compiler changes invalidate cache.
-  let compiler_version = stream.read_string()
-  if compiler_version != COMPILER_VERSION:
+    var magic: array[4, char]
+    if stream.readData(magic[0].addr, 4) != 4:
+      return false
+    if magic != ['G', 'E', 'N', 'E']:
+      return false
+
+    let version = stream.readUint32()
+    if version != GIR_VERSION:
+      return false
+
+    # Verify compiler version so semantic compiler changes invalidate cache.
+    let compiler_version = stream.read_string()
+    if compiler_version != COMPILER_VERSION:
+      return false
+
+    let vm_abi = stream.read_string()
+    let expected_abi_marker = "-valueabi" & $VALUE_ABI_VERSION
+    if not vm_abi.contains(expected_abi_marker):
+      return false
+
+    # Skip timestamp/flags and read stored source hash.
+    discard stream.readInt64()
+    discard stream.readBool()
+    discard stream.readBool()
+    cached_source_hash = stream.readInt64().Hash
+  except CatchableError:
     return false
   
   if not fileExists(source_path):
@@ -875,8 +897,14 @@ proc is_gir_up_to_date*(gir_path: string, source_path: string): bool =
   
   if source_info.lastWriteTime > gir_info.lastWriteTime:
     return false
-  
-  # TODO: Check source hash from GIR header
+
+  try:
+    let current_source_hash = compute_source_hash_for_file(source_path)
+    if current_source_hash != cached_source_hash:
+      return false
+  except CatchableError:
+    return false
+
   return true
 
 proc get_gir_path*(source_path: string, out_dir: string = "build"): string =
