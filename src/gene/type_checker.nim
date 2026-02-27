@@ -1804,33 +1804,69 @@ proc check_loop(self: TypeChecker, gene: ptr Gene): TypeExpr =
   return ANY_TYPE
 
 proc check_try(self: TypeChecker, gene: ptr Gene): TypeExpr =
-  ## Type check try/catch: (try body... catch pattern handler...)
+  ## Type check try/catch/finally:
+  ## (try body... catch pattern handler... catch pattern handler... finally ...)
   var try_type: TypeExpr = ANY_TYPE
-  var catch_type: TypeExpr = ANY_TYPE
-  var in_catch = false
+  var catch_types: seq[TypeExpr] = @[]
 
-  for i in 0..<gene.children.len:
+  var first_handler_idx = gene.children.len
+  for i, child in gene.children:
+    if child.kind == VkSymbol and (child.str == "catch" or child.str == "finally"):
+      first_handler_idx = i
+      break
+
+  if first_handler_idx > 0:
+    for i in 0..<first_handler_idx:
+      try_type = self.check_expr(gene.children[i])
+
+  var i = first_handler_idx
+  while i < gene.children.len:
     let child = gene.children[i]
     if child.kind == VkSymbol and child.str == "catch":
-      in_catch = true
-      continue
+      inc i
+      if i >= gene.children.len:
+        break
 
-    if in_catch:
+      let pattern = gene.children[i]
+      inc i
+      let body_start = i
+      while i < gene.children.len:
+        let candidate = gene.children[i]
+        if candidate.kind == VkSymbol and (candidate.str == "catch" or candidate.str == "finally"):
+          break
+        inc i
+
       self.push_scope()
-      # Bind $ex for catch-all
       self.define("$ex", ANY_TYPE)
-      catch_type = self.check_expr(child)
+
+      if pattern.kind == VkSymbol:
+        let name = pattern.str
+        if name.len > 0 and name != "*" and name != "_" and name[0].isLowerAscii():
+          self.define(name, ANY_TYPE)
+      else:
+        discard self.check_expr(pattern)
+
+      var clause_type: TypeExpr = TypeExpr(kind: TkNamed, name: "Nil")
+      for j in body_start..<i:
+        clause_type = self.check_expr(gene.children[j])
+      self.pop_scope()
+      catch_types.add(clause_type)
+    elif child.kind == VkSymbol and child.str == "finally":
+      inc i
+      self.push_scope()
+      while i < gene.children.len:
+        discard self.check_expr(gene.children[i])
+        inc i
       self.pop_scope()
     else:
-      try_type = self.check_expr(child)
+      inc i
 
-  # Result is union of try and catch types
-  if catch_type.kind != TkAny:
+  for ct in catch_types:
     try:
-      self.unify(try_type, catch_type, "try/catch")
-      return try_type
+      self.unify(try_type, ct, "try/catch")
     except CatchableError:
-      return TypeExpr(kind: TkUnion, members: @[try_type, catch_type])
+      try_type = TypeExpr(kind: TkUnion, members: @[try_type, ct])
+
   return try_type
 
 proc check_question_op(self: TypeChecker, gene: ptr Gene): TypeExpr =

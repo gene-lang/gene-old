@@ -147,3 +147,30 @@ suite "Static type checking":
       (Ok v) (x + 1)
       _ 0)
   """
+
+  test "Strict type checking: catch binding variable is scoped":
+    let checker = tc.new_type_checker(strict = true, module_filename = "test_code")
+    let code = cleanup("""
+      (try
+        (throw "boom")
+      catch ex
+        ex
+      finally
+        1
+      )
+    """)
+    for node in read_all(code):
+      checker.type_check_node(node)
+    check true
+
+  test "Strict type checking: for index plus destructuring pattern":
+    let checker = tc.new_type_checker(strict = true, module_filename = "test_code")
+    let code = cleanup("""
+      (for [i [a b]] in [[1 2] [3 4]]
+        (+ i a)
+        b
+      )
+    """)
+    for node in read_all(code):
+      checker.type_check_node(node)
+    check true
