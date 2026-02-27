@@ -19,7 +19,7 @@ must_haves:
     - "Deliberately malformed bytecode (stack underflow path) is caught by the verifier before exec"
     - "All normally compiled programs pass verification without error"
     - "The verifier is called automatically after compile_init and after load_gir"
-    - "Verification errors produce structured diagnostic envelopes (via make_diagnostic_message from plan 01)"
+    - "Verification errors include structured issue codes (GENE.VERIFY.*) in the exception message"
     - "The verifier catches at least: invalid jump targets pointing outside instruction array bounds, and stack depth going negative on any path"
   artifacts:
     - path: "src/gene/vm/verifier.nim"
@@ -48,11 +48,9 @@ must_haves:
 <objective>
 Build a bytecode verifier for gene-old's CompilationUnit that performs stack-depth analysis and jump-target validation, then wire it into the compile and GIR load paths.
 
-Purpose: Catches compiler bugs before they cause silent corruption or hard-to-debug runtime crashes. Addresses the "high regression risk in core execution paths" concern from CONCERNS.md. The verifier is also a safety prerequisite before any future instruction set changes (plans 4-6). Verification errors emit structured diagnostic envelopes from plan 01.
+Purpose: Catches compiler bugs before they cause silent corruption or hard-to-debug runtime crashes. Addresses the "high regression risk in core execution paths" concern from CONCERNS.md. The verifier is also a safety prerequisite before any future instruction set changes (plans 4-6). Verification errors include structured GENE.VERIFY.* issue codes in the exception message.
 
 Output: New src/gene/vm/verifier.nim; compiler.nim and gir.nim call verify_compilation_unit; test_vm_neg.nim has new tests asserting bad bytecode is caught.
-
-Note: Plan 03 depends on plan 01 (wave 2) because it uses make_diagnostic_message for structured error output.
 </objective>
 
 <execution_context>
@@ -268,16 +266,10 @@ when not defined(GENE_NO_VERIFY):
     var diag_parts: seq[string]
     for issue in vr.issues:
       diag_parts.add(issue.kind & ": " & issue.message)
-    raise new_exception(types.Exception,
-      make_diagnostic_message(
-        "GENE.VERIFY.FAILED",
-        "Bytecode verification failed: " & diag_parts.join("; "),
-        stage = "compile"
-      )
-    )
+    raise new_exception(types.Exception, "Bytecode verification failed: " & diag_parts.join("; "))
 ```
 
-Note: `make_diagnostic_message` comes from diagnostics.nim (plan 01, which is a prerequisite — depends_on: ["01"]). The `when not defined(GENE_NO_VERIFY)` guard allows disabling verification in tests that intentionally produce bad bytecode for other reasons.
+Note: The `when not defined(GENE_NO_VERIFY)` guard allows disabling verification in tests that intentionally produce bad bytecode for other reasons. `compiler.nim` is a standalone module that does not include `vm.nim`, so the error is raised as a plain string (consistent with the `gir.nim` wiring below).
 
 **Step 2: Wire verifier into gir.nim.**
 

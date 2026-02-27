@@ -21,6 +21,10 @@ type
     root_dependencies: Table[string, string]
     packages: Table[string, LockPackageNode]
 
+  ResolvedModuleCandidate = object
+    path: string
+    is_gir: bool
+
 # Forward declarations
 proc workspace_src_paths(): seq[string]
 
@@ -31,6 +35,56 @@ var ModuleLoadStack* = newSeq[string]()
 var LoadedModuleTypeRegistry* = new_global_type_registry()
 
 let ExportKey* = "__exports__".to_key()
+
+const
+  MODULE_ERR_NOT_FOUND = "AIR.MODULE.NOT_FOUND"
+  MODULE_ERR_AMBIGUOUS = "AIR.MODULE.AMBIGUOUS"
+  PACKAGE_ERR_NOT_FOUND = "AIR.PACKAGE.NOT_FOUND"
+  PACKAGE_ERR_AMBIGUOUS = "AIR.PACKAGE.AMBIGUOUS"
+  PACKAGE_ERR_BOUNDARY = "AIR.PACKAGE.BOUNDARY"
+  PACKAGE_ERR_INVALID_LOCK = "AIR.PACKAGE.INVALID_LOCK"
+
+proc canonical_path(path: string): string =
+  if path.len == 0:
+    return ""
+  normalizedPath(absolutePath(path))
+
+proc append_unique(values: var seq[string], value: string) =
+  if value.len == 0:
+    return
+  for existing in values:
+    if existing == value:
+      return
+  values.add(value)
+
+proc append_unique_candidate(candidates: var seq[ResolvedModuleCandidate], candidate: ResolvedModuleCandidate) =
+  if candidate.path.len == 0:
+    return
+  for existing in candidates:
+    if existing.path == candidate.path and existing.is_gir == candidate.is_gir:
+      return
+  candidates.add(candidate)
+
+proc raise_import_error(code: string, message: string,
+                        importer_module = "", specifier = "", package_name = "",
+                        searched: seq[string] = @[],
+                        candidates: seq[string] = @[],
+                        cycle: seq[string] = @[]) {.noreturn.} =
+  var details: seq[string] = @[]
+  if importer_module.len > 0:
+    details.add("importer=" & importer_module)
+  if specifier.len > 0:
+    details.add("specifier=" & specifier)
+  if package_name.len > 0:
+    details.add("package=" & package_name)
+  if searched.len > 0:
+    details.add("searched=[" & searched.join(", ") & "]")
+  if candidates.len > 0:
+    details.add("candidates=[" & candidates.join(", ") & "]")
+  if cycle.len > 0:
+    details.add("cycle=" & cycle.join(" -> "))
+  let suffix = if details.len > 0: " (" & details.join("; ") & ")" else: ""
+  not_allowed("[" & code & "] " & message & suffix)
 
 proc reset_loaded_module_type_registry*() =
   LoadedModuleTypeRegistry = new_global_type_registry()
@@ -105,10 +159,13 @@ const
   PackageNameAllowedChars = {'a'..'z', '0'..'9', '-', '_', '+', '&'}
 
 proc validate_package_name(name: string) =
-  ## Validate package name against `[a-z][a-z0-9-_+&]*[a-z0-9](/[a-z][a-z0-9-_+&]*[a-z0-9])+`
+  ## Validate package name against `[a-z][a-z0-9-_+&]*[a-z0-9](/...)`.
+  ## Single-segment names are allowed as local aliases.
+  if name.len == 0:
+    not_allowed("Package name cannot be empty")
   let parts = name.split("/")
-  if parts.len < 2:
-    not_allowed("Package name must have at least two segments")
+  if parts.len == 0:
+    not_allowed("Package name cannot be empty")
 
   let top = parts[0]
   if top == "gene" or top == "genex" or top.startsWith("gene"):
@@ -117,6 +174,8 @@ proc validate_package_name(name: string) =
     discard  # Open namespaces; still validate characters below
 
   for part in parts:
+    if part.len == 0:
+      not_allowed("Package segments cannot be empty")
     if part[0] notin {'a'..'z'}:
       not_allowed("Package segments must start with a lowercase letter: " & part)
     if part[^1] notin {'a'..'z', '0'..'9'}:
@@ -174,6 +233,72 @@ proc package_manifest_name(root: string): string =
   except CatchableError:
     discard
   return ""
+
+proc build_package_value(name: string, root: string): Value =
+  let pkg = Package(
+    dir: root,
+    adhoc: root.len == 0,
+    ns: if App != NIL and App.kind == VkApplication and App.app.global_ns.kind == VkNamespace:
+      App.app.global_ns.ref.ns
+    else:
+      nil,
+    name: if name.len > 0: name else: "gene",
+    version: NIL,
+    license: NIL,
+    globals: @[],
+    homepage: "",
+    src_path: "src",
+    test_path: "tests",
+    asset_path: "assets",
+    build_path: "build",
+    load_paths: @[],
+    init_modules: @[],
+    props: initTable[Key, Value](),
+  )
+  let pkg_ref = new_ref(VkPackage)
+  pkg_ref.pkg = pkg
+  pkg_ref.to_ref_value()
+
+proc package_value_for_module(module_path: string, package_name = "", package_root = ""): Value =
+  var resolved_root = package_root
+  var resolved_name = package_name
+
+  if resolved_root.len == 0:
+    var start_path = ""
+    if module_path.len > 0:
+      if fileExists(module_path):
+        start_path = parentDir(module_path)
+      elif module_path.endsWith(".gene") or module_path.endsWith(".gir"):
+        start_path = parentDir(module_path)
+      elif module_path.contains($DirSep):
+        start_path = parentDir(module_path)
+    if start_path.len > 0:
+      resolved_root = find_package_root(start_path)
+
+  if resolved_root.len > 0:
+    let manifest_name = package_manifest_name(resolved_root)
+    if manifest_name.len > 0:
+      resolved_name = manifest_name
+
+  if resolved_name.len == 0:
+    resolved_name = "gene"
+
+  build_package_value(resolved_name, resolved_root)
+
+proc bind_module_package_context*(ns: Namespace, module_path: string,
+                                  package_name = "", package_root = "") =
+  if ns == nil:
+    return
+  let pkg_value = package_value_for_module(module_path, package_name, package_root)
+  ns.members["pkg".to_key()] = pkg_value
+  ns.members["$pkg".to_key()] = pkg_value
+  if App != NIL and App.kind == VkApplication:
+    if App.app.global_ns.kind == VkNamespace:
+      App.app.global_ns.ref.ns["pkg".to_key()] = pkg_value
+      App.app.global_ns.ref.ns["$pkg".to_key()] = pkg_value
+    if App.app.gene_ns.kind == VkNamespace:
+      App.app.gene_ns.ref.ns["pkg".to_key()] = pkg_value
+      App.app.gene_ns.ref.ns["$pkg".to_key()] = pkg_value
 
 proc package_root_matches_name(root: string, package_name: string): bool =
   root.len > 0 and package_manifest_name(root) == package_name
@@ -251,14 +376,15 @@ proc parse_lock_graph(lock_path: string): LockGraph =
   except CatchableError:
     discard
 
-proc resolve_package_from_lock(package_name: string, importer_root: string, importer_dir: string): string =
+proc resolve_package_from_lock(package_name: string, importer_root: string, importer_dir: string):
+    tuple[root: string, issue: string] =
   if importer_root.len == 0:
-    return ""
+    return ("", "")
 
   let lock_path = joinPath(importer_root, "package.gene.lock")
   let lock = parse_lock_graph(lock_path)
   if lock.root_dependencies.len == 0 and lock.packages.len == 0:
-    return ""
+    return ("", "")
 
   let importer_abs = absolutePath(importer_dir)
   var importer_node_id = ""
@@ -277,30 +403,33 @@ proc resolve_package_from_lock(package_name: string, importer_root: string, impo
     dep_node_id = lock.packages[importer_node_id].dependencies.getOrDefault(package_name, "")
   if dep_node_id.len == 0:
     dep_node_id = lock.root_dependencies.getOrDefault(package_name, "")
-  if dep_node_id.len == 0 or not lock.packages.hasKey(dep_node_id):
-    return ""
+  if dep_node_id.len == 0:
+    return ("", "")
+  if not lock.packages.hasKey(dep_node_id):
+    return ("", "lockfile references missing package node '" & dep_node_id & "'")
 
   let dep_node = lock.packages[dep_node_id]
   if dep_node.rel_dir.len == 0:
-    return ""
+    return ("", "lockfile package node '" & dep_node_id & "' has empty dir")
   let dep_root = absolutePath(joinPath(importer_root, dep_node.rel_dir))
   if not fileExists(joinPath(dep_root, "package.gene")):
-    return ""
+    return ("", "lockfile package root missing package.gene: " & dep_root)
   if not package_root_matches_name(dep_root, package_name):
-    return ""
-  dep_root
+    return ("", "lockfile package name mismatch at " & dep_root)
+  (dep_root, "")
 
-proc resolve_package_from_deps(package_name: string, importer_dir: string): string =
+proc resolve_package_from_deps(package_name: string, importer_dir: string):
+    tuple[root: string, ambiguous: seq[string]] =
   let deps_root = find_deps_root(importer_dir)
   if deps_root.len == 0:
-    return ""
+    return ("", @[])
 
   let (parent_name, pkg_name) = package_name_parts(package_name)
   if parent_name.len == 0 or pkg_name.len == 0:
-    return ""
+    return ("", @[])
   let pkg_base = joinPath(deps_root, parent_name, pkg_name)
   if not dirExists(pkg_base):
-    return ""
+    return ("", @[])
 
   var matches: seq[string] = @[]
   for kind, path in walkDir(pkg_base):
@@ -311,38 +440,167 @@ proc resolve_package_from_deps(package_name: string, importer_dir: string): stri
       matches.add(candidate_root)
 
   if matches.len == 1:
-    return matches[0]
-  return ""
+    return (matches[0], @[])
+  if matches.len > 1:
+    return ("", matches)
+  return ("", @[])
 
-proc resolve_package_entrypoint(root: string): tuple[path: string, is_gir: bool] =
+proc resolve_package_from_registry(package_name: string, importer_root: string, importer_dir: string):
+    tuple[root: string, issue: string] =
+  if App == NIL or App.kind != VkApplication or App.app.global_ns.kind != VkNamespace:
+    return ("", "")
+
+  let deps_registry = App.app.global_ns.ref.ns.members.getOrDefault("__deps__".to_key(), NIL)
+  if deps_registry == NIL or deps_registry.kind != VkMap:
+    return ("", "")
+
+  let dep_entry = map_data(deps_registry).getOrDefault(package_name.to_key(), NIL)
+  if dep_entry == NIL:
+    return ("", "")
+  if dep_entry.kind != VkMap:
+    return ("", "dependency override entry for '" & package_name & "' must be a map")
+
+  let raw_path = value_as_string(map_lookup(dep_entry, "path"))
+  if raw_path.len == 0:
+    return ("", "dependency override for '" & package_name & "' is missing ^path")
+
+  let base_path =
+    if raw_path.isAbsolute:
+      raw_path
+    elif importer_root.len > 0:
+      joinPath(importer_root, raw_path)
+    else:
+      joinPath(importer_dir, raw_path)
+
+  let root = find_package_root(base_path)
+  if root.len == 0:
+    return ("", "dependency override path does not contain package.gene: " & base_path)
+  (canonical_path(root), "")
+
+proc resolve_package_entrypoint(root: string, importer_module = "", package_name = ""): tuple[path: string, is_gir: bool] =
   ## Choose package entrypoint in priority order.
   let idx = joinPath(root, "index.gene")
   if fileExists(idx):
-    return (absolutePath(idx), false)
+    return (canonical_path(idx), false)
   let srcIdx = joinPath(root, "src", "index.gene")
   if fileExists(srcIdx):
-    return (absolutePath(srcIdx), false)
+    return (canonical_path(srcIdx), false)
   let libIdx = joinPath(root, "lib", "index.gene")
   if fileExists(libIdx):
-    return (absolutePath(libIdx), false)
+    return (canonical_path(libIdx), false)
   let girIdx = joinPath(root, "build", "index.gir")
   if fileExists(girIdx):
-    return (absolutePath(girIdx), true)
-  not_allowed("Package entrypoint not found under " & root)
+    return (canonical_path(girIdx), true)
+  raise_import_error(PACKAGE_ERR_NOT_FOUND, "Package entrypoint not found under " & root,
+    importer_module = importer_module, package_name = package_name)
 
-proc try_resolve_path(base: string, module_path: string): tuple[path: string, is_gir: bool] =
-  ## Attempt to resolve a module path under a base directory.
-  var candidate = joinPath(base, module_path)
+proc package_module_bases(package_root: string): seq[string] =
+  if package_root.len == 0:
+    return @[]
+  @[
+    package_root,
+    joinPath(package_root, "src"),
+    joinPath(package_root, "lib"),
+    joinPath(package_root, "build"),
+  ]
+
+proc collect_resolve_candidates(base: string, module_path: string): seq[ResolvedModuleCandidate] =
+  if base.len == 0 or module_path.len == 0:
+    return @[]
+
+  let candidate = joinPath(base, module_path)
   if module_path.endsWith(".gir") or module_path.endsWith(".gene"):
     if fileExists(candidate):
-      return (absolutePath(candidate), module_path.endsWith(".gir"))
-  else:
-    let withGene = candidate & ".gene"
-    if fileExists(withGene):
-      return (absolutePath(withGene), false)
-    if fileExists(candidate):
-      return (absolutePath(candidate), candidate.endsWith(".gir"))
-  return ("", false)
+      append_unique_candidate(result, ResolvedModuleCandidate(
+        path: canonical_path(candidate),
+        is_gir: module_path.endsWith(".gir")
+      ))
+    return result
+
+  let with_gene = candidate & ".gene"
+  if fileExists(with_gene):
+    append_unique_candidate(result, ResolvedModuleCandidate(path: canonical_path(with_gene), is_gir: false))
+
+  if fileExists(candidate):
+    append_unique_candidate(result, ResolvedModuleCandidate(
+      path: canonical_path(candidate),
+      is_gir: candidate.endsWith(".gir")
+    ))
+
+proc resolve_module_path(module_path: string, importer_dir: string, package_root: string,
+                         package_name: string, importer_module = "",
+                         enforce_package_boundary = false): tuple[path: string, is_gir: bool] =
+  ## Resolve a module path using deterministic precedence tiers.
+  var normalized = module_path
+  if package_name.len > 0:
+    let pkg_last = package_name.split("/")[^1]
+    if normalized.startsWith(package_name & "/"):
+      normalized = normalized[package_name.len + 1 .. ^1]
+    elif normalized.startsWith(pkg_last & "/"):
+      normalized = normalized[pkg_last.len + 1 .. ^1]
+
+  let importer_base = canonical_path(if importer_dir.len > 0: importer_dir else: getCurrentDir())
+  let package_bases = package_module_bases(package_root)
+  let workspace_bases = workspace_src_paths()
+
+  let tier_labels = @["importer", "package", "workspace"]
+  let tier_bases = @[
+    @[importer_base],
+    package_bases,
+    workspace_bases,
+  ]
+
+  var searched: seq[string] = @[]
+  for tier_idx in 0..<tier_bases.len:
+    var bases: seq[string] = @[]
+    for base in tier_bases[tier_idx]:
+      append_unique(bases, canonical_path(base))
+
+    if bases.len == 0:
+      continue
+
+    var tier_matches: seq[ResolvedModuleCandidate] = @[]
+    for base in bases:
+      append_unique(searched, base)
+      for candidate in collect_resolve_candidates(base, normalized):
+        append_unique_candidate(tier_matches, candidate)
+
+    if package_root.len > 0 and tier_labels[tier_idx] == "package" and not normalized.endsWith(".gir"):
+      let build_base = joinPath(package_root, "build", splitFile(normalized).name)
+      let build_gir = build_base & ".gir"
+      if fileExists(build_gir):
+        append_unique_candidate(tier_matches, ResolvedModuleCandidate(path: canonical_path(build_gir), is_gir: true))
+
+    if tier_matches.len == 1:
+      let resolved = tier_matches[0]
+      if enforce_package_boundary and package_root.len > 0:
+        let package_root_abs = canonical_path(package_root)
+        if not path_within(package_root_abs, resolved.path):
+          raise_import_error(PACKAGE_ERR_BOUNDARY,
+            "Resolved module escapes package root",
+            importer_module = importer_module,
+            specifier = module_path,
+            package_name = package_name,
+            candidates = @[resolved.path],
+            searched = searched)
+      return (resolved.path, resolved.is_gir)
+    if tier_matches.len > 1:
+      var candidate_paths: seq[string] = @[]
+      for entry in tier_matches:
+        candidate_paths.add(entry.path)
+      raise_import_error(MODULE_ERR_AMBIGUOUS,
+        "Module specifier matched multiple candidates in the '" & tier_labels[tier_idx] & "' tier",
+        importer_module = importer_module,
+        specifier = module_path,
+        package_name = package_name,
+        searched = searched,
+        candidates = candidate_paths)
+
+  raise_import_error(MODULE_ERR_NOT_FOUND, "Module '" & module_path & "' was not found",
+    importer_module = importer_module,
+    specifier = module_path,
+    package_name = package_name,
+    searched = searched)
 
 proc native_ext_suffix(): string =
   when defined(windows):
@@ -362,78 +620,47 @@ proc resolve_native_module(module_path: string, importer_dir: string, package_ro
     elif normalized.startsWith(pkg_last & "/"):
       normalized = normalized[pkg_last.len + 1 .. ^1]
 
-  let base_dir = if importer_dir.len > 0: importer_dir else: getCurrentDir()
-  let pkg_dir = if package_root.len > 0: package_root else: base_dir
-  let workspace_paths = workspace_src_paths()
-  let bases = @[base_dir] & workspace_paths & @[
-    pkg_dir,
-    joinPath(pkg_dir, "src"),
-    joinPath(pkg_dir, "lib"),
-    joinPath(pkg_dir, "build")
+  let importer_base = canonical_path(if importer_dir.len > 0: importer_dir else: getCurrentDir())
+  let package_bases = package_module_bases(package_root)
+  let workspace_bases = workspace_src_paths()
+  let tier_bases = @[
+    @[importer_base],
+    package_bases,
+    workspace_bases,
   ]
 
-  for base in bases:
-    let candidate = absolutePath(joinPath(base, normalized))
-    if fileExists(candidate):
-      return candidate
-    let native_candidate = candidate & native_ext_suffix()
-    if fileExists(native_candidate):
-      return native_candidate
+  for bases in tier_bases:
+    var unique_bases: seq[string] = @[]
+    for base in bases:
+      append_unique(unique_bases, canonical_path(base))
+    for base in unique_bases:
+      let candidate = canonical_path(joinPath(base, normalized))
+      if fileExists(candidate):
+        return candidate
+      let native_candidate = candidate & native_ext_suffix()
+      if fileExists(native_candidate):
+        return canonical_path(native_candidate)
 
   if package_root.len > 0:
     let base = splitFile(normalized).name
     let build_base = joinPath(package_root, "build", base)
     let build_native = build_base & native_ext_suffix()
     if fileExists(build_native):
-      return build_native
+      return canonical_path(build_native)
 
   return ""
-
-proc resolve_module_path(module_path: string, importer_dir: string, package_root: string, package_name: string): tuple[path: string, is_gir: bool] =
-  ## Resolve a module path relative to importer dir and package root fallbacks.
-  var normalized = module_path
-  if package_name.len > 0:
-    let pkg_last = package_name.split("/")[^1]
-    if normalized.startsWith(package_name & "/"):
-      normalized = normalized[package_name.len + 1 .. ^1]
-    elif normalized.startsWith(pkg_last & "/"):
-      normalized = normalized[pkg_last.len + 1 .. ^1]
-
-  let base_dir = if importer_dir.len > 0: importer_dir else: getCurrentDir()
-  let pkg_dir = if package_root.len > 0: package_root else: base_dir
-  let workspace_paths = workspace_src_paths()
-  let candidates = @[base_dir] & workspace_paths & @[
-    pkg_dir,
-    joinPath(pkg_dir, "src"),
-    joinPath(pkg_dir, "lib"),
-    joinPath(pkg_dir, "build")
-  ]
-  for base in candidates:
-    let (p, isGir) = try_resolve_path(base, normalized)
-    if p.len > 0:
-      return (p, isGir)
-  if package_root.len > 0:
-    let base = splitFile(normalized).name
-    let build_base = joinPath(package_root, "build", base)
-    let build_gir = build_base & ".gir"
-    if fileExists(build_gir):
-      return (absolutePath(build_gir), true)
-    let build_native = build_base & native_ext_suffix()
-    if fileExists(build_native):
-      return (build_base, false)  # treat as native; caller will mark is_native
-  not_allowed("Module '" & module_path & "' not found under package root '" & pkg_dir & "'")
 
 proc package_search_paths(importer_dir: string): seq[string] =
   ## Build package search paths (minimal MVP).
   result = @[]
   if importer_dir.len > 0:
-    result.add(importer_dir)
-    result.add(joinPath(importer_dir, "packages"))
+    result.add(canonical_path(importer_dir))
+    result.add(canonical_path(joinPath(importer_dir, "packages")))
   let env_paths = getEnv("GENE_PACKAGE_PATH")
   if env_paths.len > 0:
     for part in env_paths.split(PathSep):
       if part.len > 0:
-        result.add(absolutePath(part))
+        result.add(canonical_path(part))
 
 proc workspace_src_paths(): seq[string] =
   ## Build workspace src roots from GENE_WORKSPACE_PATH.
@@ -444,17 +671,19 @@ proc workspace_src_paths(): seq[string] =
   for part in env_paths.split(PathSep):
     if part.len == 0:
       continue
-    let root = absolutePath(part)
+    let root = canonical_path(part)
     let (_, tail) = splitPath(root)
     if tail == "src":
-      result.add(root)
+      result.add(canonical_path(root))
     else:
-      result.add(joinPath(root, "src"))
+      result.add(canonical_path(joinPath(root, "src")))
 
-proc locate_package_root(package_name, importer_dir: string, override_path: string): string =
+proc locate_package_root(package_name, importer_dir: string, override_path: string,
+                         importer_module = ""): string =
   ## Locate package root by name or explicit override.
-  let importer_base = if importer_dir.len > 0: absolutePath(importer_dir) else: getCurrentDir()
+  let importer_base = canonical_path(if importer_dir.len > 0: importer_dir else: getCurrentDir())
   let importer_root = find_package_root(importer_base)
+  var searched: seq[string] = @[]
 
   if override_path.len > 0:
     let base_path =
@@ -464,18 +693,46 @@ proc locate_package_root(package_name, importer_dir: string, override_path: stri
         joinPath(importer_root, override_path)
       else:
         joinPath(importer_base, override_path)
+    append_unique(searched, canonical_path(base_path))
     let root = find_package_root(base_path)
     if root.len == 0:
-      not_allowed("Package path override '" & override_path & "' does not contain package.gene")
-    return root
+      raise_import_error(PACKAGE_ERR_NOT_FOUND,
+        "Package path override '" & override_path & "' does not contain package.gene",
+        importer_module = importer_module,
+        package_name = package_name,
+        searched = searched)
+    return canonical_path(root)
 
-  let locked_root = resolve_package_from_lock(package_name, importer_root, importer_base)
-  if locked_root.len > 0:
-    return locked_root
+  let dep_result = resolve_package_from_registry(package_name, importer_root, importer_base)
+  if dep_result.root.len > 0:
+    return canonical_path(dep_result.root)
+  if dep_result.issue.len > 0:
+    raise_import_error(PACKAGE_ERR_NOT_FOUND,
+      "Invalid dependency override for package '" & package_name & "': " & dep_result.issue,
+      importer_module = importer_module,
+      package_name = package_name)
 
-  let materialized_dep_root = resolve_package_from_deps(package_name, importer_base)
-  if materialized_dep_root.len > 0:
-    return materialized_dep_root
+  let lock_result = resolve_package_from_lock(package_name, importer_root, importer_base)
+  if lock_result.root.len > 0:
+    return canonical_path(lock_result.root)
+  if lock_result.issue.len > 0:
+    raise_import_error(PACKAGE_ERR_INVALID_LOCK,
+      "Invalid lockfile dependency for package '" & package_name & "': " & lock_result.issue,
+      importer_module = importer_module,
+      package_name = package_name)
+
+  let deps_result = resolve_package_from_deps(package_name, importer_base)
+  if deps_result.root.len > 0:
+    return canonical_path(deps_result.root)
+  if deps_result.ambiguous.len > 1:
+    var candidates: seq[string] = @[]
+    for candidate in deps_result.ambiguous:
+      candidates.add(canonical_path(candidate))
+    raise_import_error(PACKAGE_ERR_AMBIGUOUS,
+      "Multiple materialized dependency roots match package '" & package_name & "'",
+      importer_module = importer_module,
+      package_name = package_name,
+      candidates = candidates)
 
   let name_path = package_name.replace("/", $DirSep)
   # Walk search paths from importer_dir plus ancestors.
@@ -488,37 +745,56 @@ proc locate_package_root(package_name, importer_dir: string, override_path: stri
     bases.add(parent)
     walk_dir = parent
 
+  var search_matches: seq[string] = @[]
+  let last_part = package_name.split("/")[^1]
   for base in bases:
-    let base_abs = absolutePath(base)
+    let base_abs = canonical_path(base)
+    append_unique(searched, base_abs)
     let candidate_full = joinPath(base_abs, name_path)
+    append_unique(searched, canonical_path(candidate_full))
     if dirExists(candidate_full) or fileExists(candidate_full):
       let root = find_package_root(candidate_full)
       if package_root_matches_name(root, package_name):
-        return root
+        append_unique(search_matches, canonical_path(root))
 
-    let last_part = package_name.split("/")[^1]
     let candidate_short = joinPath(base_abs, last_part)
+    append_unique(searched, canonical_path(candidate_short))
     if dirExists(candidate_short) or fileExists(candidate_short):
       let root = find_package_root(candidate_short)
       if package_root_matches_name(root, package_name):
-        return root
+        append_unique(search_matches, canonical_path(root))
+
+  if search_matches.len == 1:
+    return search_matches[0]
+  if search_matches.len > 1:
+    raise_import_error(PACKAGE_ERR_AMBIGUOUS,
+      "Multiple package roots match package '" & package_name & "'",
+      importer_module = importer_module,
+      package_name = package_name,
+      searched = searched,
+      candidates = search_matches)
 
   # Fallback: try sibling of the current package root using the final segment.
   if importer_root.len > 0:
-    let last_part = package_name.split("/")[^1]
     let sibling = joinPath(parentDir(importer_root), last_part)
+    append_unique(searched, canonical_path(sibling))
     if dirExists(sibling) or fileExists(sibling):
       let root = find_package_root(sibling)
       if package_root_matches_name(root, package_name):
-        return root
-  return ""
+        return canonical_path(root)
+
+  raise_import_error(PACKAGE_ERR_NOT_FOUND,
+    "Package '" & package_name & "' was not found",
+    importer_module = importer_module,
+    package_name = package_name,
+    searched = searched)
 
 proc find_native_build(pkg_root: string, resolved_path: string): string =
   ## Look for a compiled native module under build/ matching the module basename.
   let base = splitFile(resolved_path).name
   if pkg_root.len == 0 or base.len == 0:
     return ""
-  let candidate = joinPath(pkg_root, "build", base)
+  let candidate = canonical_path(joinPath(pkg_root, "build", base))
   let extPath = candidate & native_ext_suffix()
   if fileExists(extPath):
     return candidate  # load_extension will append the suffix
@@ -799,7 +1075,7 @@ proc parse_import_statement*(gene: ptr Gene): tuple[module_path: string, package
 proc compile_module*(path: string): CompilationUnit =
   ## Compile a module from file and return its compilation unit
   # Read module file
-  let abs_path = absolutePath(path)
+  let abs_path = canonical_path(path)
   if abs_path.endsWith(".gir"):
     let loaded = load_gir(abs_path)
     register_module_type_registry(abs_path, loaded)
@@ -839,26 +1115,28 @@ proc compile_module*(path: string): CompilationUnit =
 
 proc load_module*(vm: ptr VirtualMachine, path: string): Namespace =
   ## Load a module from file and return its namespace
+  let cache_key = canonical_path(path)
   # Check cache first
-  if ModuleCache.hasKey(path):
-    return ModuleCache[path]
+  if ModuleCache.hasKey(cache_key):
+    return ModuleCache[cache_key]
   
   # Create namespace for module
-  let module_ns = new_namespace(App.app.global_ns.ref.ns, path)
+  let module_ns = new_namespace(App.app.global_ns.ref.ns, cache_key)
   module_ns.members["__is_main__".to_key()] = FALSE
-  module_ns.members["__module_name__".to_key()] = path.to_value()
+  module_ns.members["__module_name__".to_key()] = cache_key.to_value()
   module_ns.members["gene".to_key()] = App.app.gene_ns
   module_ns.members["genex".to_key()] = App.app.genex_ns
+  bind_module_package_context(module_ns, cache_key)
   
   # Compile the module to ensure it's valid
-  discard compile_module(path)
+  discard compile_module(cache_key)
   
   # The VM will execute this module when needed
   # For now, just cache the empty namespace
   # The actual execution will happen when the import is processed
   
   # Cache the module
-  ModuleCache[path] = module_ns
+  ModuleCache[cache_key] = module_ns
   
   return module_ns
 
@@ -920,8 +1198,8 @@ proc handle_import*(vm: ptr VirtualMachine, import_gene: ptr Gene): tuple[path: 
   # Determine importer directory
   let importer_module = current_module_path(vm)
   let importer_dir =
-    if importer_module.len > 0: absolutePath(parentDir(importer_module))
-    else: getCurrentDir()
+    if importer_module.len > 0: canonical_path(parentDir(importer_module))
+    else: canonical_path(getCurrentDir())
 
   var resolved_path = raw_module_path
   var is_gir = false
@@ -929,16 +1207,16 @@ proc handle_import*(vm: ptr VirtualMachine, import_gene: ptr Gene): tuple[path: 
   var package_root = ""
 
   if package_name.len > 0:
-    validate_package_name(package_name)
-    package_root = locate_package_root(package_name, importer_dir, package_path_override)
-    if package_root.len == 0:
-      not_allowed("Package '" & package_name & "' not found")
+    if package_path_override.len == 0:
+      validate_package_name(package_name)
+    package_root = locate_package_root(package_name, importer_dir, package_path_override, importer_module)
     if raw_module_path == "index":
-      let entry = resolve_package_entrypoint(package_root)
+      let entry = resolve_package_entrypoint(package_root, importer_module, package_name)
       resolved_path = entry.path
       is_gir = entry.is_gir
     else:
-      let (p, girFlag) = resolve_module_path(raw_module_path, package_root, package_root, package_name)
+      let (p, girFlag) = resolve_module_path(raw_module_path, importer_dir, package_root, package_name,
+        importer_module = importer_module, enforce_package_boundary = true)
       resolved_path = p
       is_gir = girFlag
   else:
@@ -946,18 +1224,21 @@ proc handle_import*(vm: ptr VirtualMachine, import_gene: ptr Gene): tuple[path: 
     if is_native:
       let native_path = resolve_native_module(raw_module_path, importer_dir, package_root, "")
       if native_path.len == 0:
-        not_allowed("Native module '" & raw_module_path & "' not found")
+        raise_import_error(MODULE_ERR_NOT_FOUND, "Native module '" & raw_module_path & "' was not found",
+          importer_module = importer_module, specifier = raw_module_path)
       resolved_path = native_path
       is_gir = false
     else:
-      let (p, girFlag) = resolve_module_path(raw_module_path, importer_dir, package_root, "")
+      let (p, girFlag) = resolve_module_path(raw_module_path, importer_dir, package_root, "",
+        importer_module = importer_module)
       resolved_path = p
       is_gir = girFlag
 
   if is_native and resolved_path.len == 0:
     let native_path = resolve_native_module(raw_module_path, importer_dir, package_root, package_name)
     if native_path.len == 0:
-      not_allowed("Native module '" & raw_module_path & "' not found")
+      raise_import_error(MODULE_ERR_NOT_FOUND, "Native module '" & raw_module_path & "' was not found",
+        importer_module = importer_module, specifier = raw_module_path, package_name = package_name)
     resolved_path = native_path
     is_gir = false
 
@@ -967,9 +1248,21 @@ proc handle_import*(vm: ptr VirtualMachine, import_gene: ptr Gene): tuple[path: 
       resolved_path = native_candidate
       is_native = true
 
+  resolved_path = canonical_path(resolved_path)
+  if package_name.len > 0 and package_root.len > 0 and resolved_path.len > 0:
+    let package_root_abs = canonical_path(package_root)
+    if not path_within(package_root_abs, resolved_path):
+      raise_import_error(PACKAGE_ERR_BOUNDARY,
+        "Resolved import path escapes package root",
+        importer_module = importer_module,
+        specifier = raw_module_path,
+        package_name = package_name,
+        candidates = @[resolved_path])
+
   # Check cache first
   if ModuleCache.hasKey(resolved_path):
     let module_ns = ModuleCache[resolved_path]
+    bind_module_package_context(module_ns, resolved_path, package_name, package_root)
     return (resolved_path, imports, module_ns, is_native, false)
   
   # Module not cached, need to compile and execute it (or load as native)
@@ -978,6 +1271,7 @@ proc handle_import*(vm: ptr VirtualMachine, import_gene: ptr Gene): tuple[path: 
   module_ns.members["__module_name__".to_key()] = resolved_path.to_value()
   module_ns.members["gene".to_key()] = App.app.gene_ns
   module_ns.members["genex".to_key()] = App.app.genex_ns
+  bind_module_package_context(module_ns, resolved_path, package_name, package_root)
   if is_gir:
     module_ns.members["__compiled__".to_key()] = TRUE
   return (resolved_path, imports, module_ns, is_native, false)

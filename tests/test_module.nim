@@ -124,6 +124,58 @@ test "Compilation & VM: runtime import is rejected":
   except CatchableError as e:
     check e.msg.contains("compile-time only")
 
+test "Compilation & VM: explicit exports reject non-exported named imports":
+  init_all()
+  let code = cleanup("""
+    (import hidden from "tests/fixtures/mod_exports")
+    hidden
+  """)
+  try:
+    discard VM.exec(code, "test_code")
+    fail()
+  except CatchableError as e:
+    check e.msg.contains("AIR.IMPORT.EXPORT_MISSING")
+    check e.msg.contains("hidden")
+
+test "Compilation & VM: explicit exports limit wildcard imports":
+  init_all()
+  check VM.exec(cleanup("""
+    (import * from "tests/fixtures/mod_exports")
+    public
+  """), "test_code") == 1
+
+  check VM.exec(cleanup("""
+    (import * from "tests/fixtures/mod_exports")
+    hidden
+  """), "test_code") == NIL
+
+test "Compilation & VM: ambiguous module candidates fail with stable code":
+  init_all()
+  let code = cleanup("""
+    (import value from "tests/fixtures/mod_ambiguous")
+    (value)
+  """)
+  try:
+    discard VM.exec(code, "test_code")
+    fail()
+  except CatchableError as e:
+    check e.msg.contains("AIR.MODULE.AMBIGUOUS")
+    check e.msg.contains("mod_ambiguous")
+
+test "Compilation & VM: cyclic imports fail with stable code and chain":
+  init_all()
+  let code = cleanup("""
+    (import a from "tests/fixtures/mod_cycle_a")
+    (a)
+  """)
+  try:
+    discard VM.exec(code, "test_code")
+    fail()
+  except CatchableError as e:
+    check e.msg.contains("AIR.MODULE.CYCLE")
+    check e.msg.contains("mod_cycle_a")
+    check e.msg.contains("mod_cycle_b")
+
 # test_vm """
 #   (ns n
 #     (fn f [] 1)

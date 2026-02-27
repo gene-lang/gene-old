@@ -155,12 +155,21 @@ proc import_items(self: ptr VirtualMachine, source_ns: Namespace, items: seq[Imp
   if source_ns == nil or self.frame == nil or self.frame.ns == nil:
     return
 
+  let export_enforced = has_exports(source_ns)
+
   for item in items:
     if item.name == "*":
       for key, value in source_ns.members:
         if value != NIL and not skip_wildcard_import_key(key):
+          if export_enforced:
+            let symbol_name = get_symbol(symbol_index(key))
+            if not is_exported(source_ns, symbol_name):
+              continue
           self.frame.ns.members[key] = value
     else:
+      if export_enforced and not is_exported(source_ns, item.name):
+        not_allowed("[AIR.IMPORT.EXPORT_MISSING] Cannot import '" & item.name &
+          "' from module with explicit exports")
       let value = resolve_import_value(source_ns, item.name)
       let import_name = if item.alias != "":
         item.alias
@@ -221,6 +230,8 @@ template get_value_class(val: Value): Class =
     safe_class_value(App.app.future_class)
   of VkGenerator:
     safe_class_value(App.app.generator_class)
+  of VkPackage:
+    safe_class_value(App.app.package_class)
   of VkThread:
     safe_class_value(THREAD_CLASS_VALUE)
   of VkThreadMessage:

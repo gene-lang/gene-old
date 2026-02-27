@@ -1,4 +1,4 @@
-import unittest, os, streams
+import unittest, os, streams, strutils
 import std/tempfiles
 
 import gene/gir
@@ -198,6 +198,103 @@ suite "Run CLI":
     defer:
       if dirExists(root):
         removeDir(root)
+
+    let result = run_command.handle("run", @[app_src])
+    check result.success
+
+  test "run rejects package-qualified imports that escape package root":
+    let root = createTempDir("gene_run_pkg_boundary_", "")
+    let app_src = root / "src" / "index.gene"
+    let dep_root = root / ".gene" / "deps" / "x" / "core" / "1.0.0"
+    let dep_parent = root / ".gene" / "deps" / "x" / "core"
+    let lock_path = root / "package.gene.lock"
+
+    createDir(root / "src")
+    createDir(dep_root / "src")
+    createDir(dep_parent)
+    writeFile(root / "package.gene", """
+^name "x/app"
+^version "0.1.0"
+^dependencies [
+  ($dep "x/core" "*" ^path "./vendor/core")
+]
+""")
+    writeFile(app_src, """
+(import data from "../outside" ^pkg "x/core")
+(data)
+""")
+    writeFile(dep_root / "package.gene", """
+^name "x/core"
+^version "1.0.0"
+^dependencies []
+""")
+    writeFile(dep_root / "src" / "index.gene", """
+(fn version [] 42)
+""")
+    writeFile(dep_parent / "outside.gene", """
+(var /data 99)
+""")
+    writeFile(lock_path, """
+{
+  ^lock_version 1
+  ^root_dependencies {
+    ^x/core "x/core@1.0.0"
+  }
+  ^packages {
+    ^x/core@1.0.0 {
+      ^name "x/core"
+      ^resolved "1.0.0"
+      ^node_id "x/core@1.0.0"
+      ^dir ".gene/deps/x/core/1.0.0"
+      ^source {^type "path" ^path "./vendor/core"}
+      ^sha256 "dummy"
+      ^singleton false
+      ^dependencies {}
+    }
+  }
+}
+""")
+
+    defer:
+      if dirExists(root):
+        removeDir(root)
+
+    let result = run_command.handle("run", @[app_src])
+    check not result.success
+    check result.error.contains("AIR.PACKAGE.BOUNDARY")
+
+  test "run prefers importer-relative modules over workspace fallback":
+    let root = createTempDir("gene_run_resolve_precedence_", "")
+    let workspace = createTempDir("gene_run_workspace_", "")
+    let app_src = root / "src" / "index.gene"
+    let local_mod = root / "src" / "libtarget.gene"
+    let workspace_mod = workspace / "src" / "libtarget.gene"
+    let previous_workspace = getEnv("GENE_WORKSPACE_PATH", "")
+
+    createDir(root / "src")
+    createDir(workspace / "src")
+    writeFile(app_src, """
+(import marker from "libtarget")
+(assert ((marker) == 1))
+1
+""")
+    writeFile(local_mod, """
+(fn marker [] 1)
+""")
+    writeFile(workspace_mod, """
+(fn marker [] 2)
+""")
+
+    putEnv("GENE_WORKSPACE_PATH", workspace)
+    defer:
+      if previous_workspace.len > 0:
+        putEnv("GENE_WORKSPACE_PATH", previous_workspace)
+      else:
+        delEnv("GENE_WORKSPACE_PATH")
+      if dirExists(root):
+        removeDir(root)
+      if dirExists(workspace):
+        removeDir(workspace)
 
     let result = run_command.handle("run", @[app_src])
     check result.success

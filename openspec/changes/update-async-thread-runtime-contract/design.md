@@ -55,7 +55,7 @@ No secondary code path is allowed to run callbacks with different semantics.
 `await` behavior:
 - if future is terminal, return/throw immediately according to state,
 - if pending, continue polling scheduler until terminal,
-- optional timeout returns deterministic timeout failure (`AIR.ASYNC.TIMEOUT`).
+- optional timeout returns deterministic timeout failure (`GENE.ASYNC.TIMEOUT`).
 
 ### 4. Callback Semantics
 
@@ -90,7 +90,7 @@ Mitigation:
 
 ## Open Questions
 
-- Should re-completing a terminal future throw (`AIR.ASYNC.ALREADY_TERMINAL`) or no-op?
+- Should re-completing a terminal future throw (`GENE.ASYNC.ALREADY_TERMINAL`) or no-op?
 A: throw
 - Should late callback registration execute synchronously or next scheduler tick? (recommend next scheduler tick for uniformity)
 A: next scheduler tick

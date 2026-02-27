@@ -11,6 +11,7 @@ proc exec*(self: ptr VirtualMachine, code: string, module_name: string): Value =
   # Add gene namespace to module namespace
   ns["gene".to_key()] = App.app.gene_ns
   ns["genex".to_key()] = App.app.genex_ns
+  bind_module_package_context(ns, module_name)
   App.app.gene_ns.ref.ns["main_module".to_key()] = module_name.to_value()
 
   # Add eval function to the module namespace
@@ -50,6 +51,7 @@ proc exec*(self: ptr VirtualMachine, stream: Stream, module_name: string): Value
   # Add gene namespace to module namespace
   ns["gene".to_key()] = App.app.gene_ns
   ns["genex".to_key()] = App.app.genex_ns
+  bind_module_package_context(ns, module_name)
   App.app.gene_ns.ref.ns["main_module".to_key()] = module_name.to_value()
 
   # Initialize frame if it doesn't exist

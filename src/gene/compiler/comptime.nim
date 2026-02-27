@@ -37,7 +37,7 @@ proc is_module_def_node*(v: Value): bool =
   if gt.kind != VkSymbol:
     return false
   case gt.str:
-  of "fn", "class", "ns", "enum", "type", "object", "import", "interface", "comptime":
+  of "fn", "class", "ns", "enum", "type", "object", "import", "interface", "comptime", "$dep":
     return true
   else:
     return false

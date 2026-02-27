@@ -1,0 +1,4 @@
+(var /public 1)
+(var /hidden 2)
+
+(export public)

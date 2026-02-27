@@ -142,7 +142,7 @@ suite "Threading Support":
     let err = array_data(result)[2]
     check err.kind == VkInstance
     check instance_props(err)["code".to_key()].kind == VkString
-    check instance_props(err)["code".to_key()].str == "AIR.ASYNC.TIMEOUT"
+    check instance_props(err)["code".to_key()].str == "GENE.ASYNC.TIMEOUT"
 
   test "Thread.send with reply returns payload":
     let code = """

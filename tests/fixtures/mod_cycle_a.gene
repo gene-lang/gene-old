@@ -1,0 +1,3 @@
+(import b from "tests/fixtures/mod_cycle_b")
+
+(fn a [] (b))

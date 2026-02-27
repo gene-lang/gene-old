@@ -160,7 +160,7 @@ proc poll_event_loop*(self: ptr VirtualMachine) =
               try:
                 payload = deserialize_literal(bytes_to_string(msg.payload_bytes.bytes))
               except CatchableError as ex:
-                discard future_obj.fail(new_async_error("AIR.THREAD.REPLY.DECODE", ex.msg, "thread_reply_decode"))
+                discard future_obj.fail(new_async_error("GENE.THREAD.REPLY.DECODE", ex.msg, "thread_reply_decode"))
                 self.execute_future_callbacks(future_obj)
                 # Fail the attached Nim future if present
                 if future_obj.nim_future != nil and not future_obj.nim_future.finished:
@@ -169,7 +169,7 @@ proc poll_event_loop*(self: ptr VirtualMachine) =
                 continue
             let error_msg = thread_error_message(payload)
             if error_msg.len > 0:
-              discard future_obj.fail(new_async_error("AIR.THREAD.REPLY.FAILURE", error_msg, "thread_reply"))
+              discard future_obj.fail(new_async_error("GENE.THREAD.REPLY.FAILURE", error_msg, "thread_reply"))
               self.execute_future_callbacks(future_obj)
               # Fail the attached Nim future if present
               if future_obj.nim_future != nil and not future_obj.nim_future.finished:

@@ -1239,5 +1239,36 @@ proc compile_gene(self: Compiler, input: Value) =
             of "$if_main":
               self.compile_if_main(gene)
               return
+            of "$dep":
+              if gene.children.len < 1:
+                not_allowed("$dep requires package name")
+              let dep_name_val = gene.children[0]
+              if dep_name_val.kind notin {VkString, VkSymbol}:
+                not_allowed("$dep package name must be a string or symbol")
+
+              var dep_path = ""
+              if "path".to_key() in gene.props:
+                let path_val = gene.props["path".to_key()]
+                if path_val.kind in {VkString, VkSymbol}:
+                  dep_path = path_val.str
+              if dep_path.len == 0 and gene.children.len > 1 and gene.children[1].kind in {VkString, VkSymbol}:
+                dep_path = gene.children[1].str
+              if dep_path.len == 0:
+                not_allowed("$dep requires ^path <string>")
+
+              if App != NIL and App.kind == VkApplication and App.app.global_ns.kind == VkNamespace:
+                let deps_key = "__deps__".to_key()
+                var deps_registry = App.app.global_ns.ref.ns.members.getOrDefault(deps_key, NIL)
+                if deps_registry == NIL or deps_registry.kind != VkMap:
+                  deps_registry = new_map_value()
+                  App.app.global_ns.ref.ns.members[deps_key] = deps_registry
+                  if App.app.gene_ns.kind == VkNamespace:
+                    App.app.gene_ns.ref.ns.members[deps_key] = deps_registry
+                let dep_entry = new_map_value()
+                map_data(dep_entry)["path".to_key()] = dep_path.to_value()
+                map_data(deps_registry)[dep_name_val.str.to_key()] = dep_entry
+
+              self.emit(Instruction(kind: IkPushNil))
+              return
 
   self.compile_gene_unknown(gene)

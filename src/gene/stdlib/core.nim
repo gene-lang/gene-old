@@ -1778,8 +1778,18 @@ proc init_gene_and_meta_classes(object_class: Class) =
   App.app.gene_ns.ns["Application".to_key()] = App.app.application_class
   App.app.global_ns.ns["Application".to_key()] = App.app.application_class
 
+  proc package_name_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
+                           arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("Package.name requires self")
+    let self_arg = get_positional_arg(args, 0, has_keyword_args)
+    if self_arg.kind != VkPackage or self_arg.ref.pkg == nil:
+      not_allowed("Package.name must be called on a package")
+    self_arg.ref.pkg.name.to_value()
+
   let package_class = new_class("Package")
   package_class.parent = object_class
+  package_class.def_native_method("name", package_name_method)
   r = new_ref(VkClass)
   r.class = package_class
   App.app.package_class = r.to_ref_value()
@@ -2122,6 +2132,41 @@ proc core_has_env*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_
 
   let name = name_arg.str
   return existsEnv(name).to_value()
+
+proc core_dep*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
+  ## Register a local package alias used by imports: ($dep "name" ^path "./pkg")
+  let positional = get_positional_count(arg_count, has_keyword_args)
+  if positional < 1:
+    raise new_exception(types.Exception, "$dep requires package name")
+
+  let dep_name_val = get_positional_arg(args, 0, has_keyword_args)
+  if dep_name_val.kind notin {VkString, VkSymbol}:
+    raise new_exception(types.Exception, "$dep package name must be a string or symbol")
+  let dep_name = dep_name_val.str
+  if dep_name.len == 0:
+    raise new_exception(types.Exception, "$dep package name cannot be empty")
+
+  var path_val = if has_keyword_args: get_keyword_arg(args, "path") else: NIL
+  if path_val == NIL and positional >= 2:
+    let candidate = get_positional_arg(args, 1, has_keyword_args)
+    if candidate.kind in {VkString, VkSymbol}:
+      path_val = candidate
+  if path_val.kind notin {VkString, VkSymbol}:
+    raise new_exception(types.Exception, "$dep requires ^path <string>")
+
+  let dep_entry = new_map_value()
+  map_data(dep_entry)["path".to_key()] = path_val
+
+  let deps_key = "__deps__".to_key()
+  var deps_registry = App.app.global_ns.ref.ns.members.getOrDefault(deps_key, NIL)
+  if deps_registry == NIL or deps_registry.kind != VkMap:
+    deps_registry = new_map_value()
+    App.app.global_ns.ref.ns.members[deps_key] = deps_registry
+    if App.app.gene_ns.kind == VkNamespace:
+      App.app.gene_ns.ref.ns.members[deps_key] = deps_registry
+
+  map_data(deps_registry)[dep_name.to_key()] = dep_entry
+  dep_entry
 
 # Base64 encoding/decoding
 proc core_base64*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
@@ -3602,6 +3647,8 @@ proc init_stdlib*() =
   global_ns["base64_decode".to_key()] = core_base64_decode.to_value()
 
   # Utility functions
+  global_ns["dep".to_key()] = core_dep.to_value()
+  global_ns["$dep".to_key()] = core_dep.to_value()
   global_ns["$tap".to_key()] = core_tap.to_value()
   global_ns["$if_main".to_key()] = core_if_main.to_value()
   global_ns["$repl".to_key()] = NativeFn(core_repl).to_value()

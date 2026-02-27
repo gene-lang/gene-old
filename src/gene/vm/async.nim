@@ -29,7 +29,7 @@ proc update_future_from_nim*(vm: ptr VirtualMachine, future_obj: FutureObj) {.gc
   if finished(future_obj.nim_future):
     # Nim future has completed - copy its result
     if failed(future_obj.nim_future):
-      discard future_obj.fail(new_async_error("AIR.ASYNC.FAILURE", "Async operation failed", "nim_future"))
+      discard future_obj.fail(new_async_error("GENE.ASYNC.FAILURE", "Async operation failed", "nim_future"))
     else:
       discard future_obj.complete(read(future_obj.nim_future))
 
@@ -54,7 +54,7 @@ proc future_state_name(state: FutureState): string {.inline.} =
 
 proc raise_future_already_terminal(op_name: string, state: FutureState) {.noreturn.} =
   let msg =
-    "AIR.ASYNC.ALREADY_TERMINAL: cannot " & op_name &
+    "GENE.ASYNC.ALREADY_TERMINAL: cannot " & op_name &
     " a future in state " & future_state_name(state)
   raise new_exception(types.Exception, msg)
 
@@ -76,7 +76,7 @@ proc execute_future_callbacks*(vm: ptr VirtualMachine, future_obj: FutureObj) {.
       if not run_callback_now(vm, callback, future_obj.value):
         future_obj.state = FsFailure
         if vm.current_exception == NIL:
-          future_obj.value = new_async_error("AIR.ASYNC.CALLBACK_FAILURE", "Future success callback failed", "callback")
+          future_obj.value = new_async_error("GENE.ASYNC.CALLBACK_FAILURE", "Future success callback failed", "callback")
         else:
           future_obj.value = vm.current_exception
         break
@@ -163,7 +163,7 @@ proc future_cancel(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_
     if get_positional_count(arg_count, has_keyword_args) > 1:
       get_positional_arg(args, 1, has_keyword_args)
     else:
-      new_async_error("AIR.ASYNC.CANCELLED", "Future cancelled", "cancel")
+      new_async_error("GENE.ASYNC.CANCELLED", "Future cancelled", "cancel")
 
   let future_obj = future_arg.ref.future
   if not future_obj.cancel(reason_arg):
@@ -252,7 +252,7 @@ proc init_async*() =
         if get_positional_count(arg_count, has_keyword_args) > 1:
           get_positional_arg(args, 1, has_keyword_args)
         else:
-          new_async_error("AIR.ASYNC.CANCELLED", "Future cancelled", "cancel_future")
+          new_async_error("GENE.ASYNC.CANCELLED", "Future cancelled", "cancel_future")
 
       let future_obj = future_arg.ref.future
       if not future_obj.cancel(reason_arg):

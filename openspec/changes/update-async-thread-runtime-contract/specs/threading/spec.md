@@ -35,12 +35,12 @@ Thread request/reply futures SHALL support deterministic timeout and cancellatio
 
 #### Scenario: Await timeout on thread reply future
 - **WHEN** awaiting a pending thread reply future with a timeout and the timeout elapses
-- **THEN** await SHALL fail with typed timeout error code `AIR.ASYNC.TIMEOUT`
+- **THEN** await SHALL fail with typed timeout error code `GENE.ASYNC.TIMEOUT`
 - **AND** pending reply tracking SHALL be cleaned up deterministically
 
 #### Scenario: Await cancelled thread reply future
 - **WHEN** awaiting a cancelled thread reply future
-- **THEN** await SHALL fail with typed cancellation error code `AIR.ASYNC.CANCELLED`
+- **THEN** await SHALL fail with typed cancellation error code `GENE.ASYNC.CANCELLED`
 - **AND** it SHALL not continue polling
 
 ### Requirement: Thread Failure Propagation

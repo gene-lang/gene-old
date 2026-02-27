@@ -59,8 +59,8 @@ Async lifecycle failures SHALL use typed runtime error codes.
 
 #### Scenario: Timeout failure carries typed code
 - **WHEN** a timeout occurs
-- **THEN** the runtime error SHALL include code `AIR.ASYNC.TIMEOUT`
+- **THEN** the runtime error SHALL include code `GENE.ASYNC.TIMEOUT`
 
 #### Scenario: Cancellation failure carries typed code
 - **WHEN** cancellation is observed
-- **THEN** the runtime error SHALL include code `AIR.ASYNC.CANCELLED`
+- **THEN** the runtime error SHALL include code `GENE.ASYNC.CANCELLED`

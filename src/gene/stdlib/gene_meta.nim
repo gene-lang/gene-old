@@ -130,8 +130,18 @@ proc init_gene_and_meta_classes*(object_class: Class) =
   App.app.gene_ns.ns["Application".to_key()] = App.app.application_class
   App.app.global_ns.ns["Application".to_key()] = App.app.application_class
 
+  proc package_name_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
+                           arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("Package.name requires self")
+    let self_arg = get_positional_arg(args, 0, has_keyword_args)
+    if self_arg.kind != VkPackage or self_arg.ref.pkg == nil:
+      not_allowed("Package.name must be called on a package")
+    self_arg.ref.pkg.name.to_value()
+
   let package_class = new_class("Package")
   package_class.parent = object_class
+  package_class.def_native_method("name", package_name_method)
   r = new_ref(VkClass)
   r.class = package_class
   App.app.package_class = r.to_ref_value()

@@ -3370,7 +3370,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                 cycle = ModuleLoadStack[start..^1] & @[module_path]
               else:
                 cycle = ModuleLoadStack & @[module_path]
-              not_allowed("Cyclic import detected: " & cycle.join(" -> "))
+              not_allowed("[AIR.MODULE.CYCLE] Cyclic import detected: " & cycle.join(" -> "))
 
             ModuleLoadState[module_path] = true
             ModuleLoadStack.add(module_path)
@@ -4117,7 +4117,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           of FsCancelled:
             let cancelled_error =
               if future.value != NIL: future.value
-              else: new_async_error("AIR.ASYNC.CANCELLED", "Future cancelled", "await")
+              else: new_async_error("GENE.ASYNC.CANCELLED", "Future cancelled", "await")
             self.current_exception = cancelled_error
             if self.exception_handlers.len > 0:
               let handler = self.exception_handlers[^1]
@@ -4144,7 +4144,7 @@ proc exec*(self: ptr VirtualMachine): Value =
               if timeout_ms >= 0:
                 let elapsed_ms = ((epochTime() - start_time) * 1000.0).int
                 if elapsed_ms >= timeout_ms:
-                  let timeout_error = new_async_error("AIR.ASYNC.TIMEOUT", "await timed out", "await")
+                  let timeout_error = new_async_error("GENE.ASYNC.TIMEOUT", "await timed out", "await")
                   if future.fail(timeout_error):
                     self.execute_future_callbacks(future)
                   self.detach_future_tracking(future)
@@ -4173,7 +4173,7 @@ proc exec*(self: ptr VirtualMachine): Value =
               of FsCancelled:
                 let cancelled_error =
                   if future.value != NIL: future.value
-                  else: new_async_error("AIR.ASYNC.CANCELLED", "Future cancelled", "await")
+                  else: new_async_error("GENE.ASYNC.CANCELLED", "Future cancelled", "await")
                 self.current_exception = cancelled_error
                 if self.exception_handlers.len > 0:
                   let handler = self.exception_handlers[^1]

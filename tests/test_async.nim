@@ -274,7 +274,7 @@ test_vm """
   let err = array_data(r)[2]
   check err.kind == VkInstance
   check instance_props(err)["code".to_key()].kind == VkString
-  check instance_props(err)["code".to_key()].str == "AIR.ASYNC.TIMEOUT"
+  check instance_props(err)["code".to_key()].str == "GENE.ASYNC.TIMEOUT"
 
 # Tests that require sleep_async and $await_all - not implemented yet
 # test_vm """
