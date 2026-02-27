@@ -111,6 +111,22 @@ test_vm """
 
 test_vm """
   (try
+    (throw [1 2])
+  catch [a b]
+    (a + b)
+  )
+""", 3
+
+test_vm """
+  (try
+    (throw {^x 4 ^y 6})
+  catch {^x x ^y y}
+    (x + y)
+  )
+""", 10
+
+test_vm """
+  (try
     (throw)
     1
   catch *

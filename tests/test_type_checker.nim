@@ -156,6 +156,19 @@ suite "Static type checking":
       checker.type_check_node(node)
     check true
 
+  test "Strict type checking: catch destructuring bindings are scoped":
+    let checker = tc.new_type_checker(strict = true, module_filename = "test_code")
+    let code = cleanup("""
+      (try
+        (throw [1 2])
+      catch [a b]
+        (+ a b)
+      )
+    """)
+    for node in read_all(code):
+      checker.type_check_node(node)
+    check true
+
   test "Strict type checking: for index plus destructuring pattern":
     let checker = tc.new_type_checker(strict = true, module_filename = "test_code")
     let code = cleanup("""

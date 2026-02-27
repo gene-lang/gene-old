@@ -1171,11 +1171,14 @@ proc compile_try(self: Compiler, gene: ptr Gene) =
         let is_catch_all = is_symbol_pattern and pattern.str == "*"
         # catch ex / catch err => bind exception to a variable.
         # Uppercase symbol catches remain type-based (e.g. catch MyError).
-        let is_catch_binding =
+        let is_symbol_binding =
           is_symbol_pattern and
           pattern.str.len > 0 and
           pattern.str != "*" and
           (pattern.str == "_" or pattern.str[0].isLowerAscii())
+        # Destructuring patterns in catch reuse var-binding semantics.
+        let is_destructure_binding = pattern.kind in {VkArray, VkMap}
+        let is_catch_binding = is_symbol_binding or is_destructure_binding
         
         # Generate catch matching code
         if is_catch_all or is_catch_binding:
@@ -1206,7 +1209,7 @@ proc compile_try(self: Compiler, gene: ptr Gene) =
 
         # Catch-local scope for optional exception binding and body locals.
         self.start_scope()
-        if is_catch_binding:
+        if is_symbol_binding:
           self.emit(Instruction(kind: IkPushValue, arg0: App.app.gene_ns))
           self.emit(Instruction(kind: IkGetMember, arg0: "ex".to_key().to_value()))
           if pattern.str == "_":
@@ -1218,6 +1221,24 @@ proc compile_try(self: Compiler, gene: ptr Gene) =
             self.scope_tracker.next_index.inc()
             self.emit(Instruction(kind: IkVar, arg0: catch_var_index.to_value()))
             self.emit(Instruction(kind: IkPop))
+        elif is_destructure_binding:
+          # Bind exception value through var-destructuring to keep one matcher model.
+          self.emit(Instruction(kind: IkPushValue, arg0: App.app.gene_ns))
+          self.emit(Instruction(kind: IkGetMember, arg0: "ex".to_key().to_value()))
+
+          let tmp_name = ("__catch_ex_" & $catch_count & "_" & $i).to_symbol_value()
+          let tmp_index = self.scope_tracker.next_index
+          self.scope_tracker.mappings[tmp_name.str.to_key()] = tmp_index
+          self.add_scope_start()
+          self.scope_tracker.next_index.inc()
+          self.emit(Instruction(kind: IkVar, arg0: tmp_index.to_value()))
+          self.emit(Instruction(kind: IkPop))
+
+          var bind_gene = new_gene("var".to_symbol_value())
+          bind_gene.children.add(pattern)
+          bind_gene.children.add(tmp_name)
+          self.compile_var(bind_gene)
+          self.emit(Instruction(kind: IkPop))
         
         # Compile catch body
         while i < gene.children.len:

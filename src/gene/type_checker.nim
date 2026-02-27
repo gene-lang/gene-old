@@ -1834,6 +1834,8 @@ proc check_try(self: TypeChecker, gene: ptr Gene): TypeExpr =
         let name = pattern.str
         if name.len > 0 and name != "*" and name != "_" and name[0].isLowerAscii():
           self.define(name, ANY_TYPE)
+      elif pattern.kind in {VkArray, VkMap}:
+        self.define_pattern_bindings(pattern, ANY_TYPE)
       else:
         discard self.check_expr(pattern)
 
