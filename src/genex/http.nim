@@ -644,7 +644,7 @@ proc request_send(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_c
 
   # Create completed future with response
   let future = new_future_value()
-  future.ref.future.complete(response_instance)
+  discard future.ref.future.complete(response_instance)
   return future
 
 # Response constructor implementation

@@ -200,14 +200,10 @@ proc wrap_nim_exception*(ex: ref CatchableError, location: string = ""): Value =
   let cls = core.`ref`(exception_class_val).class
   var props = initTable[Key, Value]()
   props["message".to_key()] = ex.msg.to_value()
-  props["nim_type".to_key()] = ($type(ex[])).to_value()
-  when not defined(release):
-    props["nim_stack".to_key()] = ex.getStackTrace().to_value()
-  else:
-    props["nim_stack".to_key()] = NIL
-  if location.len > 0:
-    props["location".to_key()] = location.to_value()
-  else:
-    props["location".to_key()] = NIL
+  # Keep wrapping allocation-light to avoid cascading failures while handling
+  # runtime exceptions raised from corrupted execution paths.
+  props["nim_type".to_key()] = NIL
+  props["nim_stack".to_key()] = NIL
+  props["location".to_key()] = NIL
 
   result = new_instance_value(cls, props)

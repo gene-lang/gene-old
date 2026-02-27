@@ -5,7 +5,7 @@ import ./types
 const
   GIR_MAGIC = "GENE"
   GIR_VERSION* = 18'u32
-  COMPILER_VERSION = "0.1.2"
+  COMPILER_VERSION = "0.1.3"
   VALUE_ABI_VERSION* = 2'u32  # Version 2: Value is object wrapper with GC
   
 type

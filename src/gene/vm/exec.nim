@@ -139,7 +139,7 @@ proc exec*(self: ptr VirtualMachine): Value =
               # Wrap the return value in a future
               let future_val = new_future_value()
               let future_obj = future_val.ref.future
-              future_obj.complete(result_val)
+              discard future_obj.complete(result_val)
               result_val = future_val
 
           # Profile function exit
@@ -241,8 +241,8 @@ proc exec*(self: ptr VirtualMachine): Value =
         let parts = array_data(payload)
         if parts.len != 2:
           not_allowed("IkVarDestructure payload must contain pattern and index array")
-        let pattern = parts[0]
-        let raw_indices = parts[1]
+        var pattern = parts[0]
+        var raw_indices = parts[1]
         if raw_indices.kind != VkArray:
           not_allowed("IkVarDestructure payload indices must be an array")
         var target_indices: seq[int16] = @[]
@@ -251,6 +251,8 @@ proc exec*(self: ptr VirtualMachine): Value =
             not_allowed("IkVarDestructure index must be numeric")
           target_indices.add(item.int64.int16)
         bind_destructure_pattern(pattern, source, self.frame.scope, target_indices)
+        wasMoved(pattern)
+        wasMoved(raw_indices)
 
       of IkVarResolve:
         {.push checks: off}
@@ -3242,7 +3244,7 @@ proc exec*(self: ptr VirtualMachine): Value =
               # Wrap the return value in a future
               let future_val = new_future_value()
               let future_obj = future_val.ref.future
-              future_obj.complete(v)
+              discard future_obj.complete(v)
               v = future_val
 
           # Profile function exit
@@ -4051,7 +4053,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         let future_obj = future_val.ref.future
 
         # Complete the future with the value
-        future_obj.complete(value)
+        discard future_obj.complete(value)
 
         self.frame.push(future_val)
         {.pop.}
@@ -4064,9 +4066,9 @@ proc exec*(self: ptr VirtualMachine): Value =
         let future_obj = future_val.ref.future
 
         if value.kind == VkException:
-          future_obj.fail(value)
+          discard future_obj.fail(value)
         else:
-          future_obj.complete(value)
+          discard future_obj.complete(value)
 
         self.frame.push(future_val)
         {.pop.}
@@ -4080,6 +4082,16 @@ proc exec*(self: ptr VirtualMachine): Value =
           not_allowed("await expects a Future, got: " & $future_val.kind)
 
         let future = future_val.ref.future
+
+        var timeout_ms = -1
+        if inst.arg1 != 0:
+          case inst.arg0.kind:
+          of VkInt:
+            timeout_ms = max(0, inst.arg0.int64.int)
+          of VkFloat:
+            timeout_ms = max(0, (inst.arg0.float64 * 1000.0).int)
+          else:
+            not_allowed("await ^timeout expects int milliseconds or float seconds")
 
         # Check the future state and handle accordingly
         case future.state:
@@ -4102,58 +4114,43 @@ proc exec*(self: ptr VirtualMachine): Value =
             else:
               # No handler, raise Nim exception
               raise new_exception(types.Exception, self.format_runtime_exception(future.value))
+          of FsCancelled:
+            let cancelled_error =
+              if future.value != NIL: future.value
+              else: new_async_error("AIR.ASYNC.CANCELLED", "Future cancelled", "await")
+            self.current_exception = cancelled_error
+            if self.exception_handlers.len > 0:
+              let handler = self.exception_handlers[^1]
+              self.cu = handler.cu
+              self.pc = handler.catch_pc
+              if self.pc < self.cu.instructions.len:
+                inst = self.cu.instructions[self.pc].addr
+              else:
+                raise new_exception(types.Exception, "Invalid catch PC: " & $self.pc)
+              continue
+            else:
+              raise new_exception(types.Exception, self.format_runtime_exception(cancelled_error))
           of FsPending:
             # Poll event loop until future completes
-            # Callbacks will update the future state when async operations complete
+            let start_time = epochTime()
             while future.state == FsPending:
-              # Check for thread replies (non-blocking)
-              if THREADS[0].in_use:
-                while true:
-                  let msg_opt = THREAD_DATA[0].channel.try_recv()
-                  if msg_opt.isNone():
-                    break
+              self.event_loop_counter = EVENT_LOOP_POLL_INTERVAL
+              self.poll_enabled = true
+              self.poll_event_loop()
 
-                  let msg = msg_opt.get()
-                  if msg.msg_type == MtReply:
-                    # Complete the future with the reply payload
-                    if self.thread_futures.hasKey(msg.from_message_id):
-                      let future_obj = self.thread_futures[msg.from_message_id]
-                      var payload = msg.payload
-                      if msg.payload_bytes.bytes.len > 0:
-                        try:
-                          payload = deserialize_literal(bytes_to_string(msg.payload_bytes.bytes))
-                        except CatchableError as ex:
-                          future_obj.state = FsFailure
-                          future_obj.value = wrap_nim_exception(ex, "thread reply decode")
-                          self.thread_futures.del(msg.from_message_id)
-                          continue
-                      let error_msg = thread_error_message(payload)
-                      if error_msg.len > 0:
-                        let ex = new_exception(types.Exception, error_msg)
-                        future_obj.state = FsFailure
-                        future_obj.value = wrap_nim_exception(ex, "thread reply")
-                        if future_obj.nim_future != nil and not future_obj.nim_future.finished:
-                          future_obj.nim_future.fail(newException(system.Exception, error_msg))
-                        self.thread_futures.del(msg.from_message_id)
-                        continue
-                      future_obj.state = FsSuccess
-                      future_obj.value = payload
-                      self.thread_futures.del(msg.from_message_id)
+              if future.state != FsPending:
+                break
 
-              # Poll the event loop to process async operations and fire callbacks
-              try:
-                if hasPendingOperations():
-                  poll(0)  # Process ready operations
-              except ValueError:
-                discard  # No async operations pending
+              if timeout_ms >= 0:
+                let elapsed_ms = ((epochTime() - start_time) * 1000.0).int
+                if elapsed_ms >= timeout_ms:
+                  let timeout_error = new_async_error("AIR.ASYNC.TIMEOUT", "await timed out", "await")
+                  if future.fail(timeout_error):
+                    self.execute_future_callbacks(future)
+                  self.detach_future_tracking(future)
+                  break
 
-              # Remove completed futures from pending list
-              var i = 0
-              while i < self.pending_futures.len:
-                if self.pending_futures[i].state != FsPending:
-                  self.pending_futures.delete(i)
-                else:
-                  i.inc()
+              sleep(1)
 
             # Future has completed, handle the result
             case future.state:
@@ -4173,6 +4170,22 @@ proc exec*(self: ptr VirtualMachine): Value =
                   continue
                 else:
                   raise new_exception(types.Exception, self.format_runtime_exception(future.value))
+              of FsCancelled:
+                let cancelled_error =
+                  if future.value != NIL: future.value
+                  else: new_async_error("AIR.ASYNC.CANCELLED", "Future cancelled", "await")
+                self.current_exception = cancelled_error
+                if self.exception_handlers.len > 0:
+                  let handler = self.exception_handlers[^1]
+                  self.cu = handler.cu
+                  self.pc = handler.catch_pc
+                  if self.pc < self.cu.instructions.len:
+                    inst = self.cu.instructions[self.pc].addr
+                  else:
+                    raise new_exception(types.Exception, "Invalid catch PC: " & $self.pc)
+                  continue
+                else:
+                  raise new_exception(types.Exception, self.format_runtime_exception(cancelled_error))
               of FsPending:
                 # Should not happen
                 not_allowed("Future still pending after polling")

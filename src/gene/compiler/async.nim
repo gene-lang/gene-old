@@ -23,16 +23,25 @@ proc compile_await(self: Compiler, gene: ptr Gene) =
   if gene.children.len == 0:
     not_allowed("await expects at least 1 argument")
 
+  let timeout_key = "timeout".to_key()
+  var timeout_arg = NIL
+  var has_timeout = false
+  if gene.props.has_key(timeout_key):
+    timeout_arg = gene.props[timeout_key]
+    if timeout_arg.kind notin {VkInt, VkFloat}:
+      not_allowed("await ^timeout must be int milliseconds or float seconds")
+    has_timeout = true
+
   if gene.children.len == 1:
     # Single future
     self.compile(gene.children[0])
-    self.emit(Instruction(kind: IkAwait))
+    self.emit(Instruction(kind: IkAwait, arg0: timeout_arg, arg1: if has_timeout: 1 else: 0))
   else:
     # Multiple futures - await each and collect results
     self.emit(Instruction(kind: IkArrayStart))
     for child in gene.children:
       self.compile(child)
-      self.emit(Instruction(kind: IkAwait))
+      self.emit(Instruction(kind: IkAwait, arg0: timeout_arg, arg1: if has_timeout: 1 else: 0))
       # Awaited value is on stack, will be collected by IkArrayEnd
     self.emit(Instruction(kind: IkArrayEnd))
 

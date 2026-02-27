@@ -103,6 +103,47 @@ suite "Threading Support":
     let result = VM.exec()
     check to_int(result) == 3
 
+  test "spawn_return await timeout yields typed async timeout":
+    let code = """
+      (do
+        (var f
+          (spawn_return
+            (do
+              (sleep 200)
+              1
+            )
+          )
+        )
+        (var caught false)
+        (try
+          (await ^timeout 10 f)
+          NIL
+        catch *
+          (caught = true)
+        )
+        [caught (f .state) (f .value)]
+      )
+    """
+    let ast = read(code)
+    let cu = compile_init(ast)
+
+    VM.cu = cu
+    VM.pc = 0
+    VM.frame = new_frame()
+    VM.frame.stack_index = 0
+    VM.frame.scope = new_scope(new_scope_tracker())
+    VM.frame.ns = App.app.gene_ns.ref.ns
+
+    let result = VM.exec()
+    check result.kind == VkArray
+    check array_data(result).len == 3
+    check array_data(result)[0] == TRUE
+    check array_data(result)[1] == "failure".to_symbol_value()
+    let err = array_data(result)[2]
+    check err.kind == VkInstance
+    check instance_props(err)["code".to_key()].kind == VkString
+    check instance_props(err)["code".to_key()].str == "AIR.ASYNC.TIMEOUT"
+
   test "Thread.send with reply returns payload":
     let code = """
       (do

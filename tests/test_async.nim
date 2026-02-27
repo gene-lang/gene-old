@@ -1,4 +1,5 @@
 import unittest
+import tables
 
 import gene/types except Exception
 
@@ -219,6 +220,61 @@ test_vm """
     2
   )
 """, 2
+
+test_vm """
+  (var f (new gene/Future))
+  (f .cancel)
+  (f .state)
+""", proc(r: Value) =
+  check r == "cancelled".to_symbol_value()
+
+test_vm """
+  (var f (new gene/Future))
+  (f .cancel)
+  (var threw false)
+  (try
+    (f .complete 1)
+    NIL
+  catch *
+    (threw = true)
+  )
+  [threw (f .state)]
+""", proc(r: Value) =
+  check r.kind == VkArray
+  check array_data(r).len == 2
+  check array_data(r)[0] == TRUE
+  check array_data(r)[1] == "cancelled".to_symbol_value()
+
+test_vm """
+  (var f (new gene/Future))
+  (f .cancel)
+  (try
+    (await f)
+    false
+  catch *
+    true
+  )
+""", TRUE
+
+test_vm """
+  (var f (new gene/Future))
+  (var caught false)
+  (try
+    (await ^timeout 10 f)
+    NIL
+  catch *
+    (caught = true)
+  )
+  [caught (f .state) (f .value)]
+""", proc(r: Value) =
+  check r.kind == VkArray
+  check array_data(r).len == 3
+  check array_data(r)[0] == TRUE
+  check array_data(r)[1] == "failure".to_symbol_value()
+  let err = array_data(r)[2]
+  check err.kind == VkInstance
+  check instance_props(err)["code".to_key()].kind == VkString
+  check instance_props(err)["code".to_key()].str == "AIR.ASYNC.TIMEOUT"
 
 # Tests that require sleep_async and $await_all - not implemented yet
 # test_vm """

@@ -26,6 +26,7 @@ type
     FsPending
     FsSuccess
     FsFailure
+    FsCancelled
 
   FutureObj* = ref object
     state*: FutureState

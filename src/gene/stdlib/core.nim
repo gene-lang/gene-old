@@ -3102,7 +3102,7 @@ proc gene_sleep(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_cou
                     discard call_native_fn(callback.ref.native_fn, vm, args_arr)
                   else:
                     discard
-            elif future_obj.state == FsFailure:
+            elif future_obj.state in {FsFailure, FsCancelled}:
               for callback in future_obj.failure_callbacks:
                 case callback.kind:
                   of VkFunction, VkBlock:

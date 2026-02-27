@@ -235,26 +235,52 @@ proc split_destructure_input(input: Value): tuple[positional: seq[Value], keywor
   else:
     result.positional = @[input]
 
+proc append_bound_values_for_children(children: seq[Matcher], input: Value, out_values: var seq[Value]) =
+  ## Recursively apply matcher binding to support nested destructuring patterns.
+  let matcher = new_arg_matcher()
+  matcher.children = children
+  matcher.calc_min_left()
+  matcher.calc_next()
+  matcher.check_hint()
+
+  let (positional, keywords) = split_destructure_input(input)
+  let pos_ptr = if positional.len > 0: cast[ptr UncheckedArray[Value]](positional[0].addr)
+                else: cast[ptr UncheckedArray[Value]](nil)
+
+  let level_scope = new_scope(new_scope_tracker())
+  try:
+    process_args_core(matcher, pos_ptr, positional.len, keywords, level_scope)
+    for i, param in matcher.children:
+      let bound =
+        if i < level_scope.members.len: level_scope.members[i]
+        else: NIL
+
+      var bind_name = ""
+      if cast[int64](param.name_key) != 0:
+        try:
+          bind_name = cast[Value](param.name_key).str
+        except CatchableError:
+          bind_name = ""
+      if bind_name.len > 0 and bind_name != "_":
+        out_values.add(bound)
+
+      if param.children.len > 0:
+        append_bound_values_for_children(param.children, bound, out_values)
+  finally:
+    level_scope.free()
+
 proc bind_destructure_pattern*(pattern: Value, input: Value, scope: Scope, target_indices: seq[int16]) =
   ## Bind a var-destructuring pattern using the same matcher pipeline as function args.
   if scope.is_nil:
     not_allowed("Destructuring target scope is nil")
 
   let matcher = new_arg_matcher(pattern)
-  let (positional, keywords) = split_destructure_input(input)
-  let pos_ptr = if positional.len > 0: cast[ptr UncheckedArray[Value]](positional[0].addr)
-                else: cast[ptr UncheckedArray[Value]](nil)
+  var bound_values: seq[Value] = @[]
+  append_bound_values_for_children(matcher.children, input, bound_values)
 
-  let temp_scope = new_scope(new_scope_tracker())
-  try:
-    process_args_core(matcher, pos_ptr, positional.len, keywords, temp_scope)
-    let count = min(target_indices.len, temp_scope.members.len)
-    for i in 0..<count:
-      let target = target_indices[i]
-      if target >= 0:
-        let idx = target.int
-        while scope.members.len <= idx:
-          scope.members.add(NIL)
-        scope.members[idx] = temp_scope.members[i]
-  finally:
-    temp_scope.free()
+  let count = min(target_indices.len, bound_values.len)
+  for i in 0..<count:
+    let idx = target_indices[i].int
+    while scope.members.len <= idx:
+      scope.members.add(NIL)
+    scope.members[idx] = bound_values[i]

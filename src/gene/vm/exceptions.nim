@@ -74,7 +74,7 @@ proc dispatch_exception(self: ptr VirtualMachine, value: Value, inst: var ptr In
 
       let future_val = new_future_value()
       let future_obj = future_val.ref.future
-      future_obj.fail(exception_value)
+      discard future_obj.fail(exception_value)
       self.frame.push(future_val)
 
       while self.pc < self.cu.instructions.len and self.cu.instructions[self.pc].kind != IkAsyncEnd:
@@ -89,7 +89,7 @@ proc dispatch_exception(self: ptr VirtualMachine, value: Value, inst: var ptr In
 
       let future_val = new_future_value()
       let future_obj = future_val.ref.future
-      future_obj.fail(exception_value)
+      discard future_obj.fail(exception_value)
 
       if self.frame.caller_frame != nil:
         self.cu = self.frame.caller_address.cu

@@ -370,26 +370,29 @@ proc compile_var(self: Compiler, gene: ptr Gene) =
     let matcher = new_arg_matcher(name)
     var target_indices = new_array_value()
     var has_bindings = false
+    proc add_matcher_bindings(param: Matcher) =
+      var bind_name = ""
+      if cast[int64](param.name_key) != 0:
+        try:
+          bind_name = cast[Value](param.name_key).str
+        except CatchableError:
+          bind_name = ""
+
+      if bind_name.len > 0 and bind_name != "_":
+        let key = bind_name.to_key()
+        let var_index = self.scope_tracker.next_index
+        self.scope_tracker.mappings[key] = var_index
+        self.scope_tracker.next_index.inc()
+        if self.declared_names.len > 0:
+          self.declared_names[^1][key] = true
+        array_data(target_indices).add(var_index.to_value())
+        has_bindings = true
+
+      for child in param.children:
+        add_matcher_bindings(child)
 
     for param in matcher.children:
-      var bind_name = ""
-      try:
-        bind_name = cast[Value](param.name_key).str
-      except CatchableError:
-        bind_name = ""
-
-      if bind_name.len == 0 or bind_name == "_":
-        array_data(target_indices).add((-1).to_value())
-        continue
-
-      let key = bind_name.to_key()
-      let var_index = self.scope_tracker.next_index
-      self.scope_tracker.mappings[key] = var_index
-      self.scope_tracker.next_index.inc()
-      if self.declared_names.len > 0:
-        self.declared_names[^1][key] = true
-      array_data(target_indices).add(var_index.to_value())
-      has_bindings = true
+      add_matcher_bindings(param)
 
     if has_bindings:
       self.add_scope_start()

@@ -17,11 +17,17 @@ suite "Future Callbacks":
       check array_data(r).len == 1
       check array_data(r)[0].to_int() == 77
 
-  test "on_success executes immediately for already-completed manual future":
+  test "on_success executes next tick for already-completed manual future":
     test_vm """
     (var result 0)
     (var f (new gene/Future 41))
     (f .on_success (fn [v] (result = (+ v 1))))
+
+    # Late callback registration should run on the next scheduler tick.
+    (var i 0)
+    (while (< i 200)
+      (i = (+ i 1)))
+
     result
     """, 42
 
@@ -43,12 +49,18 @@ suite "Future Callbacks":
       check array_data(r).len == 1
       check array_data(r)[0].to_int() == 42
 
-  test "on_failure executes immediately for already-failed future":
+  test "on_failure executes next tick for already-failed future":
     test_vm """
     (var result [])
     (var f (async (throw "test error")))
     (try (await f) catch * nil)
     (f .on_failure (fn [e] (result .append "failed")))
+
+    # Late callback registration should run on the next scheduler tick.
+    (var i 0)
+    (while (< i 200)
+      (i = (+ i 1)))
+
     result
     """, proc(r: Value) =
       check r.kind == VkArray
@@ -132,6 +144,25 @@ suite "Future Callbacks":
     """, proc(r: Value) =
       check r.kind == VkArray
       check array_data(r).len == 0
+
+  test "on_failure executes next tick for cancelled futures":
+    test_vm """
+    (var result [])
+    (var f (new gene/Future))
+    (f .cancel)
+    (f .on_failure (fn [e] (result .append "cancelled")))
+
+    # Late callback registration should run on the next scheduler tick.
+    (var i 0)
+    (while (< i 200)
+      (i = (+ i 1)))
+
+    result
+    """, proc(r: Value) =
+      check r.kind == VkArray
+      check array_data(r).len == 1
+      check array_data(r)[0].kind == VkString
+      check array_data(r)[0].str == "cancelled"
 
   test "callback with block syntax":
     test_vm """

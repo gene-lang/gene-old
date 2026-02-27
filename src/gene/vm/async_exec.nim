@@ -16,48 +16,6 @@ proc drain_pending_futures(self: ptr VirtualMachine) =
     if self.pending_futures.len == 0 and self.thread_futures.len == 0:
       break
 
-proc execute_future_callbacks*(self: ptr VirtualMachine, future_obj: FutureObj) =
-  ## Execute success or failure callbacks for a completed future
-  ## This should be called when a future completes OR when callbacks are added to an already-completed future
-  if future_obj.state == FsSuccess:
-    # Execute success callbacks
-    for callback in future_obj.success_callbacks:
-      try:
-        case callback.kind:
-          of VkFunction, VkBlock:
-            discard self.exec_function(callback, @[future_obj.value])
-          of VkNativeFn:
-            var args_arr = [future_obj.value]
-            discard call_native_fn(callback.ref.native_fn, self, args_arr)
-          else:
-            discard
-      except CatchableError:
-        # If callback throws, mark future as failed
-        future_obj.state = FsFailure
-        future_obj.value = self.current_exception
-        break
-    # Clear callbacks after execution
-    future_obj.success_callbacks.setLen(0)
-
-  elif future_obj.state == FsFailure:
-    # Execute failure callbacks
-    for callback in future_obj.failure_callbacks:
-      try:
-        case callback.kind:
-          of VkFunction, VkBlock:
-            discard self.exec_function(callback, @[future_obj.value])
-          of VkNativeFn:
-            var args_arr = [future_obj.value]
-            discard call_native_fn(callback.ref.native_fn, self, args_arr)
-          else:
-            discard
-      except CatchableError:
-        # If callback throws, keep failure state but replace value
-        future_obj.value = self.current_exception
-        break
-    # Clear callbacks after execution
-    future_obj.failure_callbacks.setLen(0)
-
 proc setup_callback_execution*(self: ptr VirtualMachine, callback: Value, arg: Value): bool =
   ## Sets up VM execution context for callback without executing it.
   ## Returns true if callback was set up, false if callback type not supported.
@@ -149,6 +107,25 @@ proc thread_error_message(payload: Value): string =
     return msg_val.str
   return $msg_val
 
+proc detach_future_tracking*(self: ptr VirtualMachine, future_obj: FutureObj) =
+  ## Remove a future from all runtime tracking containers.
+  var i = 0
+  while i < self.pending_futures.len:
+    if self.pending_futures[i] == future_obj:
+      self.pending_futures.delete(i)
+      continue
+    i.inc()
+
+  var remove_ids: seq[int] = @[]
+  for message_id, tracked in self.thread_futures.pairs:
+    if tracked == future_obj:
+      remove_ids.add(message_id)
+  for message_id in remove_ids:
+    self.thread_futures.del(message_id)
+
+  if self.pending_futures.len == 0 and self.thread_futures.len == 0:
+    self.poll_enabled = false
+
 proc poll_event_loop*(self: ptr VirtualMachine) =
   ## Periodically poll async/thread events; caller decides when to invoke.
   ## Callbacks are executed inline via exec_function.
@@ -173,25 +150,17 @@ proc poll_event_loop*(self: ptr VirtualMachine) =
         if msg_opt.isNone():
           break
 
-        echo "DEBUG: poll_event_loop received message!"
         let msg = msg_opt.get()
-        echo "DEBUG: Message type: ", msg.msg_type, ", from_message_id: ", msg.from_message_id
         if msg.msg_type == MtReply:
           # Complete the future with the reply payload
           if self.thread_futures.hasKey(msg.from_message_id):
-            echo "DEBUG: Found matching future, completing it"
             let future_obj = self.thread_futures[msg.from_message_id]
             var payload = msg.payload
             if msg.payload_bytes.bytes.len > 0:
               try:
-                echo "DEBUG: Deserializing payload..."
                 payload = deserialize_literal(bytes_to_string(msg.payload_bytes.bytes))
-                echo "DEBUG: Payload deserialized successfully"
               except CatchableError as ex:
-                echo "DEBUG: Deserialization failed: ", ex.msg
-                future_obj.state = FsFailure
-                future_obj.value = wrap_nim_exception(ex, "thread reply decode")
-                # Execute callbacks inline
+                discard future_obj.fail(new_async_error("AIR.THREAD.REPLY.DECODE", ex.msg, "thread_reply_decode"))
                 self.execute_future_callbacks(future_obj)
                 # Fail the attached Nim future if present
                 if future_obj.nim_future != nil and not future_obj.nim_future.finished:
@@ -200,32 +169,28 @@ proc poll_event_loop*(self: ptr VirtualMachine) =
                 continue
             let error_msg = thread_error_message(payload)
             if error_msg.len > 0:
-              echo "DEBUG: Thread reply indicates error: ", error_msg
-              let ex = new_exception(types.Exception, error_msg)
-              future_obj.state = FsFailure
-              future_obj.value = wrap_nim_exception(ex, "thread reply")
-              # Execute callbacks inline
+              discard future_obj.fail(new_async_error("AIR.THREAD.REPLY.FAILURE", error_msg, "thread_reply"))
               self.execute_future_callbacks(future_obj)
               # Fail the attached Nim future if present
               if future_obj.nim_future != nil and not future_obj.nim_future.finished:
                 future_obj.nim_future.fail(newException(system.Exception, error_msg))
               self.thread_futures.del(msg.from_message_id)
               continue
-            future_obj.state = FsSuccess
-            future_obj.value = payload
-            echo "DEBUG: Future state set to success"
+            discard future_obj.complete(payload)
             # Execute callbacks inline
             self.execute_future_callbacks(future_obj)
-            echo "DEBUG: Callbacks executed"
             # Complete the attached Nim future if present (for non-blocking HTTP handlers)
             if future_obj.nim_future != nil and not future_obj.nim_future.finished:
-              echo "DEBUG: Completing Nim future..."
               future_obj.nim_future.complete(payload)
-              echo "DEBUG: Nim future completed!"
-            else:
-              echo "DEBUG: No Nim future to complete or already finished"
             self.thread_futures.del(msg.from_message_id)
-            echo "DEBUG: Future removed from table"
+
+    # Remove any terminal thread futures that were cancelled/timed out externally.
+    var terminal_ids: seq[int] = @[]
+    for message_id, future_obj in self.thread_futures.pairs:
+      if future_obj.state != FsPending:
+        terminal_ids.add(message_id)
+    for message_id in terminal_ids:
+      self.thread_futures.del(message_id)
 
     # Update all pending futures from their Nim futures and execute callbacks inline
     var i = 0

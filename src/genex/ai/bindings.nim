@@ -256,11 +256,11 @@ proc start_openai_stream(vm: ptr VirtualMachine, config: OpenAIConfig, options: 
   try:
     let stream_handler = createGeneStreamHandler(vm, handler)
     performStreamingRequest(config, "/chat/completions", payload, stream_handler)
-    future_obj.complete("streaming completed".to_value)
+    discard future_obj.complete("streaming completed".to_value)
   except OpenAIError as e:
-    future_obj.fail(openai_error_value(e))
+    discard future_obj.fail(openai_error_value(e))
   except system.Exception as e:
-    future_obj.fail(new_error("OpenAI stream failed: " & e.msg))
+    discard future_obj.fail(new_error("OpenAI stream failed: " & e.msg))
 
   return future_val
 

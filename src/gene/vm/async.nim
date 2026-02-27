@@ -1,7 +1,19 @@
 import ../types
 import asyncdispatch  # For Future procs: finished, failed, read
+import tables
 
 # Note: execute_future_callbacks is implemented in vm.nim and imported there
+
+proc new_async_error*(code: string, message: string, location: string = "async"): Value =
+  ## Create a typed runtime error value for async/thread contract failures.
+  if App == NIL or App.kind != VkApplication or App.app.exception_class.kind != VkClass:
+    return (code & ": " & message).to_value()
+
+  var props = initTable[Key, Value]()
+  props["code".to_key()] = code.to_value()
+  props["message".to_key()] = message.to_value()
+  props["location".to_key()] = location.to_value()
+  return new_instance_value(App.app.exception_class.ref.class, props)
 
 # Update a future from its underlying Nim future
 proc update_future_from_nim*(vm: ptr VirtualMachine, future_obj: FutureObj) {.gcsafe.} =
@@ -17,16 +29,10 @@ proc update_future_from_nim*(vm: ptr VirtualMachine, future_obj: FutureObj) {.gc
   if finished(future_obj.nim_future):
     # Nim future has completed - copy its result
     if failed(future_obj.nim_future):
-      # Future failed with exception
-      # TODO: Wrap exception properly when exception handling is ready
-      future_obj.state = FsFailure
-      future_obj.value = new_str_value("Async operation failed")
+      discard future_obj.fail(new_async_error("AIR.ASYNC.FAILURE", "Async operation failed", "nim_future"))
     else:
-      # Future succeeded
-      future_obj.state = FsSuccess
-      future_obj.value = read(future_obj.nim_future)
+      discard future_obj.complete(read(future_obj.nim_future))
 
-# Future methods
 proc run_callback_now(vm: ptr VirtualMachine, callback: Value, arg: Value): bool {.gcsafe.} =
   {.cast(gcsafe).}:
     try:
@@ -35,18 +41,52 @@ proc run_callback_now(vm: ptr VirtualMachine, callback: Value, arg: Value): bool
     except CatchableError:
       return false
 
-proc run_queued_callbacks_now(vm: ptr VirtualMachine, future_obj: FutureObj) {.gcsafe.} =
+proc future_state_name(state: FutureState): string {.inline.} =
+  case state:
+  of FsPending:
+    "pending"
+  of FsSuccess:
+    "success"
+  of FsFailure:
+    "failure"
+  of FsCancelled:
+    "cancelled"
+
+proc raise_future_already_terminal(op_name: string, state: FutureState) {.noreturn.} =
+  let msg =
+    "AIR.ASYNC.ALREADY_TERMINAL: cannot " & op_name &
+    " a future in state " & future_state_name(state)
+  raise new_exception(types.Exception, msg)
+
+proc schedule_future_callbacks(vm: ptr VirtualMachine, future_obj: FutureObj) =
+  ## Ensure callback execution happens on the next scheduler tick.
+  var tracked = false
+  for pending in vm.pending_futures:
+    if pending == future_obj:
+      tracked = true
+      break
+  if not tracked:
+    vm.pending_futures.add(future_obj)
+  vm.poll_enabled = true
+
+proc execute_future_callbacks*(vm: ptr VirtualMachine, future_obj: FutureObj) {.gcsafe.} =
+  ## Unified callback execution path for all future completion sources.
   if future_obj.state == FsSuccess:
     for callback in future_obj.success_callbacks:
       if not run_callback_now(vm, callback, future_obj.value):
         future_obj.state = FsFailure
-        future_obj.value = vm.current_exception
+        if vm.current_exception == NIL:
+          future_obj.value = new_async_error("AIR.ASYNC.CALLBACK_FAILURE", "Future success callback failed", "callback")
+        else:
+          future_obj.value = vm.current_exception
         break
     future_obj.success_callbacks.setLen(0)
-  elif future_obj.state == FsFailure:
+
+  elif future_obj.state in {FsFailure, FsCancelled}:
     for callback in future_obj.failure_callbacks:
       if not run_callback_now(vm, callback, future_obj.value):
-        future_obj.value = vm.current_exception
+        if vm.current_exception != NIL:
+          future_obj.value = vm.current_exception
         break
     future_obj.failure_callbacks.setLen(0)
 
@@ -68,14 +108,14 @@ proc future_on_success(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], 
   let future_obj = future_arg.ref.future
 
   # Add callback
-  if future_obj.state == FsSuccess:
-    if not run_callback_now(vm, callback_arg, future_obj.value):
-      future_obj.state = FsFailure
-      future_obj.value = vm.current_exception
-  elif future_obj.state == FsPending:
+  if future_obj.state == FsPending:
     # Store callback for later execution when future completes
     future_obj.success_callbacks.add(callback_arg)
-  # If failed, don't add to success callbacks
+  elif future_obj.state == FsSuccess:
+    # Late registration executes on the next scheduler tick for uniformity.
+    future_obj.success_callbacks.add(callback_arg)
+    schedule_future_callbacks(vm, future_obj)
+  # If failed/cancelled, don't add to success callbacks.
 
   # Return the future for chaining
   return future_arg
@@ -98,15 +138,37 @@ proc future_on_failure(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], 
   let future_obj = future_arg.ref.future
 
   # Add callback
-  if future_obj.state == FsFailure:
-    if not run_callback_now(vm, callback_arg, future_obj.value):
-      future_obj.value = vm.current_exception
-  elif future_obj.state == FsPending:
+  if future_obj.state == FsPending:
     # Store callback for later execution when future fails
     future_obj.failure_callbacks.add(callback_arg)
-  # If succeeded, don't add to failure callbacks
+  elif future_obj.state in {FsFailure, FsCancelled}:
+    # Late registration executes on the next scheduler tick for uniformity.
+    future_obj.failure_callbacks.add(callback_arg)
+    schedule_future_callbacks(vm, future_obj)
+  # If succeeded, don't add to failure callbacks.
 
   # Return the future for chaining
+  return future_arg
+
+proc future_cancel(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  # Cancel a future with optional reason payload.
+  if arg_count < 1:
+    raise new_exception(types.Exception, "Future.cancel requires a future")
+
+  let future_arg = get_positional_arg(args, 0, has_keyword_args)
+  if future_arg.kind != VkFuture:
+    raise new_exception(types.Exception, "cancel can only be called on a Future")
+
+  let reason_arg =
+    if get_positional_count(arg_count, has_keyword_args) > 1:
+      get_positional_arg(args, 1, has_keyword_args)
+    else:
+      new_async_error("AIR.ASYNC.CANCELLED", "Future cancelled", "cancel")
+
+  let future_obj = future_arg.ref.future
+  if not future_obj.cancel(reason_arg):
+    raise_future_already_terminal("cancel", future_obj.state)
+  execute_future_callbacks(vm, future_obj)
   return future_arg
 
 proc future_state(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
@@ -130,6 +192,8 @@ proc future_state(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_c
       return "success".to_symbol_value()
     of FsFailure:
       return "failure".to_symbol_value()
+    of FsCancelled:
+      return "cancelled".to_symbol_value()
 
 proc future_value(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
   # Get the value of a completed future
@@ -145,7 +209,7 @@ proc future_value(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_c
   let future_obj = future_arg.ref.future
 
   # Return value if completed, NIL if pending
-  if future_obj.state in {FsSuccess, FsFailure}:
+  if future_obj.state in {FsSuccess, FsFailure, FsCancelled}:
     return future_obj.value
   else:
     return NIL
@@ -170,14 +234,39 @@ proc init_async*() =
         raise new_exception(types.Exception, "First argument must be a Future")
 
       let future_obj = future_arg.ref.future
-      future_obj.complete(value_arg)
-      run_queued_callbacks_now(vm, future_obj)
+      if not future_obj.complete(value_arg):
+        raise_future_already_terminal("complete", future_obj.state)
+      execute_future_callbacks(vm, future_obj)
+      return NIL
+
+    proc cancel_future_fn(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
+      # cancel_future(future, reason?) - cancels the given future
+      if arg_count < 1:
+        raise new_exception(types.Exception, "cancel_future requires at least 1 argument (future)")
+
+      let future_arg = get_positional_arg(args, 0, has_keyword_args)
+      if future_arg.kind != VkFuture:
+        raise new_exception(types.Exception, "First argument must be a Future")
+
+      let reason_arg =
+        if get_positional_count(arg_count, has_keyword_args) > 1:
+          get_positional_arg(args, 1, has_keyword_args)
+        else:
+          new_async_error("AIR.ASYNC.CANCELLED", "Future cancelled", "cancel_future")
+
+      let future_obj = future_arg.ref.future
+      if not future_obj.cancel(reason_arg):
+        raise_future_already_terminal("cancel", future_obj.state)
+      execute_future_callbacks(vm, future_obj)
       return NIL
 
     # Add to global namespace
     let complete_fn_ref = new_ref(VkNativeFn)
     complete_fn_ref.native_fn = complete_future_fn
     App.app.global_ns.ref.ns["complete_future".to_key()] = complete_fn_ref.to_ref_value()
+    let cancel_fn_ref = new_ref(VkNativeFn)
+    cancel_fn_ref.native_fn = cancel_future_fn
+    App.app.global_ns.ref.ns["cancel_future".to_key()] = cancel_fn_ref.to_ref_value()
 
     # Create Future class
     let future_class = new_class("Future")
@@ -190,7 +279,7 @@ proc init_async*() =
       # If initial value is provided, complete the future immediately
       if arg_count > 0:
         let initial_value = get_positional_arg(args, 0, has_keyword_args)
-        future_val.ref.future.complete(initial_value)
+        discard future_val.ref.future.complete(initial_value)
       return future_val
 
     future_class.def_native_constructor(future_constructor)
@@ -209,12 +298,14 @@ proc init_async*() =
         raise new_exception(types.Exception, "complete can only be called on a Future")
 
       let future_obj = future_arg.ref.future
-      future_obj.complete(value_arg)
-      run_queued_callbacks_now(vm, future_obj)
+      if not future_obj.complete(value_arg):
+        raise_future_already_terminal("complete", future_obj.state)
+      execute_future_callbacks(vm, future_obj)
       return NIL
 
     # Add Future methods
     future_class.def_native_method("complete", future_complete)
+    future_class.def_native_method("cancel", future_cancel)
     future_class.def_native_method("on_success", future_on_success)
     future_class.def_native_method("on_failure", future_on_failure)
     future_class.def_native_method("state", future_state)

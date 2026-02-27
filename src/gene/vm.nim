@@ -53,7 +53,6 @@ proc exec_method*(self: ptr VirtualMachine, fn: Value, instance: Value, args: se
 proc exec_method_kw*(self: ptr VirtualMachine, fn: Value, instance: Value, args: seq[Value], kw_pairs: seq[(Key, Value)]): Value
 proc exec_method_impl(self: ptr VirtualMachine, fn: Value, instance: Value, args: seq[Value], caller_context: Frame): Value
 proc exec_method_kw_impl(self: ptr VirtualMachine, fn: Value, instance: Value, args: seq[Value], kw_pairs: seq[(Key, Value)], caller_context: Frame): Value
-proc execute_future_callbacks*(self: ptr VirtualMachine, future_obj: FutureObj)
 proc format_runtime_exception(self: ptr VirtualMachine, value: Value): string
 proc spawn_thread(code: ptr Gene, return_value: bool): Value
 proc poll_event_loop*(self: ptr VirtualMachine)
