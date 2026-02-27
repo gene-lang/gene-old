@@ -497,7 +497,7 @@ proc compile*(input: seq[Value], eager_functions: bool): CompilationUnit =
   self.end_scope()
   self.emit(Instruction(kind: IkEnd))
   self.output.optimize_noops()  # Optimize BEFORE resolving jumps
-  # self.output.peephole_optimize()  # Apply peephole optimizations (temporarily disabled)
+  self.output.peephole_optimize()  # Apply peephole optimizations
   self.output.update_jumps()
   result = self.output
 
@@ -633,6 +633,7 @@ proc compile*(b: Block, eager_functions: bool) =
   self.end_scope()
   self.emit(Instruction(kind: IkEnd))
   self.output.optimize_noops()  # Optimize BEFORE resolving jumps
+  self.output.peephole_optimize()  # Apply peephole optimizations
   self.output.update_jumps()
   if b.matcher != nil and b.matcher.type_descriptors.len > 0:
     self.output.type_descriptors = b.matcher.type_descriptors

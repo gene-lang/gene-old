@@ -47,7 +47,7 @@ proc compile_init*(input: Value, local_defs = false, module_path = "",
     discard self.scope_trackers.pop()
   self.emit(Instruction(kind: IkEnd))
   self.output.optimize_noops()  # Optimize BEFORE resolving jumps
-  # self.output.peephole_optimize()  # Apply peephole optimizations (temporarily disabled)
+  self.output.peephole_optimize()  # Apply peephole optimizations
   self.output.update_jumps()
   result = self.output
 
@@ -568,6 +568,7 @@ proc parse_and_compile*(input: string, filename = "<input>", eager_functions = f
   self.end_scope()
   self.emit(Instruction(kind: IkEnd))
   self.output.optimize_noops()
+  self.output.peephole_optimize()
   self.output.update_jumps()
   self.output.ensure_trace_capacity()
   self.output.trace_root = parser.trace_root
@@ -661,6 +662,7 @@ proc parse_and_compile_repl*(input: string, filename = "<repl>", scope_tracker: 
 
   self.emit(Instruction(kind: IkEnd))
   self.output.optimize_noops()
+  self.output.peephole_optimize()
   self.output.update_jumps()
   self.output.ensure_trace_capacity()
   self.output.trace_root = parser.trace_root
@@ -819,6 +821,7 @@ proc parse_and_compile*(stream: Stream, filename = "<input>", eager_functions = 
   self.end_scope()
   self.output.instructions.add(Instruction(kind: IkEnd))
   self.output.optimize_noops()
+  self.output.peephole_optimize()
   self.output.update_jumps()
   self.output.ensure_trace_capacity()
   self.output.trace_root = parser.trace_root
