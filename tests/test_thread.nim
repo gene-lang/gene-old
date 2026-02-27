@@ -129,19 +129,17 @@ suite "Threading Support":
     check map_data(result)["a".to_key()].int64 == 1
     check map_data(result)["b".to_key()].int64 == 2
 
-  test "Thread.send - send message with callback":
+  test "Thread.send with keep_alive handles message callbacks":
     let code = """
-      (var received nil)
-      (var thread (spawn (do
-        (thread .on_message (fn [msg]
-          (var received (.payload msg))
-        ))
-        (keep_alive)
-      )))
-      (sleep 100)
-      (.send thread "Hello from main!")
-      (sleep 100)
-      received
+      (do
+        (var worker (spawn (do
+          (thread .on_message (fn [msg]
+            (msg .reply (+ (msg .payload) 1))
+          ))
+          (keep_alive)
+        )))
+        (await (send_expect_reply worker 41))
+      )
     """
     let ast = read(code)
     let cu = compile_init(ast)
@@ -153,12 +151,9 @@ suite "Threading Support":
     VM.frame.scope = new_scope(new_scope_tracker())
     VM.frame.ns = App.app.gene_ns.ref.ns
 
-    # This test will hang because keep_alive runs forever
-    # For now, just check it compiles
-    # TODO: Implement timeout or cancellation for keep_alive
-    # let result = VM.exec()
-    # check result.str == "Hello from main!"
-    check true
+    let result = VM.exec()
+    check result.kind == VkInt
+    check result.int64 == 42
 
   # TODO: Test spawn_return with args when implemented
   # test "spawn_return with args - pass arguments to thread":

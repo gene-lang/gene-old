@@ -419,12 +419,25 @@ proc init_thread_class*() =
 # keep_alive function - keeps thread running to receive messages
 proc keep_alive_fn*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
   ## Keep thread alive to receive messages
-  ## This function blocks forever, processing incoming messages
+  ## Thread workers already stay alive in `thread_handler`; this function acts as
+  ## a marker and optional bounded delay.
   ## Usage: (keep_alive) or (keep_alive timeout_ms)
 
-  # TODO: Implement timeout support
-  # For now, just poll periodically
-  while true:
-    sleep(10)  # Yield briefly
+  let positional_count = get_positional_count(arg_count, has_keyword_args)
+  if positional_count == 0:
+    return NIL
+
+  let timeout_arg = get_positional_arg(args, 0, has_keyword_args)
+  var timeout_ms: int
+  case timeout_arg.kind:
+  of VkInt:
+    timeout_ms = timeout_arg.int64.int
+  of VkFloat:
+    timeout_ms = (timeout_arg.float64 * 1000.0).int
+  else:
+    raise new_exception(types.Exception, "keep_alive timeout must be a number (milliseconds or seconds)")
+
+  if timeout_ms > 0:
+    sleep(timeout_ms)
 
   return NIL

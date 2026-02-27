@@ -3589,6 +3589,8 @@ proc init_stdlib*() =
 
   # Threading
   global_ns["keep_alive".to_key()] = keep_alive_fn.to_value()
+  if App.app.gene_ns.kind == VkNamespace:
+    App.app.gene_ns.ref.ns["keep_alive".to_key()] = keep_alive_fn.to_value()
 
   # Environment
   global_ns["get_env".to_key()] = core_get_env.to_value()
