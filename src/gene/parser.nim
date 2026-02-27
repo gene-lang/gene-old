@@ -1513,7 +1513,10 @@ proc read_number(self: var Parser): Value =
       if not isDigit(self.buf[self.bufpos+1]):
         let e = err_info(self)
         raise new_exception(ParseError, "Error reading a ratio: " & $e)
-      discard parse_biggest_int(self.str)  # numerator - will be used when ratio is implemented
+      try:
+        discard parse_biggest_int(self.str)  # numerator - will be used when ratio is implemented
+      except ValueError as e:
+        raise new_exception(ParseError, e.msg)
       inc(self.bufpos)
       self.str = ""
       var denom_tok = parse_number(self)
@@ -1524,9 +1527,8 @@ proc read_number(self: var Parser): Value =
       else:
         raise new_exception(ParseError, "Error reading a ratio: " & self.str)
     else:
-      let parsed_int = parse_biggest_int(self.str)
-      # With NaN boxing, we can now represent negative integers correctly
       try:
+        let parsed_int = parse_biggest_int(self.str)
         result = parsed_int.to_value()
       except ValueError as e:
         raise new_exception(ParseError, e.msg)

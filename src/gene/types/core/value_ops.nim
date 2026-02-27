@@ -174,6 +174,8 @@ proc `==`*(a, b: ptr Reference): bool =
     return false
 
   case a.kind:
+    of VkInt:
+      return a.int_data == b.int_data
     of VkSet:
       return a.set == b.set
     of VkComplexSymbol:
@@ -209,6 +211,9 @@ proc to_ref_value*(v: ptr Reference): Value {.inline.} =
 
 #################### Value ######################
 
+# Forward declaration
+converter to_int*(v: Value): int64 {.inline, noSideEffect.}
+
 proc `==`*(a, b: Value): bool {.no_side_effect.} =
   if cast[uint64](a) == cast[uint64](b):
     return true
@@ -220,6 +225,12 @@ proc `==`*(a, b: Value): bool {.no_side_effect.} =
     # Check if both are strings and compare them
     let tag1 = u1 and 0xFFFF_0000_0000_0000u64
     let tag2 = u2 and 0xFFFF_0000_0000_0000u64
+
+    # Int values can be represented as either 48-bit immediates or refs.
+    let a_is_int = tag1 == SMALL_INT_TAG or (tag1 == REF_TAG and a.ref.kind == VkInt)
+    let b_is_int = tag2 == SMALL_INT_TAG or (tag2 == REF_TAG and b.ref.kind == VkInt)
+    if a_is_int and b_is_int:
+      return a.to_int() == b.to_int()
 
     # Both strings - compare their content
     if tag1 == STRING_TAG and tag2 == STRING_TAG:
@@ -264,6 +275,11 @@ proc `==`*(a, b: Value): bool {.no_side_effect.} =
   # Default to false
   return false
 
+proc hash*(v: Value): Hash {.inline.} =
+  if v.kind == VkInt:
+    return hash(v.to_int())
+  return hash(cast[uint64](v))
+
 proc is_float*(v: Value): bool {.inline, noSideEffect.} =
   let u = cast[uint64](v)
   # A value is a float if it's NOT in our NaN boxing space (0xFFF0-0xFFFF prefix)
@@ -278,9 +294,6 @@ proc is_float*(v: Value): bool {.inline, noSideEffect.} =
 
 proc is_small_int*(v: Value): bool {.inline, noSideEffect.} =
   (cast[uint64](v) and 0xFFFF_0000_0000_0000u64) == SMALL_INT_TAG
-
-# Forward declaration
-converter to_int*(v: Value): int64 {.inline, noSideEffect.}
 
 proc kind_slow(v: Value, u: uint64, tag: uint64): ValueKind {.noinline.} =
   case tag:
@@ -375,7 +388,7 @@ proc is_literal*(self: Value): bool =
       of REF_TAG:
         let r = self.ref
         case r.kind:
-          of VkSelector, VkRegex:
+          of VkInt, VkSelector, VkRegex:
             return true
           else:
             result = false
@@ -572,7 +585,7 @@ proc is_nil*(v: Value): bool {.inline.} =
 proc to_float*(v: Value): float64 {.inline.} =
   if is_float(v):
     return cast[float64](v)
-  elif is_small_int(v):
+  elif v.kind == VkInt:
     # Convert integer to float
     return to_int(v).float64
   else:

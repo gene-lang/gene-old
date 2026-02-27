@@ -19,6 +19,8 @@ type
         csymbol*: seq[string]
 
       # Numeric and binary types
+      of VkInt:
+        int_data*: int64
       of VkRatio:
         ratio_num*: int64
         ratio_denom*: int64

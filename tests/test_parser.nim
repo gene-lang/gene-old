@@ -43,7 +43,8 @@ test_parser "10", 10
 test_parser "-1", -1  # With NaN boxing, negative integers are properly supported
 test_parser "10e10", 10e10
 test_parser "+5.0E5", +5.0E5
-test_parser_error "140737488355328"  # 2^47, outside current 48-bit immediate range
+test_parser "140737488355328", (140737488355328'i64).to_value() # 2^47 (ref-backed int)
+test_parser_error "9223372036854775808" # > int64 max
 
 # Character literals now use 'a' syntax, not \a
 test_parser "'a'", 'a'

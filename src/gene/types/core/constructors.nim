@@ -4,15 +4,20 @@
 
 #################### Int ########################
 
-# NaN boxing for integers - supports 48-bit immediate values
+# NaN boxing for integers - uses 48-bit immediates with int64 ref fallback
 
-converter to_value*(v: int): Value {.inline, noSideEffect.} =
+proc new_int_ref_value(v: int64): Value {.inline.} =
+  let r = new_ref(VkInt)
+  r.int_data = v
+  result = r.to_ref_value()
+
+converter to_value*(v: int): Value {.inline.} =
   let i = v.int64
   if i >= SMALL_INT_MIN and i <= SMALL_INT_MAX:
     # Fits in 48 bits - use NaN boxing
     result = Value(raw: SMALL_INT_TAG or (cast[uint64](i) and PAYLOAD_MASK))
   else:
-    raise newException(ValueError, "Integer " & $i & " outside 48-bit range (BigInt not implemented)")
+    result = new_int_ref_value(i)
 
 converter to_value*(v: int16): Value {.inline, noSideEffect.} =
   # int16 always fits in 48 bits
@@ -22,12 +27,12 @@ converter to_value*(v: int32): Value {.inline, noSideEffect.} =
   # int32 always fits in 48 bits
   result = Value(raw: SMALL_INT_TAG or (cast[uint64](v.int64) and PAYLOAD_MASK))
 
-converter to_value*(v: int64): Value {.inline, noSideEffect.} =
+converter to_value*(v: int64): Value {.inline.} =
   if v >= SMALL_INT_MIN and v <= SMALL_INT_MAX:
     # Fits in 48 bits - use NaN boxing
     result = Value(raw: SMALL_INT_TAG or (cast[uint64](v) and PAYLOAD_MASK))
   else:
-    raise newException(ValueError, "Integer " & $v & " outside 48-bit range (BigInt not implemented)")
+    result = new_int_ref_value(v)
 
 converter to_int*(v: Value): int64 {.inline, noSideEffect.} =
   if is_small_int(v):
@@ -38,8 +43,13 @@ converter to_int*(v: Value): int64 {.inline, noSideEffect.} =
       result = cast[int64](raw or 0xFFFF_0000_0000_0000u64)
     else:
       result = cast[int64](raw)
+  elif (v.raw and 0xFFFF_0000_0000_0000u64) == REF_TAG:
+    let r = cast[ptr Reference](v.raw and PAYLOAD_MASK)
+    if not r.is_nil and r.kind == VkInt:
+      result = r.int_data
+    else:
+      raise newException(ValueError, "Value is not an integer")
   else:
-    # TODO: Handle BigInt conversion
     raise newException(ValueError, "Value is not an integer")
 
 template int64*(v: Value): int64 =

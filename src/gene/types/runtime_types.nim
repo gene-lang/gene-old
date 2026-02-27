@@ -434,7 +434,8 @@ proc try_convert_named(value: Value, expected_type: string, param_name: string,
       let cls = classify(float_value)
       if cls in {fcNan, fcInf, fcNegInf}:
         return false
-      if float_value < system.float64(SMALL_INT_MIN) or float_value > system.float64(SMALL_INT_MAX):
+      if float_value < system.float64(system.low(system.int64)) or
+         float_value > system.float64(system.high(system.int64)):
         return false
       let int_value = system.int64(float_value)
       converted = int_value.to_value()
