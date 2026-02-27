@@ -141,6 +141,13 @@ suite "Static type checking":
         0)
   """
 
+  test "Strict type checking: binding match compatibility form":
+    let checker = tc.new_type_checker(strict = true, module_filename = "test_code")
+    let code = cleanup("(match [a b] [1 2])")
+    for node in read_all(code):
+      checker.type_check_node(node)
+    check true
+
   test_strict_type_error """
     (var x: ((Result Int String) | Int) (Ok 1))
     (match x

@@ -1583,12 +1583,21 @@ proc check_return(self: TypeChecker, gene: ptr Gene): TypeExpr =
   return ret_type
 
 proc check_match(self: TypeChecker, gene: ptr Gene): TypeExpr =
-  ## `match` has been removed as a language form.
-  ## In strict mode, fail during type-checking.
-  ## In non-strict mode, defer to compiler so users get source-traced diagnostics.
+  ## Compatibility window:
+  ##   (match pattern value) => (var pattern value)
+  ## Non-binding match forms remain removed.
+  if gene.children.len == 2 and gene.props.len == 0:
+    if not self.strict:
+      self.warn("Warning: match is deprecated; use (var pattern value)")
+    var lowered = new_gene("var".to_symbol_value())
+    lowered.trace = gene.trace
+    lowered.children = gene.children
+    return self.check_var(lowered)
+
+  let msg = "Type error: match has been removed; use (var pattern value) for binding or (case ...) for branching"
   if self.strict:
-    raise new_exception(types.Exception,
-      "Type error: match has been removed; use (var pattern value) for binding or (case ...) for branching")
+    raise new_exception(types.Exception, msg)
+  self.warn("Warning: " & msg)
   return ANY_TYPE
 
 proc check_case(self: TypeChecker, gene: ptr Gene): TypeExpr =
