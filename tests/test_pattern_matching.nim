@@ -110,6 +110,11 @@ test_vm_error """
   (var [^a b c...] [1 2 3])
 """
 
+test_vm_error """
+  (var payload `(payload ^a 1 ^extra 9 2))
+  (var [^a b] payload)
+"""
+
 # proc test_arg_matching*(pattern: string, input: string, callback: proc(result: MatchResult)) =
 #   var pattern = cleanup(pattern)
 #   var input = cleanup(input)

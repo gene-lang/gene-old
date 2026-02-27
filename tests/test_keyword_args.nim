@@ -146,3 +146,11 @@ suite "Keyword Arguments Consistency":
       )
       (((new Builder) .set ^v 123) .get)
     """, 123.to_value()
+
+  test "Unexpected keyword without keyword splat raises":
+    test_vm_error """
+      (fn only_positional [a b]
+        (a + b)
+      )
+      (only_positional 1 2 ^extra 3)
+    """

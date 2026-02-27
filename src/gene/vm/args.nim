@@ -118,6 +118,11 @@ proc process_args_core(matcher: RootMatcher, positional: ptr UncheckedArray[Valu
         if k notin used_keys:
           map_data(rest_map)[k] = v
     scope.members[prop_splat_index] = rest_map
+  elif keywords.len > 0:
+    for (k, _) in keywords:
+      if k notin used_keys:
+        let name = key_to_name(k)
+        raise new_exception(types.Exception, "Unexpected keyword argument: " & name)
 
   if not has_value_splat and pos_index < pos_count:
     raise new_exception(types.Exception, "Expected " & $pos_index & " arguments, got " & $pos_count)
