@@ -99,6 +99,8 @@ task test, "Runs the test suite":
   exec "nim c -r tests/test_logging.nim"
   exec "nim c -r tests/test_native.nim"
   exec "nim c -r tests/test_native_trampoline.nim"
+  exec "nim c -r tests/test_ai_tools.nim"
+  exec "nim c -r tests/test_ai_runtime_contracts.nim"
   exec "nim c -r tests/test_ext.nim"
   exec "nim c -r tests/test_custom_value.nim"
   # exec "nim c -d:GENE_LLM_MOCK -r tests/test_llm_mock.nim"
