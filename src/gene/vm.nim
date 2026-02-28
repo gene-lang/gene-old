@@ -75,6 +75,7 @@ include ./vm/vm_modules
 include ./vm/exec
 include ./vm/exec_support
 include ./vm/entry
+include ./vm/diagnostics
 include ./vm/runtime_helpers
 
 set_vm_exec_callable_hook(exec_callable)

@@ -1,4 +1,8 @@
+import std/json
+import unittest
+
 import gene/types except Exception
+import gene/vm
 
 import ./helpers
 
@@ -277,3 +281,21 @@ test_vm """
 #     3
 #   )
 # """, 2
+
+test "runtime exception produces structured diagnostic envelope":
+  init_all()
+  try:
+    discard VM.exec("(throw \"test diagnostic\")", "test_code")
+    fail()
+  except types.Exception as e:
+    let msg = e.msg
+    check msg.len > 0
+    let parsed = parseJson(msg)
+    check parsed.hasKey("code")
+    check parsed.hasKey("message")
+    check parsed.hasKey("severity")
+    check parsed["severity"].getStr() == "error"
+    check parsed.hasKey("stage")
+    check parsed.hasKey("span")
+    check parsed["span"].hasKey("line")
+    check parsed["code"].getStr().len > 0

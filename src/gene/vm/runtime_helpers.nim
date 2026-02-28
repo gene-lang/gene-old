@@ -14,21 +14,34 @@ proc current_trace(self: ptr VirtualMachine): SourceTrace =
 
 proc format_runtime_exception(self: ptr VirtualMachine, value: Value): string =
   let trace = self.current_trace()
-  let location = trace_location(trace)
-  var detail = $value
+  var detail: string
   if value.kind == VkInstance:
     let exception_class_val = App.app.exception_class
     if exception_class_val.kind == VkClass and value.instance_class == exception_class_val.ref.class:
       if "message".to_key() in instance_props(value):
         let msg_val = instance_props(value)["message".to_key()]
-        if msg_val.kind == VkString:
-          detail = msg_val.str
-        else:
-          detail = $msg_val
-  if location.len > 0:
-    "Gene exception at " & location & ": " & detail
+        detail = if msg_val.kind == VkString: msg_val.str else: $msg_val
+      else:
+        detail = $value
+    else:
+      detail = $value
   else:
-    "Gene exception: " & detail
+    detail = $value
+
+  if is_diagnostic_envelope(detail):
+    return detail
+
+  let (file, line, column) =
+    if trace != nil: (trace.filename, trace.line, trace.column)
+    else: ("", 0, 0)
+
+  make_diagnostic_message(
+    code = infer_diag_code(detail),
+    message = detail,
+    file = file,
+    line = line,
+    column = column
+  )
 
 proc ensure_frame_pool() =
   ## Lazily allocate the shared frame pool for this thread.
