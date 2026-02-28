@@ -15,20 +15,13 @@ echo ""
 
 # Model list - small models suitable for testing
 declare -a MODELS=(
-    # Tiny model - fastest for testing
-    "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
-
-    # Small but capable model
-    "https://huggingface.co/TheBloke/Qwen1.5-1.8B-Chat-GGUF/resolve/main/qwen1.5-1.8b-chat.Q4_K_M.gguf"
-
-    # Popular small model
-    "https://huggingface.co/TheBloke/Phi-3-mini-4k-instruct-GGUF/resolve/main/phi-3-mini-4k-instruct-q4.gguf"
+    "https://huggingface.co/unsloth/Qwen3-14B-GGUF/resolve/main/Qwen3-14B-Q4_K_M.gguf"
+    # "https://huggingface.co/unsloth/Qwen3.5-27B-GGUF/resolve/main/Qwen3.5-27B-Q4_K_M.gguf"
 )
 
 declare -a MODEL_NAMES=(
-    "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
-    "qwen1.5-1.8b-chat.Q4_K_M.gguf"
-    "phi-3-mini-4k-instruct-q4.gguf"
+    "Qwen3-14B-Q4_K_M.gguf"
+    # "Qwen3.5-27B-Q4_K_M.gguf"
 )
 
 download_model() {

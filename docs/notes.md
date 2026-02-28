@@ -3,6 +3,8 @@ nimble buildllmamacpp # Build LLM runtime dependencies
 nimble buildwithllm # Build Gene with LLM support
 cd example-projects/llm_app/backend
 CONCURRENT_MODE=true GENE_LLM_MODEL=models/Qwen3-14B-Q4_K_M.gguf gene run src/main.gene
+GENE_LLM_MODEL=$HOME/gene-workspace/gene-old/tmp/models/Qwen3-14B-Q4_K_M.gguf gene run src/main.gene
+GENE_LLM_MODEL=$HOME/gene-workspace/gene-old/tmp/models/Qwen3.5-27B-Q4_K_M.gguf gene run src/main.gene
 
 cd example-projects/llm_app/frontend
 npm install
