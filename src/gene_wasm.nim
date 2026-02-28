@@ -3,6 +3,8 @@ import std/strutils
 import ./gene/types
 import ./gene/vm
 import ./gene/vm/thread
+import ./gene/parser
+import ./gene/compiler
 
 var g_eval_output = ""
 var g_eval_result = ""
@@ -53,17 +55,46 @@ proc append_eval_result(result: Value) =
 proc eval_gene_source(source: string): string =
   g_eval_output = ""
 
-  # Fresh runtime per call keeps evaluation deterministic for host embedding.
-  init_thread_pool()
-  init_app_and_vm()
-  init_stdlib()
-  install_wasm_print_capture()
-
   try:
-    let result = VM.exec(source, "<wasm>")
+    # Fresh runtime per call keeps evaluation deterministic for host embedding.
+    init_thread_pool()
+    init_app_and_vm()
+    set_vm_exec_callable_hook(exec_callable)
+    set_vm_poll_event_loop_hook(poll_event_loop)
+    init_stdlib()
+    install_wasm_print_capture()
+
+    let nodes = read_all(source)
+    if nodes.len == 0:
+      return ""
+
+    let input =
+      if nodes.len == 1:
+        nodes[0]
+      else:
+        new_stream_value(nodes)
+
+    let compiled = compile_init(input)
+
+    let ns = new_namespace(App.app.global_ns.ref.ns, "<wasm>")
+    ns["gene".to_key()] = App.app.gene_ns
+    ns["genex".to_key()] = App.app.genex_ns
+
+    VM.frame = new_frame(ns)
+    let args_gene = new_gene(NIL)
+    args_gene.children.add(ns.to_value())
+    VM.frame.args = args_gene.to_gene_value()
+    VM.cu = compiled
+    VM.pc = 0
+
+    let result = VM.exec()
     append_eval_result(result)
     g_eval_output
   except CatchableError as ex:
+    if g_eval_output.len > 0 and not g_eval_output.endsWith("\n"):
+      g_eval_output.add("\n")
+    g_eval_output & "error: " & ex.msg
+  except Defect as ex:
     if g_eval_output.len > 0 and not g_eval_output.endsWith("\n"):
       g_eval_output.add("\n")
     g_eval_output & "error: " & ex.msg

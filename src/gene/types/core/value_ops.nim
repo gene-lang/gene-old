@@ -190,10 +190,10 @@ proc `$`*(self: ptr Reference): string =
 proc new_ref*(kind: ValueKind): ptr Reference {.inline.} =
   result = cast[ptr Reference](alloc0(sizeof(Reference)))
   result.ref_count = 1
-  # Can't assign to discriminant directly, use direct memory write
-  # ref_count is 8 bytes, kind starts at offset 8
+  # Write discriminant with layout-safe offset/size (works on 32-bit and 64-bit).
   var k = kind
-  copy_mem(cast[pointer](cast[uint](result) + 8), addr k, 2)
+  let kind_offset = cast[uint](offsetOf(Reference, kind))
+  copy_mem(cast[pointer](cast[uint](result) + kind_offset), addr k, sizeof(ValueKind))
 
 proc `ref`*(v: Value): ptr Reference {.inline.} =
   let u = cast[uint64](v)

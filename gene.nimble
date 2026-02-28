@@ -10,7 +10,7 @@ installExt    = @["nim"]
 bin           = @["gene"]
 
 # Dependencies
-requires "nim >= 1.4.0"
+requires "nim >= 2.0.0"
 requires "db_connector >= 0.1.0"
 
 task speedy, "Optimized build for maximum performance":

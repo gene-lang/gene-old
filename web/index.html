@@ -225,39 +225,14 @@
     const presets = {
       core: `# From examples/full.gene (trimmed for playground)
 (var i 42)
-(var msg "Hello, Gene!")
 (var arr [1 2 3 4 5])
 (var m {^lang "Gene" ^year 2026})
 
 (fn add [a b]
   (a + b))
 
-(fn make_adder [x]
-  (fn [y] (x + y)))
-
-(class Point
-  (ctor [x y]
-    (/x = x)
-    (/y = y))
-  (method length []
-    (sqrt ((/x * /x) + (/y * /y))))
-  (method to_s []
-    ("Point(" .append (str /x) ", " (str /y) ")")))
-
-(var add10 (make_adder 10))
-(var p (new Point 3 4))
-
-(var result {
-  ^message msg
-  ^sum (add i 8)
-  ^closure (add10 7)
-  ^first arr/0
-  ^map_value m/lang
-  ^point p/.to_s
-  ^distance p/.length
-})
-
-result`,
+(println "hello from wasm")
+{^sum (add i 8) ^first arr/0 ^lang m/lang}`,
       closures: `(fn make_scale [n]
   (fn [x] (x * n)))
 
