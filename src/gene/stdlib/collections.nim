@@ -1,4 +1,4 @@
-import strutils, tables
+import strutils, tables, algorithm
 
 import ../types
 import ./classes
@@ -251,6 +251,130 @@ proc init_collection_classes*(object_class: Class) =
 
   array_class.def_native_method("join", vm_array_join)
 
+  proc vm_array_clear(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("Array.clear requires self")
+    let arr = get_positional_arg(args, 0, has_keyword_args)
+    if arr.kind != VkArray:
+      not_allowed("clear must be called on an array")
+    array_data(arr).setLen(0)
+    arr
+
+  array_class.def_native_method("clear", vm_array_clear)
+
+  proc vm_array_pairs(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("Array.pairs requires self")
+    let arr = get_positional_arg(args, 0, has_keyword_args)
+    if arr.kind != VkArray:
+      not_allowed("pairs must be called on an array")
+    var result_ref = new_array_value()
+    for i, item in array_data(arr):
+      var pair = new_array_value()
+      array_data(pair).add(i.int64.to_value())
+      array_data(pair).add(item)
+      array_data(result_ref).add(pair)
+    result_ref
+
+  array_class.def_native_method("pairs", vm_array_pairs)
+
+  proc vm_array_sort(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("Array.sort requires self")
+    let arr = get_positional_arg(args, 0, has_keyword_args)
+    if arr.kind != VkArray:
+      not_allowed("sort must be called on an array")
+    var sorted_result = new_array_value()
+    var data = array_data(arr)
+    if get_positional_count(arg_count, has_keyword_args) >= 2:
+      let comparator = get_positional_arg(args, 1, has_keyword_args)
+      var items = newSeq[Value](data.len)
+      for i in 0..<data.len:
+        items[i] = data[i]
+      items.sort(proc(a, b: Value): int =
+        {.cast(gcsafe).}:
+          let result = vm_exec_callable(vm, comparator, @[a, b])
+          if result.kind == VkInt:
+            return result.int64.int
+          elif result.to_bool():
+            return -1
+          else:
+            return 1
+      )
+      array_data(sorted_result) = items
+    else:
+      var items = newSeq[Value](data.len)
+      for i in 0..<data.len:
+        items[i] = data[i]
+      items.sort(proc(a, b: Value): int =
+        let sa = display_value(a, true)
+        let sb = display_value(b, true)
+        cmp(sa, sb)
+      )
+      array_data(sorted_result) = items
+    sorted_result
+
+  array_class.def_native_method("sort", vm_array_sort)
+
+  proc vm_array_reverse(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("Array.reverse requires self")
+    let arr = get_positional_arg(args, 0, has_keyword_args)
+    if arr.kind != VkArray:
+      not_allowed("reverse must be called on an array")
+    var result_ref = new_array_value()
+    let data = array_data(arr)
+    for i in countdown(data.len - 1, 0):
+      array_data(result_ref).add(data[i])
+    result_ref
+
+  array_class.def_native_method("reverse", vm_array_reverse)
+
+  proc vm_array_slice(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    let pos_count = get_positional_count(arg_count, has_keyword_args)
+    if pos_count < 2:
+      not_allowed("Array.slice requires start index")
+    let arr = get_positional_arg(args, 0, has_keyword_args)
+    if arr.kind != VkArray:
+      not_allowed("slice must be called on an array")
+    let data = array_data(arr)
+    let len = data.len
+    var start_idx = get_positional_arg(args, 1, has_keyword_args).to_int().int
+    if start_idx < 0:
+      start_idx = len + start_idx
+    if start_idx < 0:
+      start_idx = 0
+    var end_idx = if pos_count >= 3:
+      var e = get_positional_arg(args, 2, has_keyword_args).to_int().int
+      if e < 0:
+        e = len + e
+      e
+    else:
+      len
+    if end_idx > len:
+      end_idx = len
+    var result_ref = new_array_value()
+    if start_idx < end_idx:
+      for i in start_idx..<end_idx:
+        array_data(result_ref).add(data[i])
+    result_ref
+
+  array_class.def_native_method("slice", vm_array_slice)
+
+  proc vm_array_index_of(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 2:
+      not_allowed("Array.index_of requires a value")
+    let arr = get_positional_arg(args, 0, has_keyword_args)
+    if arr.kind != VkArray:
+      not_allowed("index_of must be called on an array")
+    let needle = get_positional_arg(args, 1, has_keyword_args)
+    for i, item in array_data(arr):
+      if item == needle:
+        return i.int64.to_value()
+    (-1).int64.to_value()
+
+  array_class.def_native_method("index_of", vm_array_index_of)
+
   let map_class = new_class("Map")
   map_class.parent = object_class
   map_class.def_native_method("to_s", object_to_s_method)
@@ -461,6 +585,83 @@ proc init_collection_classes*(object_class: Class) =
     value_to_json(map_val).to_value()
 
   map_class.def_native_method("to_json", vm_map_to_json)
+
+  proc vm_map_del(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    let pos_count = get_positional_count(arg_count, has_keyword_args)
+    if pos_count < 2:
+      not_allowed("Map.del expects at least a key argument")
+    let map_val = get_positional_arg(args, 0, has_keyword_args)
+    if map_val.kind != VkMap:
+      not_allowed("del must be called on a map")
+    var last_removed = NIL
+    for i in 1..<pos_count:
+      let key_val = get_positional_arg(args, i, has_keyword_args)
+      var key: Key
+      case key_val.kind
+      of VkString, VkSymbol:
+        key = key_val.str.to_key()
+      else:
+        not_allowed("Map.del key must be a string or symbol")
+      if map_data(map_val).hasKey(key):
+        last_removed = map_data(map_val)[key]
+        map_data(map_val).del(key)
+    last_removed
+
+  map_class.def_native_method("del", vm_map_del)
+
+  proc vm_map_merge(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 2:
+      not_allowed("Map.merge expects a map argument")
+    let map_val = get_positional_arg(args, 0, has_keyword_args)
+    if map_val.kind != VkMap:
+      not_allowed("merge must be called on a map")
+    let other = get_positional_arg(args, 1, has_keyword_args)
+    if other.kind == VkMap:
+      for key, value in map_data(other):
+        map_data(map_val)[key] = value
+    else:
+      not_allowed("Map.merge argument must be a map")
+    map_val
+
+  map_class.def_native_method("merge", vm_map_merge)
+
+  proc vm_map_empty(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("Map.empty requires self")
+    let map_val = get_positional_arg(args, 0, has_keyword_args)
+    if map_val.kind != VkMap:
+      not_allowed("empty must be called on a map")
+    (map_data(map_val).len == 0).to_value()
+
+  map_class.def_native_method("empty", vm_map_empty)
+
+  proc vm_map_clear(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("Map.clear requires self")
+    let map_val = get_positional_arg(args, 0, has_keyword_args)
+    if map_val.kind != VkMap:
+      not_allowed("clear must be called on a map")
+    map_data(map_val).clear()
+    map_val
+
+  map_class.def_native_method("clear", vm_map_clear)
+
+  proc vm_map_pairs(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("Map.pairs requires self")
+    let map_val = get_positional_arg(args, 0, has_keyword_args)
+    if map_val.kind != VkMap:
+      not_allowed("pairs must be called on a map")
+    var result_ref = new_array_value()
+    for key, value in map_data(map_val):
+      var pair = new_array_value()
+      let key_val = cast[Value](key)
+      array_data(pair).add(key_val.str.to_value())
+      array_data(pair).add(value)
+      array_data(result_ref).add(pair)
+    result_ref
+
+  map_class.def_native_method("pairs", vm_map_pairs)
 
 proc init_set_class*(object_class: Class) =
   var r: ptr Reference

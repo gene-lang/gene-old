@@ -80,6 +80,16 @@ proc init_string_class*(object_class: Class) =
   string_class.def_native_method("length", length_fn.native_fn, @[], App.app.int_class)
   string_class.def_native_method("size", length_fn.native_fn, @[], App.app.int_class)
 
+  proc string_empty(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("String.empty requires self")
+    let self_arg = get_positional_arg(args, 0, has_keyword_args)
+    if self_arg.kind != VkString:
+      not_allowed("empty must be called on a string")
+    (self_arg.str.len == 0).to_value()
+
+  string_class.def_native_method("empty", string_empty)
+
   proc string_to_i(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
     if get_positional_count(arg_count, has_keyword_args) < 1:
       not_allowed("String.to_i requires self argument")
@@ -149,6 +159,8 @@ proc init_string_class*(object_class: Class) =
 
   string_class.def_native_method("to_uppercase", string_to_uppercase)
   string_class.def_native_method("to_lowercase", string_to_lowercase)
+  string_class.def_native_method("upper", to_upper_fn.native_fn, @[], string_class_value)
+  string_class.def_native_method("lower", to_lower_fn.native_fn, @[], string_class_value)
 
   proc string_substr(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 2:
