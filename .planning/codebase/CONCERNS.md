@@ -1,15 +1,15 @@
 # Codebase Concerns
 
-**Analysis Date:** 2026-02-26
+**Analysis Date:** 2026-02-28
 
 ## Tech Debt
 
-**Extension loading fallback in VM:**
-- Issue: VM statically imports multiple `genex` modules as a temporary workaround
-- Files: `src/gene/vm.nim` (comment: "Temporarily import http and sqlite modules until extension loading is fixed")
-- Why: extension loading path is not fully stabilized
-- Impact: tighter coupling and harder modular deployment
-- Fix approach: complete extension loader path and remove temporary hard imports
+**Extension discovery/autoload heuristics:**
+- Issue: `genex` resolution relies on search-path heuristics and a small hardcoded set of lazy global symbols
+- Files: `src/gene/vm/module.nim`, `src/gene/vm/exec.nim`
+- Why: dynamic loading now works, but helper-global autoload (`start_server`, `respond`, etc.) is explicit-name based
+- Impact: newly added extension globals may not autoload unless mapped; behavior differs between namespaced and global call styles
+- Fix approach: move to declarative extension metadata for exported global helpers (or require explicit namespace usage)
 
 **Large include-driven core files:**
 - Issue: high complexity concentrated in `src/gene/vm.nim` and `src/gene/compiler.nim`
@@ -35,17 +35,17 @@
 
 ## Security Considerations
 
-**OpenAI debug logging can expose sensitive headers:**
-- Risk: debug branches print request headers that can include bearer token
+**OpenAI debug logging still exposes non-secret request/response metadata:**
+- Risk: request headers are redacted, but debug output still includes full response headers/body snippets
 - Files: `src/genex/ai/openai_client.nim`, `src/genex/ai/streaming.nim`
-- Current mitigation: debug logging only when compiled with debug flag
-- Recommendations: redact `Authorization` and other secret-bearing headers before any logging
+- Current mitigation: secret-bearing request headers are redacted; debug logging only when compiled with debug flag
+- Recommendations: optionally redact additional sensitive response metadata in debug logs when handling regulated data
 
-**PostgreSQL query parameter substitution is string-based:**
-- Risk: SQL construction via manual placeholder replacement is brittle and may be misused
-- Files: `src/genex/postgres.nim` (`substitute_params`, string replacement path)
-- Current mitigation: single-quote escaping for string values
-- Recommendations: switch to proper prepared execution API instead of textual substitution
+**Dynamic extension load path trust boundary:**
+- Risk: extension loader searches relative paths (`build/...`) and env-driven roots (`$GENE_HOME/build/...`)
+- Files: `src/gene/vm/module.nim`, `src/gene/vm/extension.nim`
+- Current mitigation: explicit filename conventions (`lib<name>.<ext>`) and namespace validation after load
+- Recommendations: prefer absolute trusted roots in production and avoid running from untrusted working directories
 
 ## Performance Bottlenecks
 
@@ -55,11 +55,11 @@
 - Cause: repeated object/sequence allocation in runtime paths
 - Improvement path: sequence pooling/arena strategies listed in `docs/performance.md`
 
-**SQLite extension serializes operations through global lock:**
-- Problem: all sqlite operations are guarded by a global lock
-- Files: `src/genex/sqlite.nim` (`connection_lock` around query/exec/close)
-- Cause: thread-safety design favors correctness over parallel throughput
-- Improvement path: finer-grained locking or per-connection synchronization strategy
+**SQLite registry lock + per-connection lock contention:**
+- Problem: connection table access uses a global lock, and each connection serializes its own query/exec operations
+- Files: `src/genex/sqlite.nim` (`connection_lock`, `wrapper.lock`)
+- Cause: correctness-first synchronization around shared table and connection handles
+- Improvement path: reduce global-lock hold time further and validate contention under high concurrent connection churn
 
 ## Fragile Areas
 
@@ -102,11 +102,11 @@
 
 ## Missing Critical Features
 
-**Module/package system completion:**
-- Problem: module/import/package support is described as incomplete in project docs
-- Current workaround: partial module behavior with ongoing evolution
-- Blocks: robust package distribution and more stable module boundaries
-- Implementation complexity: high (compiler, VM, dependency resolution, tooling)
+**Module/package ergonomics and stabilization:**
+- Problem: resolver coverage has expanded significantly, but user-facing packaging workflow/docs are still evolving
+- Current workaround: rely on current resolver behavior and project-local conventions
+- Blocks: predictable multi-project distribution and lower-friction onboarding
+- Implementation complexity: medium to high (resolver edge-cases, tooling/docs alignment)
 
 **Richer class semantics coverage:**
 - Problem: constructors/inheritance/dispatch edge cases need broader coverage
@@ -131,5 +131,5 @@
 - Difficulty to test: medium (requires service/tooling setup in CI)
 
 ---
-*Concerns audit: 2026-02-26*
+*Concerns audit: 2026-02-28*
 *Update as issues are fixed or new ones discovered*

@@ -85,10 +85,15 @@ For general conversation, respond normally without tool calls.")
 
   (if genex/ai
     (try
-      (var client (genex/ai/openai/new OPENAI_API_KEY))
-      (var response (client .chat messages ^model OPENAI_MODEL))
+      (var client (new OpenAIClient {^api_key OPENAI_API_KEY ^model OPENAI_MODEL}))
+      (var response (client .chat {^messages messages}))
       (if (response != nil)
-        (return (response .get "content" ""))
+        (var choices (response .get "choices" []))
+        (if (choices/.length > 0)
+          (var first_choice (choices .get 0))
+          (var msg (first_choice .get "message" {}))
+          (return (msg .get "content" ""))
+        )
       )
       "I could not generate a response."
     catch *
