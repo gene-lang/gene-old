@@ -16,16 +16,16 @@
 )
 
 (fn get_header [req name default_val]
-  (try
+  # (try
     (var headers req/.headers)
     (if headers
       (headers .get name default_val)
     else
       default_val
     )
-  catch *
-    default_val
-  )
+  # catch *
+  #   default_val
+  # )
 )
 
 # ============================================================
@@ -40,9 +40,9 @@
   # Body: {"workspace_id": "...", "user_id": "...", "channel_id": "...", "text": "..."}
   (try
     (var body (gene/json/parse req/.body))
-    (var workspace_id (body .get "workspace_id" "default"))
-    (var user_id (body .get "user_id" "anonymous"))
-    (var channel_id (body .get "channel_id" "general"))
+    (var workspace_id (body/workspace_id || "default"))
+    (var user_id (body/user_id || "anonymous"))
+    (var channel_id (body/channel_id || "general"))
     (var text body/text)
 
     (if text/.empty
@@ -65,8 +65,7 @@
 (fn handle_slack_event [req]
   # Slack Events API webhook
   (try
-    (var body_str req/.body)
-    (var body (gene/json/parse body_str))
+    (var body (gene/json/parse req/.body))
 
     # URL verification challenge
     (if (body/type == "url_verification")
@@ -91,8 +90,8 @@
       (return (json_response 200 {^ok true}))
     )
 
-    (var workspace_id (body .get "team_id" "default"))
-    (var user_id (event .get "user" "unknown"))
+    (var workspace_id (body/team_id || "default"))
+    (var user_id (event/user || "unknown"))
     (var channel_id event/channel)
     (var text event/text)
 
@@ -105,8 +104,7 @@
 
     # Reply to Slack
     (if (SLACK_BOT_TOKEN && result/response)
-      (var thread_ts event/thread_ts)
-      (if thread_ts/.empty then (thread_ts = event/ts))
+      (var thread_ts event/thread_ts || event_ts)
       (var reply_payload {
         ^channel channel_id
         ^text result/response
@@ -115,8 +113,9 @@
       (try
         (await (http_post "https://slack.com/api/chat.postMessage"
           reply_payload/.to_json
-          {^Content-Type "application/json; charset=utf-8"
-           ^Authorization #"Bearer #{SLACK_BOT_TOKEN}"}))
+          {
+            ^Content-Type "application/json; charset=utf-8"
+            ^Authorization #"Bearer #{SLACK_BOT_TOKEN}"}))
       catch *
         (println "Slack reply failed:" $ex/message)
       )
@@ -158,24 +157,25 @@
 
 (if SLACK_APP_TOKEN
   # Socket Mode: connect to Slack via outbound WebSocket (no public URL needed)
-  (println "Starting Slack Socket Mode...")
-  (println #"Starting HTTP server on http://localhost:#{PORT} (health + REST API)")
-  (println "Endpoints:")
-  (println "  GET  /health         - Health check")
-  (println "  POST /api/chat       - Send message to agent")
-  (println "  POST /slack/events   - Slack Events API webhook (disabled in socket mode)")
-  (println)
+  (println
+#"""Starting Slack Socket Mode...
+Starting HTTP server on http://localhost:#{PORT} (health + REST API)
+Endpoints:
+  GET  /health         - Health check
+  POST /api/chat       - Send message to agent
+  POST /slack/events   - Slack Events API webhook (disabled in socket mode)
+""")
   (start_server PORT handle_request)
   (start_slack_socket_mode SLACK_APP_TOKEN SLACK_BOT_TOKEN run_agent)
-  (run_forever)
 else
   # Webhook mode: Slack sends events via HTTP POST
-  (println #"Starting server on http://localhost:#{PORT}")
-  (println "Endpoints:")
-  (println "  GET  /health         - Health check")
-  (println "  POST /api/chat       - Send message to agent")
-  (println "  POST /slack/events   - Slack Events API webhook")
-  (println)
+  (println
+#"""Starting server on http://localhost:#{PORT}")
+Endpoints:
+  GET  /health         - Health check
+  POST /api/chat       - Send message to agent
+  POST /slack/events   - Slack Events API webhook
+""")
   (start_server PORT handle_request)
-  (run_forever)
 )
+(run_forever)

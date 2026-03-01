@@ -16,13 +16,13 @@
 (fn extract_json [text]
   # Extract first JSON object from text
   (var start (text .index "{"))
-  (if (start < 0) (return nil))
+  (if (start < 0) then (return nil))
   (var i start)
   (var depth 0)
   (var in_str false)
   (var escape false)
   (loop
-    (if (i >= text/.length) (break))
+    (if (i >= text/.length) then (break))
     (var ch (text .char_at i))
     (if in_str
       (if escape

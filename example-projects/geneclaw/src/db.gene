@@ -3,7 +3,7 @@
 
 (import DB_PATH from "config")
 
-(var DB nil)
+(var DB)
 
 (fn $ns/get_db [] DB)
 
@@ -63,7 +63,7 @@
 # --- Memory operations ---
 
 (fn $ns/memory_append [workspace_id session_id role content meta]
-  (if_not DB (return nil))
+  (if_not DB then (return))
   (var now (gene/now))
   (var meta_str (if meta then meta/.to_json else "{}"))
   (DB .exec "INSERT INTO memory_events (workspace_id, session_id, role, content, meta_json, created_at_ms) VALUES (?, ?, ?, ?, ?, ?)"
@@ -71,7 +71,7 @@
 )
 
 (fn $ns/memory_recent [session_id limit]
-  (if_not DB (return []))
+  (if_not DB then (return []))
   (try
     (var rows (DB .query "SELECT role, content, meta_json FROM memory_events WHERE session_id = ? ORDER BY created_at_ms DESC, id DESC LIMIT ?" session_id limit))
     (if_not rows (return []))
@@ -93,7 +93,7 @@
 # --- Audit operations ---
 
 (fn $ns/audit_log [run_id workspace_id tool_name status args_json result_json duration_ms]
-  (if_not DB (return nil))
+  (if_not DB then (return))
   (var now (gene/now))
   (DB .exec "INSERT INTO tool_audit (run_id, workspace_id, tool_name, status, args_json, result_json, duration_ms, created_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     run_id workspace_id tool_name status
@@ -105,14 +105,14 @@
 # --- Run tracking ---
 
 (fn $ns/run_create [run_id workspace_id user_id]
-  (if_not DB (return nil))
+  (if_not DB then (return))
   (var now (gene/now))
   (DB .exec "INSERT INTO agent_runs (run_id, workspace_id, user_id, state, started_at_ms) VALUES (?, ?, ?, 'running', ?)"
     run_id workspace_id user_id now)
 )
 
 (fn $ns/run_complete [run_id state error]
-  (if_not DB (return nil))
+  (if_not DB then (return))
   (var now (gene/now))
   (DB .exec "UPDATE agent_runs SET state = ?, ended_at_ms = ?, error = ? WHERE run_id = ?"
     state now (if error then error else "") run_id)
