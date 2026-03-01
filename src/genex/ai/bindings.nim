@@ -2,10 +2,12 @@
 ## Bridges the Nim OpenAI client to Gene's VM system
 
 import tables, json, strutils
+import asyncdispatch
 import ../../gene/types
 import ../../gene/vm
 import ../../gene/vm/extension_abi
 import openai_client, streaming, documents
+import slack_socket_mode, control_slack, utils as ai_utils
 
 var openai_client_class*: Class
 var openai_error_class*: Class
@@ -410,6 +412,103 @@ proc attach_openai_client_class*(cls: Class) =
     openai_error_class = new_class("OpenAIError", parent_cls)
     openai_error_class.def_native_method("to_s", openai_error_to_s)
 
+# ---------------------------------------------------------------------------
+# Slack Socket Mode native binding
+# ---------------------------------------------------------------------------
+
+var slack_vm_global: ptr VirtualMachine = nil
+var slack_callback_global: Value = NIL
+
+proc execute_gene_callback(vm: ptr VirtualMachine, fn: Value, args: seq[Value]): Value {.gcsafe.} =
+  {.cast(gcsafe).}:
+    case fn.kind
+    of VkNativeFn:
+      return call_native_fn(fn.ref.native_fn, vm, args)
+    of VkFunction:
+      return vm.exec_function(fn, args)
+    else:
+      echo "start_slack_socket_mode: callback is not callable (kind=", fn.kind, ")"
+      return NIL
+
+proc vm_start_slack_socket_mode*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  if get_positional_count(arg_count, has_keyword_args) < 3:
+    raise new_exception(types.Exception, "start_slack_socket_mode requires app_token, bot_token, and callback")
+
+  let app_token_val = get_positional_arg(args, 0, has_keyword_args)
+  let bot_token_val = get_positional_arg(args, 1, has_keyword_args)
+  let callback_val = get_positional_arg(args, 2, has_keyword_args)
+
+  if app_token_val.kind != VkString:
+    raise new_exception(types.Exception, "start_slack_socket_mode: app_token must be a string")
+  if bot_token_val.kind != VkString:
+    raise new_exception(types.Exception, "start_slack_socket_mode: bot_token must be a string")
+  if callback_val.kind notin {VkFunction, VkNativeFn}:
+    raise new_exception(types.Exception, "start_slack_socket_mode: callback must be a function")
+
+  let app_token = app_token_val.str
+  let bot_token = bot_token_val.str
+
+  # Store VM and callback for use inside the event handler closure
+  {.cast(gcsafe).}:
+    slack_vm_global = vm
+    slack_callback_global = callback_val
+
+  let slack_client = new_slack_client(bot_token)
+
+  let event_handler: SocketModeEventHandler = proc(event_type: string; payload: JsonNode) {.gcsafe.} =
+    if event_type != "events_api":
+      return
+    # Parse the Slack event into a CommandEnvelope
+    var envelope: CommandEnvelope
+    try:
+      envelope = slack_event_to_command(payload)
+    except CatchableError as e:
+      echo "Socket Mode: skipping event: ", e.msg
+      return
+
+    # Call the Gene callback with (workspace_id, user_id, channel_id, text)
+    var result: Value
+    {.cast(gcsafe).}:
+      let stored_vm = slack_vm_global
+      let stored_cb = slack_callback_global
+      try:
+        result = execute_gene_callback(stored_vm, stored_cb, @[
+          envelope.workspace_id.to_value,
+          envelope.user_id.to_value,
+          envelope.channel_id.to_value,
+          envelope.text.to_value
+        ])
+      except CatchableError as e:
+        echo "Socket Mode: agent error: ", e.msg
+        return
+      except system.Exception as e:
+        echo "Socket Mode: agent error: ", e.msg
+        return
+
+    # Reply to Slack with the response field from the result
+    if result.kind == VkMap:
+      let response_key = "response".to_key()
+      if map_data(result).hasKey(response_key):
+        let response_val = map_data(result)[response_key]
+        if response_val.kind == VkString and response_val.str.len > 0:
+          let target = reply_target_from_envelope(envelope)
+          let reply_result = slack_client.slack_reply(target, response_val.str)
+          if not reply_result.ok:
+            echo "Socket Mode: Slack reply failed: ", reply_result.error
+
+  let client = new_slack_socket_mode(app_token, bot_token, event_handler)
+
+  {.cast(gcsafe).}:
+    asyncCheck client.start()
+    # Give the event loop time to start the connection
+    try:
+      poll(100)
+    except ValueError:
+      discard
+
+  echo "Slack Socket Mode client started"
+  return NIL
+
 # Initialize OpenAI classes and functions
 proc init_openai_classes*() =
   VmCreatedCallbacks.add proc() {.gcsafe.} =
@@ -460,6 +559,7 @@ proc init_openai_classes*() =
     ai_ns["embeddings".to_key()] = vm_openai_embeddings.to_value()
     ai_ns["respond".to_key()] = vm_openai_respond.to_value()
     ai_ns["stream".to_key()] = vm_openai_stream.to_value()
+    ai_ns["start_slack_socket_mode".to_key()] = vm_start_slack_socket_mode.to_value()
 
     let documents_ns = new_namespace("documents")
     documents_ns["extract_pdf".to_key()] = vm_ai_documents_extract_pdf.to_value()
@@ -476,6 +576,9 @@ proc init_openai_classes*() =
     global_ns["openai_respond".to_key()] = vm_openai_respond.to_value()
     global_ns["openai_stream".to_key()] = vm_openai_stream.to_value()
 
+    # Slack Socket Mode
+    global_ns["start_slack_socket_mode".to_key()] = vm_start_slack_socket_mode.to_value()
+
 # Call init function
 init_openai_classes()
 
@@ -490,12 +593,26 @@ proc init*(vm: ptr VirtualMachine): Namespace {.gcsafe.} =
     return ai_val.ref.ns
   return nil
 
+var ai_host_scheduler_registered = false
+
+proc ai_scheduler_tick(vm_user_data: pointer, callback_user_data: pointer) {.cdecl, gcsafe.} =
+  ## Called by the host's run_forever loop to pump the extension's async dispatcher.
+  discard callback_user_data
+  try:
+    poll(0)
+  except CatchableError:
+    discard
+
 proc gene_init*(host: ptr GeneHostAbi): int32 {.cdecl, exportc, dynlib.} =
   if host == nil:
     return int32(GeneExtErr)
   if host.abi_version != GENE_EXT_ABI_VERSION:
     return int32(GeneExtAbiMismatch)
   let vm = apply_extension_host_context(host)
+  if host.register_scheduler_callback_fn != nil and not ai_host_scheduler_registered:
+    if host.register_scheduler_callback_fn(ai_scheduler_tick, nil) != int32(GeneExtOk):
+      return int32(GeneExtErr)
+    ai_host_scheduler_registered = true
   run_extension_vm_created_callbacks()
   let ns = init(vm)
   if host.result_namespace != nil:

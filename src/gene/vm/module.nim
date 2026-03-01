@@ -913,6 +913,8 @@ proc ensure_global_extension_symbol*(vm: ptr VirtualMachine, name: Key): Value =
      name == "http_get".to_key() or
      name == "http_post".to_key():
     ext_name = "http"
+  elif name == "start_slack_socket_mode".to_key():
+    ext_name = "ai"
 
   if ext_name.len == 0:
     return NIL

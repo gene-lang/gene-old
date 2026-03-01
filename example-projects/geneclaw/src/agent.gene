@@ -10,7 +10,7 @@
 
 (fn make_run_id []
   (RUN_COUNTER += 1)
-  #"run-#{(gene/now/.to_i)}-#{RUN_COUNTER}"
+  #"run-#{RUN_COUNTER}"
 )
 
 (fn extract_json [text]

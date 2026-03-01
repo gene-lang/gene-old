@@ -64,7 +64,7 @@
 
 (fn $ns/memory_append [workspace_id session_id role content meta]
   (if (DB == nil) (return nil))
-  (var now (gene/now/.to_i))
+  (var now (gene/now))
   (var meta_str (if (meta == nil) "{}" else meta/.to_json))
   (DB .exec "INSERT INTO memory_events (workspace_id, session_id, role, content, meta_json, created_at_ms) VALUES (?, ?, ?, ?, ?, ?)"
     workspace_id session_id role content meta_str now)
@@ -89,7 +89,7 @@
 
 (fn $ns/audit_log [run_id workspace_id tool_name status args_json result_json duration_ms]
   (if (DB == nil) (return nil))
-  (var now (gene/now/.to_i))
+  (var now (gene/now))
   (DB .exec "INSERT INTO tool_audit (run_id, workspace_id, tool_name, status, args_json, result_json, duration_ms, created_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     run_id workspace_id tool_name status
     (if (args_json == nil) "{}" else args_json/.to_json)
@@ -101,14 +101,14 @@
 
 (fn $ns/run_create [run_id workspace_id user_id]
   (if (DB == nil) (return nil))
-  (var now (gene/now/.to_i))
+  (var now (gene/now))
   (DB .exec "INSERT INTO agent_runs (run_id, workspace_id, user_id, state, started_at_ms) VALUES (?, ?, ?, 'running', ?)"
     run_id workspace_id user_id now)
 )
 
 (fn $ns/run_complete [run_id state error]
   (if (DB == nil) (return nil))
-  (var now (gene/now/.to_i))
+  (var now (gene/now))
   (DB .exec "UPDATE agent_runs SET state = ?, ended_at_ms = ?, error = ? WHERE run_id = ?"
     state now (if (error == nil) "" else error) run_id)
 )
