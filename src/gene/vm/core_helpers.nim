@@ -244,6 +244,8 @@ template get_value_class(val: Value): Class =
     safe_class_value(App.app.aspect_class)
   of VkNamespace:
     safe_class_value(App.app.namespace_class)
+  of VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock:
+    safe_class_value(App.app.function_class)
   else:
     safe_class_value(App.app.object_class)
 

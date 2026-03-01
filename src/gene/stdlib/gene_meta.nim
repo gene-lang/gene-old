@@ -303,6 +303,21 @@ proc init_gene_and_meta_classes*(object_class: Class) =
         array_data(out_arr).add(example.expected)
     out_arr
 
+  proc function_call_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
+                            arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    let pos_count = get_positional_count(arg_count, has_keyword_args)
+    if pos_count < 1:
+      not_allowed("Function.call requires self")
+    let fn_val = get_positional_arg(args, 0, has_keyword_args)
+    if fn_val.kind notin {VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock}:
+      not_allowed("Function.call must be called on a callable")
+    var call_args = newSeq[Value]()
+    for i in 1..<pos_count:
+      call_args.add(get_positional_arg(args, i, has_keyword_args))
+    {.cast(gcsafe).}:
+      vm_exec_callable(vm, fn_val, call_args)
+
+  function_class.def_native_method("call", function_call_method)
   function_class.def_native_method("intent", function_intent_method)
   function_class.def_native_method("examples", function_examples_method)
 
