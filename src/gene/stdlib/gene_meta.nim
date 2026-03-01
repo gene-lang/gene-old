@@ -580,3 +580,29 @@ proc init_gene_and_meta_classes*(object_class: Class) =
     accumulator
 
   namespace_class.def_native_method("reduce", ns_reduce_method)
+
+  proc ns_on_member_missing_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 2:
+      not_allowed("on_member_missing requires a handler function")
+    let ns_val = get_positional_arg(args, 0, has_keyword_args)
+    if ns_val.kind != VkNamespace:
+      not_allowed("on_member_missing must be called on a namespace")
+    let handler = get_positional_arg(args, 1, has_keyword_args)
+    case handler.kind
+    of VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock:
+      ns_val.ref.ns.on_member_missing.add(handler)
+    else:
+      not_allowed("on_member_missing handler must be callable, got " & $handler.kind)
+    ns_val
+
+  namespace_class.def_native_method("on_member_missing", ns_on_member_missing_method)
+
+  proc ns_name_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("Namespace.name requires self")
+    let ns_val = get_positional_arg(args, 0, has_keyword_args)
+    if ns_val.kind != VkNamespace:
+      not_allowed("Namespace.name must be called on a namespace")
+    ns_val.ref.ns.name.to_value()
+
+  namespace_class.def_native_method("name", ns_name_method)

@@ -79,8 +79,29 @@ include ./vm/diagnostics
 include ./vm/runtime_helpers
 
 set_vm_exec_callable_hook(exec_callable)
+set_vm_exec_callable_with_self_hook(exec_callable_with_self)
 set_vm_poll_event_loop_hook(poll_event_loop)
 
 include "./stdlib"
+
+# Register default on_member_missing handler on genex namespace
+# This replaces the hard-coded ensure_genex_extension checks in exec.nim
+proc genex_extension_loader(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  {.cast(gcsafe).}:
+    let name_val = get_positional_arg(args, 0, has_keyword_args)
+    if name_val.kind != VkString and name_val.kind != VkSymbol:
+      return NIL
+    let part = name_val.str
+    when not defined(noExtensions):
+      return ensure_genex_extension(vm, part)
+    else:
+      return NIL
+
+# Register via VmCreatedCallbacks so it runs after App is initialized
+VmCreatedCallbacks.add proc() =
+  if App != NIL and App.kind == VkApplication and App.app.genex_ns.kind == VkNamespace:
+    let loader_ref = new_ref(VkNativeFn)
+    loader_ref.native_fn = genex_extension_loader
+    App.app.genex_ns.ref.ns.on_member_missing.add(loader_ref.to_ref_value())
 
 {.pop.}

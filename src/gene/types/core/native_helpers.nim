@@ -82,13 +82,18 @@ proc call_native_fn*(fn: NativeFn, vm: ptr VirtualMachine, args: openArray[Value
     return fn(vm, cast[ptr UncheckedArray[Value]](args[0].unsafeAddr), args.len, has_keyword_args)
 
 type VmExecCallableHook* = proc(vm: ptr VirtualMachine, callable: Value, args: seq[Value]): Value {.nimcall.}
+type VmExecCallableWithSelfHook* = proc(vm: ptr VirtualMachine, callable: Value, self_value: Value, args: seq[Value]): Value {.nimcall.}
 type VmPollEventLoopHook* = proc(vm: ptr VirtualMachine) {.nimcall.}
 
 var vm_exec_callable_hook*: VmExecCallableHook
+var vm_exec_callable_with_self_hook*: VmExecCallableWithSelfHook
 var vm_poll_event_loop_hook*: VmPollEventLoopHook
 
 proc set_vm_exec_callable_hook*(hook: VmExecCallableHook) {.inline.} =
   vm_exec_callable_hook = hook
+
+proc set_vm_exec_callable_with_self_hook*(hook: VmExecCallableWithSelfHook) {.inline.} =
+  vm_exec_callable_with_self_hook = hook
 
 proc set_vm_poll_event_loop_hook*(hook: VmPollEventLoopHook) {.inline.} =
   vm_poll_event_loop_hook = hook
@@ -97,6 +102,13 @@ proc vm_exec_callable*(vm: ptr VirtualMachine, callable: Value, args: seq[Value]
   if vm_exec_callable_hook.isNil:
     not_allowed("VM callable hook is not initialized")
   vm_exec_callable_hook(vm, callable, args)
+
+proc vm_exec_callable_with_self*(vm: ptr VirtualMachine, callable: Value, self_value: Value, args: seq[Value]): Value {.inline.} =
+  ## Call a callable with a self value for IkSelf, but only pass args to the matcher.
+  if vm_exec_callable_with_self_hook.isNil:
+    # Fall back to regular callable (self not set)
+    return vm_exec_callable(vm, callable, args)
+  vm_exec_callable_with_self_hook(vm, callable, self_value, args)
 
 proc vm_poll_event_loop*(vm: ptr VirtualMachine) {.inline.} =
   if vm_poll_event_loop_hook.isNil:

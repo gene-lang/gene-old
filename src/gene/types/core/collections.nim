@@ -109,17 +109,8 @@ proc member_names*(self: Namespace): Value =
   # for k, _ in self.members:
   #   result.vec.add(k)
 
-# proc on_member_missing*(frame: Frame, self: Value, args: Value): Value =
-proc on_member_missing*(vm_data: ptr VirtualMachine, args: Value): Value =
-  todo()
-  # let self = args.gene_type
-  # case self.kind
-  # of VkNamespace:
-  #   self.ns.on_member_missing.add(args.gene_children[0])
-  # of VkClass:
-  #   self.class.ns.on_member_missing.add(args.gene_children[0])
-  # else:
-  #   todo("member_missing " & $self.kind)
+# on_member_missing is now implemented as a native method on namespace_class
+# in stdlib/core.nim via try_member_missing_handlers in vm/module.nim
 
 #################### Scope #######################
 

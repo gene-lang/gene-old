@@ -266,6 +266,114 @@ proc exec_callable*(self: ptr VirtualMachine, callable: Value, args: seq[Value])
   else:
     not_allowed("Value is not callable: " & $callable.kind)
 
+proc exec_function_with_self*(self: ptr VirtualMachine, fn: Value, self_value: Value, args: seq[Value]): Value =
+  ## Like exec_function but sets self_value as self (for IkSelf) without passing it to the matcher.
+  if fn.kind != VkFunction:
+    return NIL
+
+  let f = fn.ref.fn
+
+  if f.body_compiled == nil:
+    f.compile()
+
+  let saved_cu = self.cu
+  let saved_pc = self.pc
+  let saved_frame = self.frame
+
+  var scope: Scope
+  if f.matcher.is_empty():
+    scope = f.parent_scope
+    if scope != nil:
+      scope.ref_count.inc()
+  else:
+    scope = new_scope(f.scope_tracker, f.parent_scope)
+    # Only pass actual args to the matcher (NOT self_value)
+    if args.len == 0:
+      process_args_zero(f.matcher, scope)
+    elif args.len == 1:
+      process_args_one(f.matcher, args[0], scope)
+    else:
+      process_args_direct(f.matcher, cast[ptr UncheckedArray[Value]](args[0].addr), args.len, false, scope)
+
+  let new_frame = new_frame()
+  new_frame.kind = FkFunction
+  new_frame.target = fn
+  new_frame.scope = scope
+  new_frame.ns = f.ns
+  if saved_frame != nil:
+    saved_frame.ref_count.inc()
+  new_frame.caller_frame = saved_frame
+  new_frame.caller_address = Address(cu: saved_cu, pc: saved_pc)
+  new_frame.from_exec_function = true
+
+  # Set frame.args with self_value as first child (for IkSelf), then actual args
+  let args_gene = new_gene_value()
+  args_gene.gene.children.add(self_value)
+  for arg in args:
+    args_gene.gene.children.add(arg)
+  new_frame.args = args_gene
+
+  self.frame = new_frame
+  self.cu = f.body_compiled
+  self.pc = 0
+  return self.exec_continue()
+
+proc exec_callable_with_self*(self: ptr VirtualMachine, callable: Value, self_value: Value, args: seq[Value]): Value {.exportc.} =
+  ## Like exec_callable but sets self_value for IkSelf without passing it to the matcher.
+  case callable.kind:
+  of VkFunction:
+    return self.exec_function_with_self(callable, self_value, args)
+  of VkNativeFn:
+    # Native functions don't use IkSelf, pass args as-is
+    return call_native_fn(callable.ref.native_fn, self, args)
+  of VkBlock:
+    let blk = callable.ref.block
+    if blk.body_compiled == nil:
+      blk.compile()
+
+    let saved_cu = self.cu
+    let saved_pc = self.pc
+    let saved_frame = self.frame
+
+    var scope: Scope
+    if blk.matcher.is_empty():
+      scope = blk.frame.scope
+      if scope != nil:
+        scope.ref_count.inc()
+    else:
+      scope = new_scope(blk.scope_tracker, blk.frame.scope)
+
+    let new_frame = new_frame()
+    new_frame.kind = FkBlock
+    new_frame.target = callable
+    new_frame.scope = scope
+    new_frame.ns = blk.ns
+    if saved_frame != nil:
+      saved_frame.ref_count.inc()
+    new_frame.caller_frame = saved_frame
+    new_frame.caller_address = Address(cu: saved_cu, pc: saved_pc)
+    new_frame.from_exec_function = true
+
+    var args_gene = new_gene_value()
+    args_gene.gene.children.add(self_value)
+    for arg in args:
+      args_gene.gene.children.add(arg)
+    new_frame.args = args_gene
+
+    if not blk.matcher.is_empty():
+      # Only pass actual args (not self) to matcher
+      var matcher_args = new_gene_value()
+      for arg in args:
+        matcher_args.gene.children.add(arg)
+      process_args(blk.matcher, matcher_args, new_frame.scope)
+
+    self.frame = new_frame
+    self.cu = blk.body_compiled
+    self.pc = 0
+    return self.exec_continue()
+  else:
+    # Fall back to regular callable
+    return self.exec_callable(callable, args)
 
 proc exec_generator_impl*(self: ptr VirtualMachine, gen: GeneratorObj): Value {.exportc.} =
   # Check for nil generator

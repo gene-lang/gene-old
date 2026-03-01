@@ -533,12 +533,6 @@ proc exec*(self: ptr VirtualMachine): Value =
                     value = self.thread_local_ns[name]
                     if value != NIL:
                       found_ns = self.thread_local_ns
-                if value == NIL:
-                  # Lazy-load extension-provided globals (e.g. start_server).
-                  value = ensure_global_extension_symbol(self, name)
-                  if value != NIL and App != NIL and App.kind == VkApplication and App.app.global_ns.kind == VkNamespace:
-                    found_ns = App.app.global_ns.ref.ns
-
                 # Update cache if we found the value
                 if value != NIL:
                   cache.ns = found_ns
@@ -560,12 +554,6 @@ proc exec*(self: ptr VirtualMachine): Value =
                   value = self.thread_local_ns[name]
                   if value != NIL:
                     found_ns = self.thread_local_ns
-              if value == NIL:
-                # Lazy-load extension-provided globals (e.g. start_server).
-                value = ensure_global_extension_symbol(self, name)
-                if value != NIL and App != NIL and App.kind == VkApplication and App.app.global_ns.kind == VkNamespace:
-                  found_ns = App.app.global_ns.ref.ns
-
               # Initialize cache if we found the value
               if value != NIL:
                 self.cu.inline_caches[self.pc].ns = found_ns
@@ -824,20 +812,11 @@ proc exec*(self: ptr VirtualMachine): Value =
               # Return current exception if set, otherwise the REPL exception
               let ex_value = if self.current_exception != NIL: self.current_exception else: self.repl_exception
               self.frame.push(ex_value)
-            elif value.ref.ns == App.app.genex_ns.ref.ns:
-              # Auto-load extensions when accessing genex/name
+            else:
               var member = value.ref.ns[name]
               if member == NIL:
-                let symbol_index = cast[uint64](name) and PAYLOAD_MASK
-                let ext_name = get_symbol(symbol_index.int)
-                member = ensure_genex_extension(self, ext_name)
-                if member == NIL:
-                  # Avoid repeated failed lookup attempts.
-                  value.ref.ns[name] = NIL
-              retain(member)
-              self.frame.push(member)
-            else:
-              let member = value.ref.ns[name]
+                let sym_name = get_symbol(symbol_index(name))
+                member = try_member_missing_handlers(self, value.ref.ns, sym_name)
               retain(member)
               self.frame.push(member)
           of VkClass:
@@ -965,28 +944,20 @@ proc exec*(self: ptr VirtualMachine): Value =
                 let now_us = host_now_us().float64
                 let elapsed = now_us - self.duration_start_us
                 self.frame.push(elapsed.to_value())
-              elif App != NIL and App.kind == VkApplication and
-                   App.app.genex_ns.kind == VkNamespace and
-                   target.ref.ns == App.app.genex_ns.ref.ns:
-                var member = target.ref.ns.members.getOrDefault(key, NIL)
+              else:
+                var member = target.ref.ns[key]
                 if member == NIL:
-                  let ext_name = case prop.kind:
+                  let prop_name = case prop.kind:
                     of VkString, VkSymbol: prop.str
                     of VkInt: $prop.int64
                     else: ""
-                  if ext_name.len > 0:
-                    member = ensure_genex_extension(self, ext_name)
+                  if prop_name.len > 0:
+                    member = try_member_missing_handlers(self, target.ref.ns, prop_name)
                 if member != NIL:
                   retain(member)
                   self.frame.push(member)
                 else:
                   self.frame.push(VOID)
-              elif target.ref.ns.has_key(key):
-                let member = target.ref.ns[key]
-                retain(member)
-                self.frame.push(member)
-              else:
-                self.frame.push(VOID)
             of VkClass:
               let key = case prop.kind:
                 of VkString, VkSymbol: prop.str.to_key()
@@ -1141,30 +1112,21 @@ proc exec*(self: ptr VirtualMachine): Value =
                 let member = self.current_exception
                 retain(member)
                 self.frame.push(member)
-              elif App != NIL and App.kind == VkApplication and
-                   App.app.genex_ns.kind == VkNamespace and
-                   target.ref.ns == App.app.genex_ns.ref.ns:
-                var member = target.ref.ns.members.getOrDefault(key, NIL)
+              else:
+                var member = target.ref.ns[key]
                 if member == NIL:
-                  let ext_name = case prop.kind:
+                  let prop_name = case prop.kind:
                     of VkString, VkSymbol: prop.str
                     of VkInt: $prop.int64
                     else: ""
-                  if ext_name.len > 0:
-                    member = ensure_genex_extension(self, ext_name)
+                  if prop_name.len > 0:
+                    member = try_member_missing_handlers(self, target.ref.ns, prop_name)
                 if member != NIL:
                   retain(member)
                   self.frame.push(member)
                 else:
                   retain(default_val)
                   self.frame.push(default_val)
-              elif target.ref.ns.has_key(key):
-                let member = target.ref.ns[key]
-                retain(member)
-                self.frame.push(member)
-              else:
-                retain(default_val)
-                self.frame.push(default_val)
             of VkClass:
               let key = case prop.kind:
                 of VkString, VkSymbol: prop.str.to_key()
@@ -3379,81 +3341,78 @@ proc exec*(self: ptr VirtualMachine): Value =
 
         let (module_path, imports, module_ns, is_native, handled) = self.handle_import(import_gene.gene)
 
-        if handled:
-          self.frame.push(NIL)
-          continue
+        if not handled:
+          # If module is not cached, we need to execute it
+          if not ModuleCache.hasKey(module_path):
+            if is_native:
+              # Load native extension
+              when not defined(noExtensions):
+                let ext_ns = load_extension(self, module_path)
+                ModuleCache[module_path] = ext_ns
 
-        # If module is not cached, we need to execute it
-        if not ModuleCache.hasKey(module_path):
-          if is_native:
-            # Load native extension
-            when not defined(noExtensions):
-              let ext_ns = load_extension(self, module_path)
-              ModuleCache[module_path] = ext_ns
-
-              # Import requested symbols
-              self.import_items(ext_ns, imports)
-            else:
-              not_allowed("Native extensions are not supported in this build")
-          else:
-            # Cycle detection
-            if ModuleLoadState.getOrDefault(module_path, false):
-              var cycle: seq[string] = @[]
-              var start = -1
-              for i, entry in ModuleLoadStack:
-                if entry == module_path:
-                  start = i
-                  break
-              if start >= 0:
-                cycle = ModuleLoadStack[start..^1] & @[module_path]
+                # Import requested symbols
+                self.import_items(ext_ns, imports)
               else:
-                cycle = ModuleLoadStack & @[module_path]
-              not_allowed("[GENE.MODULE.CYCLE] Cyclic import detected: " & cycle.join(" -> "))
+                not_allowed("Native extensions are not supported in this build")
+            else:
+              # Cycle detection
+              if ModuleLoadState.getOrDefault(module_path, false):
+                var cycle: seq[string] = @[]
+                var start = -1
+                for i, entry in ModuleLoadStack:
+                  if entry == module_path:
+                    start = i
+                    break
+                if start >= 0:
+                  cycle = ModuleLoadStack[start..^1] & @[module_path]
+                else:
+                  cycle = ModuleLoadStack & @[module_path]
+                not_allowed("[GENE.MODULE.CYCLE] Cyclic import detected: " & cycle.join(" -> "))
 
-            ModuleLoadState[module_path] = true
-            ModuleLoadStack.add(module_path)
+              ModuleLoadState[module_path] = true
+              ModuleLoadStack.add(module_path)
 
-            # Compile the module
-            try:
-              let cu = compile_module(module_path)
+              # Compile the module
+              try:
+                let cu = compile_module(module_path)
 
-              # Save current state
-              let saved_cu = self.cu
-              let saved_frame = self.frame
-              let saved_pc = self.pc
+                # Save current state
+                let saved_cu = self.cu
+                let saved_frame = self.frame
+                let saved_pc = self.pc
 
-              # Create a new frame for module execution
-              self.frame = new_frame()
-              self.frame.ns = module_ns
-              # Module namespace is now passed as argument, not stored as self
-              let args_gene = new_gene(NIL)
-              args_gene.children.add(module_ns.to_value())
-              self.frame.args = args_gene.to_gene_value()
+                # Create a new frame for module execution
+                self.frame = new_frame()
+                self.frame.ns = module_ns
+                # Module namespace is now passed as argument, not stored as self
+                let args_gene = new_gene(NIL)
+                args_gene.children.add(module_ns.to_value())
+                self.frame.args = args_gene.to_gene_value()
 
-              # Execute the module
-              self.cu = cu
-              discard self.exec()
-              discard self.run_module_init(module_ns)
+                # Execute the module
+                self.cu = cu
+                discard self.exec()
+                discard self.run_module_init(module_ns)
 
-              # Restore the original state
-              self.cu = saved_cu
-              self.frame = saved_frame
-              self.pc = saved_pc
+                # Restore the original state
+                self.cu = saved_cu
+                self.frame = saved_frame
+                self.pc = saved_pc
 
-              # Cache the module
-              ModuleCache[module_path] = module_ns
+                # Cache the module
+                ModuleCache[module_path] = module_ns
 
-              # Import requested symbols
-              self.import_items(module_ns, imports)
-            finally:
-              if ModuleLoadState.hasKey(module_path):
-                ModuleLoadState.del(module_path)
-              if ModuleLoadStack.len > 0 and ModuleLoadStack[^1] == module_path:
-                ModuleLoadStack.setLen(ModuleLoadStack.len - 1)
-        else:
-          # Module already cached - import requested symbols
-          let cached_ns = ModuleCache[module_path]
-          self.import_items(cached_ns, imports)
+                # Import requested symbols
+                self.import_items(module_ns, imports)
+              finally:
+                if ModuleLoadState.hasKey(module_path):
+                  ModuleLoadState.del(module_path)
+                if ModuleLoadStack.len > 0 and ModuleLoadStack[^1] == module_path:
+                  ModuleLoadStack.setLen(ModuleLoadStack.len - 1)
+          else:
+            # Module already cached - import requested symbols
+            let cached_ns = ModuleCache[module_path]
+            self.import_items(cached_ns, imports)
 
         self.frame.push(NIL)
 

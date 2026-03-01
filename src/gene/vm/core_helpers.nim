@@ -242,6 +242,8 @@ template get_value_class(val: Value): Class =
     safe_class_value(App.app.class_class)
   of VkAspect:
     safe_class_value(App.app.aspect_class)
+  of VkNamespace:
+    safe_class_value(App.app.namespace_class)
   else:
     safe_class_value(App.app.object_class)
 

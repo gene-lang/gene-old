@@ -898,29 +898,23 @@ proc ensure_genex_extension*(vm: ptr VirtualMachine, part: string): Value =
       App.app.genex_ns.ref.ns.members[key] = member
   return member
 
-proc ensure_global_extension_symbol*(vm: ptr VirtualMachine, name: Key): Value =
-  ## Lazily load extension-provided global helpers on first symbol resolution.
-  if App == NIL or App.kind != VkApplication:
+proc try_member_missing_handlers*(vm: ptr VirtualMachine, ns: Namespace, name: string): Value =
+  ## Try each on_member_missing handler on a namespace.
+  ## Returns the first non-NIL result (cached in ns.members), or NIL.
+  ## The namespace is passed as self (for IkSelf//.name) but not to the matcher.
+  if ns.on_member_missing.len == 0:
     return NIL
-  if App.app.global_ns.kind != VkNamespace:
-    return NIL
-
-  var ext_name = ""
-  if name == "start_server".to_key() or
-     name == "respond".to_key() or
-     name == "respond_sse".to_key() or
-     name == "redirect".to_key() or
-     name == "http_get".to_key() or
-     name == "http_post".to_key():
-    ext_name = "http"
-  elif name == "start_slack_socket_mode".to_key():
-    ext_name = "ai"
-
-  if ext_name.len == 0:
-    return NIL
-
-  discard ensure_genex_extension(vm, ext_name)
-  return App.app.global_ns.ref.ns.members.getOrDefault(name, NIL)
+  let name_val = name.to_value()
+  # Create a namespace Value for self
+  let ns_ref = new_ref(VkNamespace)
+  ns_ref.ns = ns
+  let ns_value = ns_ref.to_ref_value()
+  for handler in ns.on_member_missing:
+    let result = vm_exec_callable_with_self(vm, handler, ns_value, @[name_val])
+    if result != NIL:
+      ns.members[name.to_key()] = result
+      return result
+  return NIL
 
 proc resolve_from_root(vm: ptr VirtualMachine, root: Value, parts: seq[string]): Value =
   ## Resolve a path against a root namespace value.
@@ -935,10 +929,8 @@ proc resolve_from_root(vm: ptr VirtualMachine, root: Value, parts: seq[string]):
       return NIL
     let key = part.to_key()
     var next = current.ref.ns.members.getOrDefault(key, NIL)
-    if next == NIL and current.kind == VkNamespace and App != NIL and App.kind == VkApplication and App.app.genex_ns.kind == VkNamespace and current.ref.ns == App.app.genex_ns.ref.ns:
-      next = ensure_genex_extension(vm, part)
-      if next == NIL:
-        current.ref.ns.members[key] = NIL
+    if next == NIL:
+      next = try_member_missing_handlers(vm, current.ref.ns, part)
     if next == NIL:
       return NIL
     current = next
@@ -1243,7 +1235,7 @@ proc execute_module*(vm: ptr VirtualMachine, path: string, module_ns: Namespace)
 proc handle_import*(vm: ptr VirtualMachine, import_gene: ptr Gene): tuple[path: string, imports: seq[ImportItem], ns: Namespace, is_native: bool, handled: bool] =
   ## Parse import statement and prepare for execution
   let (raw_module_path, package_from_stmt, imports) = parse_import_statement(import_gene)
-  
+
   if raw_module_path.len == 0:
     if import_from_namespace(vm, imports):
       return ("", @[], nil, false, true)
