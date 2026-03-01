@@ -100,6 +100,12 @@ proc compile_if(self: Compiler, gene: ptr Gene) =
 
   self.end_scope()
 
+proc compile_if_not(self: Compiler, gene: ptr Gene) =
+  normalize_if_not(gene)
+  # After normalization, if_not has the same cond/then/else props as if.
+  # compile_if's normalize_if will see "cond" already set and return early.
+  self.compile_if(gene)
+
 proc is_result_option_pattern(v: Value): bool =
   ## Check if value is a Result/Option pattern like (Ok a), (Err e), (Some x), or None
   if v.kind == VkSymbol and v.str == "None":

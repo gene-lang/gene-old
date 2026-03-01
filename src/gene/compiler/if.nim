@@ -121,3 +121,66 @@ proc normalize_if*(self: ptr Gene) =
       self.props["else".to_key()].ref.stream.add(NIL)
 
     self.children.reset  # Clear our gene_children as it's not needed any more
+
+proc normalize_if_not*(self: ptr Gene) =
+  ## Normalize (if_not cond body...) into the same props format as if,
+  ## wrapping the condition with (not ...).
+  ## No elif branches are supported.
+  if self.props.has_key("cond".to_key()):
+    return
+
+  type IfNotState = enum
+    Cond, CondDone, Body, Else
+
+  var state = Cond
+  var body: seq[Value]
+  var else_body: seq[Value]
+
+  proc handler(input: Value) =
+    case state:
+    of Cond:
+      if input == nil:
+        not_allowed("if_not: missing condition")
+      else:
+        # Wrap condition with (not ...)
+        let g = new_gene("not".to_symbol_value())
+        g.children.add(input)
+        self.props["cond".to_key()] = g.to_gene_value()
+        state = CondDone
+    of CondDone:
+      state = Body
+      body = @[]
+      if input == nil:
+        not_allowed("if_not: missing body after condition")
+      elif input == "else".to_symbol_value():
+        state = Else
+        else_body = @[]
+      elif input != "then".to_symbol_value():
+        body.add(input)
+    of Body:
+      if input == nil:
+        discard
+      elif input == "else".to_symbol_value():
+        state = Else
+        else_body = @[]
+      else:
+        body.add(input)
+    of Else:
+      if input == nil:
+        discard
+      else:
+        else_body.add(input)
+
+  for item in self.children:
+    handler(item)
+  handler(nil)
+
+  self.props["then".to_key()] = new_stream_value(body)
+  self.props["else".to_key()] = new_stream_value(else_body)
+
+  if self.props["then".to_key()].ref.stream.len == 0:
+    self.props["then".to_key()].ref.stream.add(NIL)
+  if self.props["else".to_key()].ref.stream.len == 0:
+    self.props["else".to_key()].ref.stream.add(NIL)
+
+  self.children.reset

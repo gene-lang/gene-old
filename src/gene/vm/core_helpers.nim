@@ -196,6 +196,8 @@ template get_value_class(val: Value): Class =
     instance_class(val)
   of VkNil:
     safe_class_value(App.app.nil_class)
+  of VkVoid:
+    safe_class_value(App.app.void_class)
   of VkBool:
     safe_class_value(App.app.bool_class)
   of VkInt:

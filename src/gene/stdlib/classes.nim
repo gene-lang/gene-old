@@ -261,11 +261,29 @@ proc init_basic_classes*(): Class =
   let nil_class = new_class("Nil")
   nil_class.parent = object_class
   nil_class.def_native_method("to_s", object_to_s_method)
+
+  proc nil_empty_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
+                        arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    TRUE
+
+  nil_class.def_native_method("empty", nil_empty_method)
+
   r = new_ref(VkClass)
   r.class = nil_class
   App.app.nil_class = r.to_ref_value()
   App.app.gene_ns.ns["Nil".to_key()] = App.app.nil_class
   App.app.global_ns.ns["Nil".to_key()] = App.app.nil_class
+
+  let void_class = new_class("Void")
+  void_class.parent = object_class
+  void_class.def_native_method("to_s", object_to_s_method)
+  void_class.def_native_method("empty", nil_empty_method)
+
+  r = new_ref(VkClass)
+  r.class = void_class
+  App.app.void_class = r.to_ref_value()
+  App.app.gene_ns.ns["Void".to_key()] = App.app.void_class
+  App.app.global_ns.ns["Void".to_key()] = App.app.void_class
 
   let bool_class = new_class("Bool")
   bool_class.parent = object_class

@@ -11,30 +11,19 @@
 #   SLACK_BOT_TOKEN   - Bot token (xoxb-...)
 #   SLACK_CHANNEL_ID  - Channel to send messages to (e.g. C0123456789)
 
-(var APP_TOKEN  ($env .get "SLACK_APP_TOKEN" ""))
-(var BOT_TOKEN  ($env .get "SLACK_BOT_TOKEN" ""))
-(var CHANNEL_ID ($env .get "SLACK_CHANNEL_ID" ""))
+(var APP_TOKEN  $env/SLACK_APP_TOKEN)
+(var BOT_TOKEN  $env/SLACK_BOT_TOKEN)
+(var CHANNEL_ID $env/SLACK_CHANNEL_ID)
 
-(if (APP_TOKEN/.length == 0)
-  (println "Error: SLACK_APP_TOKEN not set")
+(if_not (APP_TOKEN && BOT_TOKEN && CHANNEL_ID)
+  (println "Error: SLACK_APP_TOKEN / SLACK_BOT_TOKEN / SLACK_CHANNEL_ID not set")
   (exit 1)
 )
-(if (BOT_TOKEN/.length == 0)
-  (println "Error: SLACK_BOT_TOKEN not set")
-  (exit 1)
-)
-(if (CHANNEL_ID/.length == 0)
-  (println "Error: SLACK_CHANNEL_ID not set")
-  (exit 1)
-)
-
 # --- Helper: post a message to Slack ---
 # When thread_ts is non-empty, replies in that thread.
 (fn slack_send [text thread_ts]
   (var body {^channel CHANNEL_ID ^text text})
-  (if (thread_ts != "")
-    (body .set "thread_ts" thread_ts)
-  )
+  (if thread_ts then (body/thread_ts = thread_ts))
   (var headers {^Content-Type "application/json; charset=utf-8"
                 ^Authorization #"Bearer #{BOT_TOKEN}"})
   (var resp (await (http_post "https://slack.com/api/chat.postMessage" body/.to_json headers)))
@@ -48,16 +37,15 @@
 (var resp (await (http_post "https://slack.com/api/apps.connections.open" "" open_headers)))
 (var data (gene/json/parse resp/body))
 
-(if (data/ok != true)
+(if_not data/ok
   (println "Error: apps.connections.open failed:" data)
   (exit 1)
 )
 
-(var ws_url data/url)
-(println #"Connecting to #{ws_url}")
+(println #"Connecting to #{data/url}")
 
 # --- Step 2: Connect WebSocket ---
-(var ws (await (ws_connect ws_url)))
+(var ws (await (ws_connect data/url)))
 (println "WebSocket connected!")
 
 # --- Step 3: Send greeting ---
@@ -67,17 +55,17 @@
 # --- Step 4: Receive loop ---
 (println "Listening for messages... (send 'exit' to quit)")
 (loop
-  (var frame (await (ws .recv)))
+  (var frame (await ws/.recv))
 
   # Connection closed
-  (if (frame == nil)
+  (if_not frame
     (println "WebSocket closed by server")
     (break)
   )
 
   # Parse the envelope
   (var envelope (gene/json/parse frame))
-  (var env_type (envelope .get "type" ""))
+  (var env_type envelope/type)
 
   # Hello message confirms connection
   (if (env_type == "hello")
@@ -92,38 +80,35 @@
   )
 
   # ACK the envelope
-  (var envelope_id (envelope .get "envelope_id" ""))
-  (if (envelope_id/.length > 0)
+  (var envelope_id envelope/envelope_id)
+  (if envelope_id
     (var ack {^envelope_id envelope_id})
     (ws .send ack/.to_json)
   )
 
   # Only process events_api envelopes
-  (if (env_type != "events_api")
-    (continue)
-  )
+  (if (env_type != "events_api") then (continue))
 
   # Extract the event
-  (var payload (envelope .get "payload" nil))
-  (if (payload == nil) (continue))
+  (var payload envelope/payload)
+  (if_not payload then (continue))
 
-  (var event (payload .get "event" nil))
-  (if (event == nil) (continue))
+  (var event payload/event)
+  (if_not event then (continue))
 
   # Ignore bot messages
-  (var bot_id (event .get "bot_id" ""))
-  (if (bot_id != "") (continue))
-  (var subtype (event .get "subtype" ""))
-  (if (subtype == "bot_message") (continue))
+  (var bot_id event/bot_id)
+  (if bot_id then (continue))
+  (var subtype event/subtype)
+  (if (subtype == "bot_message") then (continue))
 
-  (var text (event .get "text" ""))
-  (if (text/.length == 0) (continue))
+  (var text event/text)
+  (if text/.empty then (continue))
 
   # Determine thread: if already in a thread use thread_ts, otherwise
   # reply to the channel message's ts to start a new thread.
-  (var thread_ts (event .get "thread_ts" ""))
-  (if (thread_ts == "")
-    (thread_ts = (event .get "ts" ""))
+  (var thread_ts event/thread_ts)
+  (if thread_ts/.empty then (thread_ts = event/ts)
   )
 
   (println #"Message: #{text}")
@@ -132,7 +117,7 @@
   (if (text == "exit")
     (println "Exit requested. Shutting down...")
     (slack_send "Goodbye from Gene!" thread_ts)
-    (ws .close)
+    ws/.close
     (exit 0)
   )
 

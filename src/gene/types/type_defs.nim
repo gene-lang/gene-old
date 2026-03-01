@@ -347,6 +347,7 @@ type
 
     object_class*   : Value
     nil_class*      : Value
+    void_class*     : Value
     bool_class*     : Value
     int_class*      : Value
     float_class*    : Value

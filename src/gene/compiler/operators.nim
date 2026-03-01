@@ -1017,6 +1017,9 @@ proc compile_gene(self: Compiler, input: Value) =
       of "if":
         self.compile_if(gene)
         return
+      of "if_not":
+        self.compile_if_not(gene)
+        return
       of "case":
         self.compile_case(gene)
         return

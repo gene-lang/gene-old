@@ -1556,8 +1556,7 @@ proc check_if(self: TypeChecker, gene: ptr Gene): TypeExpr =
   let else_expr = if has_else: branch_expr(else_items) else: NIL
 
   let cond_type = self.check_expr(cond)
-  if cond_type.kind != TkAny:
-    self.unify(TypeExpr(kind: TkNamed, name: "Bool"), cond_type, "if condition")
+  # Allow any truthy/falsy value in if conditions (runtime to_bool handles coercion)
 
   let guard = self.extract_type_guard(cond)
   let has_guard = guard.found
