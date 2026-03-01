@@ -78,7 +78,7 @@ For general conversation, respond normally without tool calls.")
 
 (fn call_llm [messages]
   # Call OpenAI-compatible API
-  (if (OPENAI_API_KEY/.length == 0)
+  (if OPENAI_API_KEY/.empty
     # Mock mode
     (return #"I received your message. (Running in mock mode - set OPENAI_API_KEY to enable LLM)")
   )
@@ -87,11 +87,11 @@ For general conversation, respond normally without tool calls.")
     (try
       (var client (new OpenAIClient {^api_key OPENAI_API_KEY ^model OPENAI_MODEL}))
       (var response (client .chat {^messages messages}))
-      (if (response != nil)
+      (if response
         (var choices (response .get "choices" []))
         (if (choices/.length > 0)
-          (var first_choice (choices .get 0))
-          (var msg (first_choice .get "message" {}))
+          (var first_choice choices/0)
+          (var msg first_choice/message)
           (return (msg .get "content" ""))
         )
       )
@@ -137,10 +137,10 @@ For general conversation, respond normally without tool calls.")
 
     # Check if response is a tool call
     (var tool_json_str (extract_json response))
-    (if (tool_json_str != nil)
+    (if tool_json_str
       (try
         (var parsed (gene/json/parse tool_json_str))
-        (if (parsed .contains "tool")
+        (if (parsed .has "tool")
           # Tool dispatch
           (if (tool_calls >= MAX_TOOL_CALLS)
             (final_response = "Agent reached maximum tool call limit.")
@@ -148,13 +148,13 @@ For general conversation, respond normally without tool calls.")
           )
           (tool_calls += 1)
 
-          (var tool_name (parsed .get "tool" ""))
+          (var tool_name parsed/tool)
           (var tool_args (parsed .get "args" {}))
           (var tool_result (invoke_tool run_id workspace_id tool_name tool_args))
 
           # Add tool result to history for next iteration
           (var result_text (if tool_result/ok
-            #"Tool '#{tool_name}' result: #{(tool_result/result .to_json)}"
+            #"Tool '#{tool_name}' result: #{tool_result/result/.to_json}"
           else
             #"Tool '#{tool_name}' error: #{tool_result/error}"
           ))

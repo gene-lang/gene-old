@@ -63,26 +63,24 @@
 # --- Memory operations ---
 
 (fn $ns/memory_append [workspace_id session_id role content meta]
-  (if (DB == nil) (return nil))
+  (if_not DB (return nil))
   (var now (gene/now))
-  (var meta_str (if (meta == nil) "{}" else meta/.to_json))
+  (var meta_str (if meta then meta/.to_json else "{}"))
   (DB .exec "INSERT INTO memory_events (workspace_id, session_id, role, content, meta_json, created_at_ms) VALUES (?, ?, ?, ?, ?, ?)"
     workspace_id session_id role content meta_str now)
 )
 
 (fn $ns/memory_recent [session_id limit]
-  (if (DB == nil) (return []))
+  (if_not DB (return []))
   (try
     (var rows (DB .query "SELECT role, content, meta_json FROM memory_events WHERE session_id = ? ORDER BY created_at_ms DESC, id DESC LIMIT ?" session_id limit))
-    (if ((rows == nil) || (rows == 0) || (rows == 0.0))
-      (return [])
-    )
+    (if_not rows (return []))
     # Reverse so oldest is first
     (var result [])
-    (var i ((rows .size) - 1))
+    (var i (rows/.size - 1))
     (loop
       (if (i < 0) (break))
-      (var row (rows .get i))
+      (var row rows/i)
       (result .append {^role row/0 ^content row/1})
       (i -= 1)
     )
@@ -95,27 +93,27 @@
 # --- Audit operations ---
 
 (fn $ns/audit_log [run_id workspace_id tool_name status args_json result_json duration_ms]
-  (if (DB == nil) (return nil))
+  (if_not DB (return nil))
   (var now (gene/now))
   (DB .exec "INSERT INTO tool_audit (run_id, workspace_id, tool_name, status, args_json, result_json, duration_ms, created_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     run_id workspace_id tool_name status
-    (if (args_json == nil) "{}" else args_json/.to_json)
-    (if (result_json == nil) "{}" else result_json/.to_json)
+    (if args_json then args_json/.to_json else "{}")
+    (if result_json then result_json/.to_json else "{}")
     duration_ms now)
 )
 
 # --- Run tracking ---
 
 (fn $ns/run_create [run_id workspace_id user_id]
-  (if (DB == nil) (return nil))
+  (if_not DB (return nil))
   (var now (gene/now))
   (DB .exec "INSERT INTO agent_runs (run_id, workspace_id, user_id, state, started_at_ms) VALUES (?, ?, ?, 'running', ?)"
     run_id workspace_id user_id now)
 )
 
 (fn $ns/run_complete [run_id state error]
-  (if (DB == nil) (return nil))
+  (if_not DB (return nil))
   (var now (gene/now))
   (DB .exec "UPDATE agent_runs SET state = ?, ended_at_ms = ?, error = ? WHERE run_id = ?"
-    state now (if (error == nil) "" else error) run_id)
+    state now (if error then error else "") run_id)
 )

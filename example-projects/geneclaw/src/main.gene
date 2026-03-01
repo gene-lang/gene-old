@@ -18,7 +18,7 @@
 (fn get_header [req name default_val]
   (try
     (var headers req/.headers)
-    (if (headers != nil)
+    (if headers
       (headers .get name default_val)
     else
       default_val
@@ -43,9 +43,9 @@
     (var workspace_id (body .get "workspace_id" "default"))
     (var user_id (body .get "user_id" "anonymous"))
     (var channel_id (body .get "channel_id" "general"))
-    (var text (body .get "text" ""))
+    (var text body/text)
 
-    (if (text/.length == 0)
+    (if text/.empty
       (return (json_response 400 {^error "Missing text field"}))
     )
 
@@ -69,34 +69,34 @@
     (var body (gene/json/parse body_str))
 
     # URL verification challenge
-    (if ((body .get "type" "") == "url_verification")
-      (return (json_response 200 {^challenge (body .get "challenge" "")}))
+    (if (body/type == "url_verification")
+      (return (json_response 200 {^challenge body/challenge}))
     )
 
     # Only handle event_callback
-    (if ((body .get "type" "") != "event_callback")
+    (if (body/type != "event_callback")
       (return (json_response 200 {^ok true}))
     )
 
-    (var event (body .get "event" nil))
-    (if (event == nil)
+    (var event body/event)
+    (if_not event
       (return (json_response 200 {^ok true}))
     )
 
     # Ignore bot messages
-    (if (((event .get "bot_id" "") .length) > 0)
+    (if event/bot_id
       (return (json_response 200 {^ok true}))
     )
-    (if ((event .get "subtype" "") == "bot_message")
+    (if (event/subtype == "bot_message")
       (return (json_response 200 {^ok true}))
     )
 
     (var workspace_id (body .get "team_id" "default"))
     (var user_id (event .get "user" "unknown"))
-    (var channel_id (event .get "channel" ""))
-    (var text (event .get "text" ""))
+    (var channel_id event/channel)
+    (var text event/text)
 
-    (if ((text/.length == 0) || (channel_id/.length == 0))
+    (if (text/.empty || channel_id/.empty)
       (return (json_response 200 {^ok true}))
     )
 
@@ -104,15 +104,14 @@
     (var result (run_agent workspace_id user_id channel_id text))
 
     # Reply to Slack
-    (if ((SLACK_BOT_TOKEN/.length > 0) && (result/response/.length > 0))
-      (var thread_ts (event .get "thread_ts" (event .get "ts" "")))
+    (if (SLACK_BOT_TOKEN && result/response)
+      (var thread_ts event/thread_ts)
+      (if thread_ts/.empty then (thread_ts = event/ts))
       (var reply_payload {
         ^channel channel_id
         ^text result/response
       })
-      (if (thread_ts/.length > 0)
-        (reply_payload .set "thread_ts" thread_ts)
-      )
+      (if thread_ts then (reply_payload/thread_ts = thread_ts))
       (try
         (await (http_post "https://slack.com/api/chat.postMessage"
           reply_payload/.to_json
@@ -157,7 +156,7 @@
 (init_tools)
 (println)
 
-(if (SLACK_APP_TOKEN/.length > 0)
+(if SLACK_APP_TOKEN
   # Socket Mode: connect to Slack via outbound WebSocket (no public URL needed)
   (println "Starting Slack Socket Mode...")
   (println #"Starting HTTP server on http://localhost:#{PORT} (health + REST API)")

@@ -11,7 +11,7 @@
 (var POLICIES {})
 
 (fn $ns/register_tool [name description params handler]
-  (TOOLS .set name {
+  (TOOLS/name = {
     ^description description
     ^params params
     ^handler handler
@@ -19,22 +19,24 @@
 )
 
 (fn $ns/set_workspace_policy [workspace_id policy]
-  (POLICIES .set workspace_id policy)
+  (POLICIES/workspace_id = policy)
 )
 
 (fn $ns/check_policy [workspace_id tool_name]
-  (var policy (POLICIES .get workspace_id nil))
-  (if (policy == nil) (return true))
+  (var policy POLICIES/workspace_id)
+  (if_not policy (return true))
 
   # Check denied list
-  (var denied (policy .get "denied_tools" []))
-  (denied .each (fn [d]
-    (if (d == tool_name) (return false))
-  ))
+  (var denied policy/denied_tools)
+  (if denied
+    (denied .each (fn [d]
+      (if (d == tool_name) (return false))
+    ))
+  )
 
   # Check allowed list (if non-empty, only listed tools are allowed)
-  (var allowed (policy .get "allowed_tools" []))
-  (if (allowed/.size > 0)
+  (var allowed policy/allowed_tools)
+  (if_not allowed/.empty
     (var found false)
     (allowed .each (fn [a]
       (if (a == tool_name) (found = true))
@@ -46,13 +48,13 @@
 
 (fn $ns/invoke_tool [run_id workspace_id tool_name args]
   # Policy gate
-  (if ((check_policy workspace_id tool_name) == false)
+  (if_not (check_policy workspace_id tool_name)
     (audit_log run_id workspace_id tool_name "denied" args nil 0)
     (return {^ok false ^error #"Tool '#{tool_name}' denied for workspace #{workspace_id}"})
   )
 
-  (var tool (TOOLS .get tool_name nil))
-  (if (tool == nil)
+  (var tool TOOLS/tool_name)
+  (if_not tool
     (audit_log run_id workspace_id tool_name "not_found" args nil 0)
     (return {^ok false ^error #"Unknown tool: #{tool_name}"})
   )
@@ -100,7 +102,7 @@
     "Get the current date and time"
     {}
     (fn [args]
-      {^result ((gene/now) .to_s)}
+      {^result (gene/now/.to_s)}
     )
   )
 
@@ -108,8 +110,8 @@
     "Run an allowlisted shell command"
     {^command "The command to run" ^args "Arguments as a string"}
     (fn [args]
-      (var cmd (args .get "command" ""))
-      (if (cmd/.length == 0)
+      (var cmd args/command)
+      (if cmd/.empty
         (return {^error "Missing command"})
       )
 
@@ -118,11 +120,12 @@
       (SHELL_ALLOWLIST .each (fn [c]
         (if (c == cmd) (allowed = true))
       ))
-      (if (allowed == false)
+      (if_not allowed
         (return {^error #"Command '#{cmd}' is not allowlisted"})
       )
 
-      (var cmd_args (args .get "args" ""))
+      (var cmd_args args/args)
+      (if cmd_args/.empty then (cmd_args = ""))
       (var full_cmd #"cd #{WORKSPACE_ROOT} && #{cmd} #{cmd_args}")
       (var result (system/shell full_cmd))
       {^exit_code result/exit_code ^output result/output}
@@ -133,8 +136,8 @@
     "Read a file within the workspace"
     {^path "Relative path within workspace"}
     (fn [args]
-      (var path (args .get "path" ""))
-      (if (path/.length == 0)
+      (var path args/path)
+      (if path/.empty
         (return {^error "Missing path"})
       )
       # Reject path traversal
@@ -155,9 +158,9 @@
     "Write a file within the workspace"
     {^path "Relative path" ^content "File content"}
     (fn [args]
-      (var path (args .get "path" ""))
-      (var content (args .get "content" ""))
-      (if (path/.length == 0)
+      (var path args/path)
+      (var content args/content)
+      (if path/.empty
         (return {^error "Missing path"})
       )
       (if ((path .index "..") >= 0)
@@ -177,8 +180,8 @@
     "Fetch a URL via HTTP GET"
     {^url "The URL to fetch"}
     (fn [args]
-      (var url (args .get "url" ""))
-      (if (url/.length == 0)
+      (var url args/url)
+      (if url/.empty
         (return {^error "Missing url"})
       )
       (try
