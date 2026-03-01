@@ -309,7 +309,7 @@ proc compile_complex_symbol(self: Compiler, input: Value) =
         self.emit(Instruction(kind: IkResolveSymbol, arg0: cast[Value](key)))
     for s in r.csymbol[1..^1]:
       if s == "!":
-        self.emit(Instruction(kind: IkAssertNotVoid))
+        self.emit(Instruction(kind: IkAssertValue))
         continue
       let (is_int, i) = to_int(s)
       if is_int:

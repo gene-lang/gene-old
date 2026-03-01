@@ -872,7 +872,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         var target: Value
         self.frame.pop2(target)
 
-        # Not found returns VOID by default. Use /! (IkAssertNotVoid) to throw.
+        # Not found returns VOID by default. Use /! (IkAssertValue) to throw.
         if target == VOID or target == NIL:
           self.frame.push(VOID)
         else:
@@ -1190,10 +1190,14 @@ proc exec*(self: ptr VirtualMachine): Value =
               retain(default_val)
               self.frame.push(default_val)
 
-      of IkAssertNotVoid:
+      of IkAssertValue:
         let value = self.frame.current()
         if value == VOID:
           not_allowed("Selector did not match (VOID)")
+        elif value == NIL:
+          not_allowed("Selector matched but value is nil")
+        elif value == PLACEHOLDER:
+          not_allowed("Selector matched but value is a placeholder")
 
       of IkCreateSelector:
         let count = inst.arg1
