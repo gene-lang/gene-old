@@ -29,8 +29,12 @@
 )
 
 # --- Helper: post a message to Slack ---
-(fn slack_send [text]
+# When thread_ts is non-empty, replies in that thread.
+(fn slack_send [text thread_ts]
   (var body {^channel CHANNEL_ID ^text text})
+  (if (thread_ts != "")
+    (body .set "thread_ts" thread_ts)
+  )
   (var headers {^Content-Type "application/json; charset=utf-8"
                 ^Authorization #"Bearer #{BOT_TOKEN}"})
   (var resp (await (http_post "https://slack.com/api/chat.postMessage" body/.to_json headers)))
@@ -57,7 +61,7 @@
 (println "WebSocket connected!")
 
 # --- Step 3: Send greeting ---
-(slack_send "Hi from Gene")
+(slack_send "Hi from Gene" "")
 (println "Sent: Hi from Gene")
 
 # --- Step 4: Receive loop ---
@@ -115,18 +119,25 @@
   (var text (event .get "text" ""))
   (if (text/.length == 0) (continue))
 
+  # Determine thread: if already in a thread use thread_ts, otherwise
+  # reply to the channel message's ts to start a new thread.
+  (var thread_ts (event .get "thread_ts" ""))
+  (if (thread_ts == "")
+    (thread_ts = (event .get "ts" ""))
+  )
+
   (println #"Message: #{text}")
 
   # Exit on "exit"
   (if (text == "exit")
     (println "Exit requested. Shutting down...")
-    (slack_send "Goodbye from Gene!")
+    (slack_send "Goodbye from Gene!" thread_ts)
     (ws .close)
     (exit 0)
   )
 
-  # Echo back
-  (slack_send #"Received: #{text}")
+  # Echo back in thread
+  (slack_send #"Received: #{text}" thread_ts)
   (println #"Sent: Received: #{text}")
 )
 
