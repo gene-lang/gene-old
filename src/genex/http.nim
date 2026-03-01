@@ -524,6 +524,32 @@ proc init*(vm: ptr VirtualMachine): Namespace {.exportc, dynlib.} =
   fn.native_fn = vm_ws_connect
   result["ws_connect".to_key()] = fn.to_ref_value()
 
+  # Global helper functions (also registered in global_ns by gene_init).
+  # Exposing them here allows (import genex/http/start_server) etc.
+  fn = new_ref(VkNativeFn)
+  fn.native_fn = vm_http_get_helper
+  result["http_get".to_key()] = fn.to_ref_value()
+
+  fn = new_ref(VkNativeFn)
+  fn.native_fn = vm_http_post_helper
+  result["http_post".to_key()] = fn.to_ref_value()
+
+  fn = new_ref(VkNativeFn)
+  fn.native_fn = vm_start_server
+  result["start_server".to_key()] = fn.to_ref_value()
+
+  fn = new_ref(VkNativeFn)
+  fn.native_fn = vm_respond
+  result["respond".to_key()] = fn.to_ref_value()
+
+  fn = new_ref(VkNativeFn)
+  fn.native_fn = vm_respond_sse
+  result["respond_sse".to_key()] = fn.to_ref_value()
+
+  fn = new_ref(VkNativeFn)
+  fn.native_fn = vm_redirect
+  result["redirect".to_key()] = fn.to_ref_value()
+
 proc gene_init*(host: ptr GeneHostAbi): int32 {.cdecl, exportc, dynlib.} =
   if host == nil:
     return int32(GeneExtErr)

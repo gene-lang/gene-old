@@ -571,14 +571,6 @@ proc init_openai_classes*() =
     documents_ns["extract_upload".to_key()] = vm_ai_documents_extract_upload.to_value()
     ai_ns["documents".to_key()] = documents_ns.to_value()
 
-    global_ns["openai_chat".to_key()] = vm_openai_chat.to_value()
-    global_ns["openai_embeddings".to_key()] = vm_openai_embeddings.to_value()
-    global_ns["openai_respond".to_key()] = vm_openai_respond.to_value()
-    global_ns["openai_stream".to_key()] = vm_openai_stream.to_value()
-
-    # Slack Socket Mode
-    global_ns["start_slack_socket_mode".to_key()] = vm_start_slack_socket_mode.to_value()
-
 # Call init function
 init_openai_classes()
 

@@ -24,7 +24,7 @@
 (println "  children=" p/.children)
 
 # More complex example - a quoted if expression
-(var expr `(if (x > 0) "positive" else "non-positive"))
+(var expr `(if (x > 0) then "positive" else "non-positive"))
 (println "If expression:" expr)
 (println "  type    =" expr/.type)       # => if
 (println "  children=" expr/.children)   # => [(x > 0) "positive" ...]
@@ -187,7 +187,7 @@ else
     /y
   )
   (method distance _
-    (sqrt ((/x * /x) + (/y * /y)))
+    (sqrt (/x * /x + /y * /y))
   )
 )
 
@@ -280,11 +280,12 @@ catch *
 
 # Process nested data
 (for item in data
-  (if (item/type == "user")
+  (case item/type
+  when "user"
     (println "User:" item/name)
-  elif (item/type == "post")
+  when "post"
     (println "Post:" item/title)
-  elif (item/type == "comment")
+  when "comment"
     (println "Comment by" item/author)
   )
 )

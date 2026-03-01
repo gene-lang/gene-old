@@ -23,7 +23,6 @@ import ./helpers
 #
 # Root level
 # (var name input)
-# (var _ input)
 #
 # Child level
 # (var [a? b] input) # "a" is optional, if input contains only one item, it'll be

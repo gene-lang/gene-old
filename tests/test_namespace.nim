@@ -177,24 +177,23 @@ test_vm """
   n/test
 """, 1
 
-# String concatenation via ("" ...) pattern not yet implemented in VM
-# test_vm """
-#   (ns n
-#     (.on_member_missing
-#       (fn [name]
-#         ("" /.name "/" name)
-#       )
-#     )
-#   )
-#   n/test
-# """, "n/test"
+test_vm """
+  (ns n
+    (.on_member_missing
+      (fn [name]
+        #"#{/.name}/#{name}"
+      )
+    )
+  )
+  n/test
+""", "n/test"
 
 # Classes and member missing handlers not yet implemented in VM
 # test_vm """
 #   (class C
 #     (.on_member_missing
 #       (fn [name]
-#         ("" /.name "/" name)
+#         #"#{/.name}/#{name}"
 #       )
 #     )
 #   )

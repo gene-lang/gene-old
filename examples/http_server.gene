@@ -1,8 +1,5 @@
 #!/usr/bin/env gene run
 
-# Import all members from genex/http to current namespace
-# (import genex/http/*)
-
 # The main app class
 (class App
 

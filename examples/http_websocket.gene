@@ -1,7 +1,6 @@
 #!/usr/bin/env gene run
 
 (import genex/mysql:DB)
-(import genex/http/*)
 (import genex/html/tags/*)
 
 # Prerequisites:

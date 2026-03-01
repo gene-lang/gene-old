@@ -12,7 +12,7 @@
 # Helpers
 # ============================================================
 (fn json_response [status data]
-  (respond status data/.to_json {^Content-Type "application/json"})
+  (genex/http/respond status data/.to_json {^Content-Type "application/json"})
 )
 
 (fn get_header [req name default_val]
@@ -165,8 +165,8 @@ Endpoints:
   POST /api/chat       - Send message to agent
   POST /slack/events   - Slack Events API webhook (disabled in socket mode)
 """)
-  (start_server PORT handle_request)
-  (start_slack_socket_mode SLACK_APP_TOKEN SLACK_BOT_TOKEN run_agent)
+  (genex/http/start_server PORT handle_request)
+  (genex/ai/start_slack_socket_mode SLACK_APP_TOKEN SLACK_BOT_TOKEN run_agent)
 else
   # Webhook mode: Slack sends events via HTTP POST
   (println
@@ -176,6 +176,6 @@ Endpoints:
   POST /api/chat       - Send message to agent
   POST /slack/events   - Slack Events API webhook
 """)
-  (start_server PORT handle_request)
+  (genex/http/start_server PORT handle_request)
 )
 (run_forever)

@@ -1,6 +1,7 @@
 # GeneClaw Tool Registry
 # Declarative tool registry with policy gate and audit trail
 
+(import genex/http/http_get)
 (import SHELL_ALLOWLIST WORKSPACE_ROOT from "config")
 (import audit_log from "db")
 

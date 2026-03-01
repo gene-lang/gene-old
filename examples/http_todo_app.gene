@@ -5,10 +5,6 @@
 # (import genex/http)
 # (import genex/html/tags/*)
 
-# Note: sqlite and http are already loaded in the VM
-# TODO: Fix wildcard imports - they cause VM issues currently
-# Force-load HTTP extension so start_server/respond/redirect globals are registered.
-(var _http genex/http)
 # Force-load HTML tag helpers so tag symbols (UL, LI, DIV, ...) are available.
 (var _html_tags genex/html/tags)
 
