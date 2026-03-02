@@ -361,4 +361,317 @@ catch *
 (var api (new API "https://api.example.com"))
 (println "API request result:" (api .request "/users"))
 
+# ===== 19. WHILE LOOPS =====
+(var n 0)
+(while (n < 5)
+  (n += 1)
+)
+(println "While loop: n =" n)
+
+# Loop with break value
+(var loop_val (loop
+  (break 42)
+))
+(println "Loop break value:" loop_val)
+
+# ===== 20. DO BLOCKS =====
+# do sequences expressions and returns the last value
+(var do_result (do
+  (var x 10)
+  (var y 20)
+  (x + y)
+))
+(println "Do block result:" do_result)
+
+# Nested do blocks
+(var nested_do (do
+  (var outer 5)
+  (do
+    (var inner 10)
+    (outer + inner)
+  )
+))
+(println "Nested do:" nested_do)
+
+# ===== 21. RESULT & OPTION TYPES =====
+# Ok/Err for Result type
+(var ok_val (Ok 42))
+(var err_val (Err "something went wrong"))
+(println "Ok:" ok_val)
+(println "Err:" err_val)
+
+# Some/None for Option type
+(var some_val (Some "hello"))
+(var none_val None)
+(println "Some:" some_val)
+(println "None:" none_val)
+
+# Functions returning Result
+(fn safe_divide [a b]
+  (if (b == 0)
+    (Err "division by zero")
+  else
+    (Ok (a / b))
+  )
+)
+(println "safe_divide(10, 2) =" (safe_divide 10 2))
+(println "safe_divide(10, 0) =" (safe_divide 10 0))
+
+# ===== 22. TRY-UNWRAP ? OPERATOR =====
+# ? unwraps Ok/Some, or returns early with Err/None
+(fn unwrap_ok []
+  (var val ((Ok 42) ?))
+  (val * 2)
+)
+(println "unwrap_ok:" (unwrap_ok))
+
+(fn early_return_err []
+  (var val ((Err "error") ?))
+  val
+)
+(println "early_return_err:" (early_return_err))
+
+(fn unwrap_some []
+  (var val ((Some "hello") ?))
+  val
+)
+(println "unwrap_some:" (unwrap_some))
+
+# ===== 23. CASE/WHEN PATTERN MATCHING =====
+# Pattern matching on Result/Option types
+(var r (Ok 42))
+(case r
+  when (Ok v)
+    (println "Got Ok:" v)
+  when (Err e)
+    (println "Got Err:" e)
+)
+
+(var opt (Some "world"))
+(case opt
+  when (Some x)
+    (println "Got Some:" x)
+  when None
+    (println "Got None")
+)
+
+# case/when with plain values
+(var day 3)
+(case day
+  when 1 (println "Monday")
+  when 2 (println "Tuesday")
+  when 3 (println "Wednesday")
+  else   (println "Other day")
+)
+
+# case/when as expression (returns a value)
+(var label
+  (case (Ok 10)
+    when (Ok n) (n * 2)
+    when (Err e) -1
+  ))
+(println "case result:" label)
+
+# ===== 24. TYPE CHECKING WITH `is` =====
+(println "42 is Int:" (42 is Int))
+(println "\"hi\" is String:" ("hi" is String))
+(println "true is Bool:" (true is Bool))
+(println "[1] is Array:" ([1] is Array))
+(println "{^a 1} is Map:" ({^a 1} is Map))
+
+# is works with class inheritance
+(class Shape)
+(class Circle < Shape
+  (ctor [radius]
+    (/radius = radius)
+  )
+)
+(var c (new Circle 5))
+(println "c is Circle:" (c is Circle))
+(println "c is Shape:" (c is Shape))    # true - inheritance
+
+# ===== 25. COLLECTION METHODS =====
+# Array methods
+(var nums [1 2 3 4 5])
+(println "Array size:" nums/.size)
+
+(var doubled (nums .map (fn [x] (x * 2))))
+(println "Mapped:" doubled)
+
+(var evens (nums .filter (fn [x] (x % 2 == 0))))
+(println "Filtered:" evens)
+
+(var sum (nums .reduce 0 (fn [acc x] (acc + x))))
+(println "Reduced:" sum)
+
+(nums .each (fn [x] (print x " ")))
+(println "")
+
+# Array mutation
+(var arr2 [1 2])
+(arr2 .add 3)
+(println "After add:" arr2)
+
+# Map higher-order methods
+(var scores {^alice 90 ^bob 85 ^carol 95})
+
+(var boosted (scores .map (fn [k v] (v + 5))))
+(println "Boosted:" boosted)
+
+(var high (scores .filter (fn [k v] (v >= 90))))
+(println "High scores:" high)
+
+(var total_score (scores .reduce 0 (fn [acc k v] (acc + v))))
+(println "Total score:" total_score)
+
+# ===== 26. FUNCTION ARGUMENTS =====
+# Default values
+(fn greet [name = "World"]
+  (println "Hello," name)
+)
+(greet)
+(greet "Gene")
+
+# Rest arguments (variadic)
+(fn sum_all [first rest...]
+  (var total first)
+  (for x in rest
+    (total += x)
+  )
+  total
+)
+(println "sum_all(1):" (sum_all 1))
+(println "sum_all(1 2 3):" (sum_all 1 2 3))
+
+# Keyword arguments
+# ^a     = mandatory keyword arg
+# ^^b    = keyword arg with default value true
+# ^!c    = keyword arg with default value false
+# ^d = 4 = keyword with default value
+(fn kwfn [^a ^^b ^!c ^d = 4]
+  (println "a:" a "b:" b "c:" c "d:" d)
+)
+(kwfn ^a 1)
+(kwfn ^a 1 ^!b ^^c ^d 5)
+
+# ===== 27. REGEX =====
+(var regex #/a/)
+(println "Regex match:" (regex .match "ba"))
+(println "Regex find:" (regex .find "ba"))
+
+# Case-insensitive with flag
+(var ci (new gene/Regexp ^^i "ab"))
+(println "Case insensitive:" (ci .match "AB"))
+
+# Replace all with regex
+(println "Replace:" ("a1b2" .replace_all #/(\d)/ "[\\1]"))
+
+# ===== 28. NAMESPACES =====
+(ns Geometry)
+(class Geometry/Shape2D
+  (method area _ 0)
+)
+(class Geometry/Rect < Geometry/Shape2D
+  (ctor [w h]
+    (/w = w)
+    (/h = h)
+  )
+  (method area _
+    (/w * /h)
+  )
+)
+(var rect (new Geometry/Rect 3 4))
+(println "Rect area:" rect/.area)
+
+# ===== 29. CALLABLE INSTANCES =====
+# A class with a `call` method can be used like a function
+(class Multiplier
+  (ctor [factor]
+    (/factor = factor)
+  )
+  (method call [x]
+    (x * /factor)
+  )
+)
+(var triple (new Multiplier 3))
+(println "Callable instance:" (triple 7))
+
+# ===== 30. .call METHOD ON FUNCTIONS =====
+# Functions have a .call method for indirect invocation
+(fn adder [a b] (a + b))
+(println "adder .call:" (adder .call 3 4))
+
+# Works on native functions too
+(println "gene/now .call:" gene/now/.call)
+
+# ===== 31. nil ASSERTION WITH /! =====
+# /! throws if the value is void (missing) or nil
+(var config {^host "localhost" ^port 8080})
+(println "host:" config/host/!)          # ok - value exists
+
+(try
+  (println config/missing/!)             # throws - key doesn't exist
+catch *
+  (println "Caught: missing key")
+)
+
+(try
+  (var m {^key nil})
+  (println m/key/!)                      # throws - value is nil
+catch *
+  (println "Caught: nil value")
+)
+
+# ===== 32. INFIX CHAINING =====
+# Infix operators can be chained
+(println "1 + 2 * 3 =" (1 + 2 * 3))
+(println "2 * 3 * 4 =" (2 * 3 * 4))
+
+# ===== 33. CONTRACTS =====
+# Preconditions with ^pre
+(fn positive_only [x: Int] -> Int
+  ^pre [(x > 0)]
+  x
+)
+(println "positive_only(3):" (positive_only 3))
+
+(try
+  (positive_only -1)
+catch *
+  (println "Caught: precondition failed")
+)
+
+# Postconditions with ^post
+(fn increment [x: Int] -> Int
+  ^post [(result > x)]
+  (x + 1)
+)
+(println "increment(4):" (increment 4))
+
+# ===== 34. FUNCTION METADATA =====
+# Functions can carry intent and example documentation
+(fn my_add [a b]
+  ^intent "Add two values"
+  ^examples [[1 2] -> 3
+             [2 3] -> 5]
+  (a + b)
+)
+(println "Intent:" (function_intent my_add))
+(println "Examples:" (function_examples my_add))
+
+# ===== 35. ^fields CLASS ANNOTATION =====
+# ^fields declares expected properties with types
+(class Person
+  ^fields {^name String ^age Int}
+  (ctor [name age]
+    (/name = name)
+    (/age = age)
+  )
+  (method greet _
+    (println "Hi, I'm" /name "age" /age)
+  )
+)
+(var person (new Person "Alice" 30))
+(person .greet)
+
 (println "=== ALL SYNTAX PATTERNS DEMONSTRATED ===")

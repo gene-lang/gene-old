@@ -7,3 +7,8 @@
 (repeat 2
   (println "Hello World!")
 )
+
+(repeat 3
+  (println "Hi!")
+  (break)
+)
