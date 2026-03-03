@@ -1,471 +1,218 @@
 #!/usr/bin/env gene run
 # Gene Programming Language - Complete Syntax Reference
+# Organized by major language features.
 
-# ===== THE GENE DATA TYPE (Central to the Language!) =====
-# The Gene data structure is unique and fundamental to the language.
-# It combines THREE components: Type, Properties, and Children
-#
-# Syntax: ( type  ^prop1 val1 ^prop2 val2  child1 child2 ... )
-#          └type┘└─────properties────────┘└──children─────┘
-#
-# Example: (Person ^name "Alice" ^age 30 child1 child2)
-#   - Type: Person
-#   - Properties: {^name "Alice" ^age 30}
-#   - Children: [child1 child2]
+# ============================================================================
+# 1) CORE VALUES, QUOTING, AND THE GENE DATA TYPE
+# ============================================================================
 
-# Create a Gene value using the ` (quote) prefix
-# This prevents evaluation, preserving the structure as data
-(var p
+# Primitives
+(var i 10)
+(var f 3.14)
+(var s "hello")
+(var b true)
+(var nothing NIL)
+(var ch ?A)
+
+# Assignment + augmented assignment
+(i = 20)
+(i += 5)
+(i = (i - 2))
+(i = (i * 2))
+(i = (i / 3))
+
+# Quote preserves structure as data
+(var quoted_expr `(if (x > 0) then "positive" else "non-positive"))
+(println "quoted_expr:" quoted_expr)
+
+# Gene values are: type + props + children
+(var person_gene
   `(Person ^name "Alice" ^age 30
-    child1 child2 (Person ^name "Bob" ^age 25)))
-(println "Gene value:" p)
-(println "  type    =" p/.type)
-(println "  props   =" p/.props)
-(println "  children=" p/.children)
+    (Address ^city "NYC")
+    "extra-child"))
+(println "gene type:" person_gene/.type)
+(println "gene props:" person_gene/.props)
+(println "gene children:" person_gene/.children)
 
-# More complex example - a quoted if expression
-(var expr `(if (x > 0) then "positive" else "non-positive"))
-(println "If expression:" expr)
-(println "  type    =" expr/.type)       # => if
-(println "  children=" expr/.children)   # => [(x > 0) "positive" ...]
+# String interpolation
+(var who "Gene")
+(var greeting #"Hello, #{who}!")
+(println greeting)
 
-# Gene is homoiconic - code IS data
-# This makes metaprogramming natural
+# ============================================================================
+# 2) EXPRESSIONS, OPERATORS, AND CONTROL FLOW
+# ============================================================================
 
-# ===== 1. VARIABLES & ASSIGNMENT =====
-(var x 10)                    # Declaration
-(x = 20)                      # Assignment
-(var name "Gene")             # String
-(var pi 3.14159)              # Float
-(var flag true)               # Boolean
-(var nothing)                 # nil
+# Arithmetic + precedence
+(println "5 + 3 =" (5 + 3))
+(println "2 + 3 * 4 =" (2 + 3 * 4))
+(println "10 % 3 =" (10 % 3))
 
-# ===== 2. FUNCTIONS =====
-# Basic function with no parameters
-(fn hello []
-  (println "Hello from function!")
+# Comparison + boolean logic
+(println "10 > 5 =" (10 > 5))
+(println "10 == 10 =" (10 == 10))
+(println "true && false =" (true && false))
+(println "true || false =" (true || false))
+(println "! true =" (! true))
+
+# if / elif / else
+(if (i > 20)
+  (println "i > 20")
+elif (i == 20)
+  (println "i == 20")
+else
+  (println "i < 20")
 )
 
-# Function with parameters
+# do returns last expression
+(var do_result (do
+  (var a 5)
+  (var b 8)
+  (a + b)
+))
+(println "do_result =" do_result)
+
+# while
+(var n 0)
+(while (n < 3)
+  (n += 1)
+)
+(println "while result n =" n)
+
+# loop + break value
+(var loop_value (loop
+  (break 42)
+))
+(println "loop break value =" loop_value)
+
+# repeat
+(repeat 2
+  (println "repeat body")
+)
+
+# for
+(var sum_for 0)
+(for x in [1 2 3 4]
+  (sum_for += x)
+)
+(println "for sum =" sum_for)
+
+# ============================================================================
+# 3) COLLECTIONS (ARRAY / MAP), ACCESS, AND SPREAD
+# ============================================================================
+
+# Arrays
+(var arr [1 2 3])
+(println "arr =" arr)
+(println "arr/0 =" arr/0)
+(arr/0 = 99)
+(println "arr/0 (updated) =" arr/0)
+
+# Nested arrays
+(var matrix [[1 2] [3 4]])
+(println "matrix/1/0 =" matrix/1/0)
+
+# Array spread
+(var left [1 2])
+(var right [3 4])
+(var both [left... right...])
+(println "spread array =" both)
+
+# Maps (keys must start with ^)
+(var cfg {^host "localhost" ^port 8080 ^ssl false})
+(println "cfg/host =" cfg/host)
+(cfg/port = 9090)
+(println "cfg/port (updated) =" cfg/port)
+
+# Nested maps
+(var nested {^outer {^inner 123}})
+(println "nested/outer/inner =" nested/outer/inner)
+
+# Shortcuts
+(var shortcuts {
+  ^^a
+  ^!b
+  ^c^^d
+  ^c^!e
+  ^c^f 100
+})
+(println "shortcuts/a =" shortcuts/a)
+(println "shortcuts/b =" shortcuts/b)
+(println "shortcuts/c/d =" shortcuts/c/d)
+(println "shortcuts/c/e =" shortcuts/c/e)
+(println "shortcuts/c/f =" shortcuts/c/f)
+
+# /! assertion: throw if missing or nil
+(println "cfg/host/! =" cfg/host/!)
+(try
+  (println cfg/missing/!)
+catch *
+  (println "caught missing key")
+)
+
+# ============================================================================
+# 4) FUNCTIONS, ARGUMENT PATTERNS, AND CALLING FORMS
+# ============================================================================
+
+(fn hello []
+  (println "hello()")
+)
+(hello)
+
 (fn add [a: Int b: Int] -> Int
   (a + b)
 )
+(println "add(2, 3) =" (add 2 3))
 
-# Multi-expression function with return
-(fn calc [x: Int y: Int] -> Int
-  (var sum (x + y))
-  (var product (x * y))
-  (println "Sum:" sum "Product:" product)
-  sum                          # Returns last expression
+# Defaults
+(fn greet [name = "World"]
+  (println #"Hello, #{name}")
 )
+(greet)
+(greet "Team")
 
-# Recursive function
-(fn factorial [n: Int] -> Int
-  (if (n <= 1)
-    1
-  else
-    (n * (factorial (n - 1)))
+# Variadic/rest args
+(fn sum_all [first rest...]
+  (var total first)
+  (for x in rest
+    (total += x)
   )
+  total
 )
+(println "sum_all(1,2,3,4) =" (sum_all 1 2 3 4))
 
-# ===== 3. CONTROL FLOW =====
-# Basic if
-(if true
-  (println "If works")
+# Keyword args
+(fn kwdemo [^a ^^b ^!c ^d = 4]
+  [a b c d]
 )
+(println "kwdemo #1 =" (kwdemo ^a 1))
+(println "kwdemo #2 =" (kwdemo ^a 1 ^!b ^^c ^d 7))
 
-# If-else
-(if (x > 5)
-  (println "x is greater than 5")
-elif (x == 5)
-  (println "x is equal to 5")
-else
-  (println "x is less than 5")
-)
+# Anonymous function
+(var double (fn [x] (x * 2)))
+(println "double(5) =" (double 5))
 
-# Nested if with complex conditions
-(var a 5)
-(var b 10)
-(if ((a < b) && (b > 0))
-  (println "Both conditions are true")
-)
+# Function .call
+(fn adder [x y] (x + y))
+(println "adder.call(3,4) =" (adder .call 3 4))
 
-# Loop with break
-(var count 0)
-(loop
-  (count += 1)
-  (if (count >= 3)
-    (break)
-  )
-)
+# ============================================================================
+# 5) PATTERN BINDING AND CASE/WHEN MATCHING
+# ============================================================================
 
-(repeat 2
-  (println "Repeating")
-)
+# Destructuring arrays
+(var [x y] [10 20])
+(println "destructured x,y =" x y)
 
-# ===== 4. DATA STRUCTURES =====
-# Arrays
-(var arr [1 2 3 4 5])
-(println "Array:" arr)
-(println "First element:" arr/0)
-(println "Last element:" arr/4)
+# Destructuring with defaults/rest + property extraction
+(var payload `(payload ^a 10 ^x 99 20 30 40))
+(var [^a ^extra... first rest...] payload)
+(println "payload a =" a)
+(println "payload first child =" first)
+(println "payload rest =" rest)
+(println "payload extra/x =" extra/x)
 
-# Array modification
-(arr/0 = 10)
-(println "Modified first element:" arr/0)
-
-# Mixed type array
-(var mixed [1 "hello" true])
-
-# Nested arrays
-(var nested [[1 2] [3 4]])
-(println "nested/0/0 =" nested/0/0)
-
-# Array spread
-(var a [1 2])
-(var b [3 4])
-(var combined [a... b...])
-
-# Empty array
-(var empty [])
-
-# Maps (keyword keys with ^ prefix)
-(var m {^a 1 ^b 2 ^c 3})
-(println "Map:" m)
-(println "m/a =" m/a)
-
-# Map modification
-(m/a = 10)
-(println "Modified m/a =" m/a)
-
-# Mixed value types
-(var mixed_map {^num 42 ^str "hello" ^bool true})
-
-# Nested maps
-(var nested_map {^outer {^inner 123}})
-(println "nested/outer/inner =" nested_map/outer/inner)
-
-# Empty map
-(var empty_map {})
-(empty_map/new = "value")
-
-# ===== 5. ARITHMETIC & LOGIC =====
-# Arithmetic operators
-(println "5 + 3 =" (5 + 3))
-(println "10 - 4 =" (10 - 4))
-(println "6 * 7 =" (6 * 7))
-(println "15 / 3 =" (15 / 3))
-(println "10 % 3 =" (10 % 3))
-(println "2 + 3 * 4 =" (2 + 3 * 4))  # Operator precedence
-
-# Comparison operators
-(println "10 > 5 =" (10 > 5))
-(println "10 <= 10 =" (10 <= 10))
-(println "x == 20 =" (x == 20))
-(println "x != 5 =" (x != 5))
-
-# Boolean operators
-(println "true && false =" (true && false))
-(println "true || false =" (true || false))
-(println "1 && 2 && 3 =" (1 && 2 && 3))
-(println "1 || 2 && 3 =" (1 || 2 && 3))
-(println "1 && 2 || 3 =" (1 && 2 || 3))
-(println "! true =" (! true))
-
-# ===== 6. STRINGS =====
-(var s "Hello, Gene!")
-(println "String length:" s/.length)  # s/.length = (s .length)
-(println "Uppercase:" s/.to_upper)
-(println "String to int:" ("42" .to_i))
-(println "String to int with spaces:" ("  -7  " .to_i))
-(println "String append:" ("hello" .append " world"))
-
-# ===== 7. CLASSES & OOP =====
-# Basic class with constructor
-(class Point
-  (ctor [x: Int y: Int]
-    (/x = x)      # Use / for property access in constructor
-    (/y = y)      # /y = self/y
-  )
-  (method get_x _
-    /x
-  )
-  (method get_y _
-    /y
-  )
-  (method distance _
-    (sqrt (/x * /x + /y * /y))
-  )
-)
-
-# Class instantiation and method calls
-(var p (new Point 3 4))
-(println "Point x:" p/.get_x)
-(println "Point y:" p/.get_y)
-(println "Distance from origin:" p/.distance)
-
-# Class with inheritance
-(class Animal)
-(class Dog < Animal)
-
-# Nested class
-(class Outer
-  (ctor [data: Any]
-    (/data = data)
-  )
-  (class Inner        # Outer is like a namespace
-    (method get_data _
-      Outer/data
-    )
-  )
-)
-
-# Class with macro constructor (receives unevaluated symbols)
-(class LazyPoint
-  (ctor! [x: Any y: Any]
-    (/x = x)      # x and y are unevaluated arguments
-    (/y = y)
-  )
-  (method get_x _
-    /x
-  )
-)
-
-# ===== 8. EXCEPTION HANDLING =====
-(try
-  (1 / 0)
-catch *
-  (println "Caught division by zero error:" $ex)  # $ex is the exception object
-)
-
-# (try
-#   ("abc" .to_i)
-# catch *
-#   (println "Conversion failed")
-# )
-
-# ===== 9. ASYNC PROGRAMMING =====
-(var result (await (async 42)))
-
-(fn read_file [filename: String] -> Any
-  (gene/io/read_async filename)
-)
-
-(var sum_result (await (read_file "tests/fixtures/test.txt")))
-
-# ===== 10. FUNCTIONAL PROGRAMMING =====
-# Lambda/anonymous function
-(var double (fn [x: Int] -> Int (x * 2)))
-(println "Double 5:" (double 5))
-
-# Function composition
-(fn quadruple [x: Int] -> Int
-  (double (double x))
-)
-(println "Quadruple 3:" (quadruple 3))
-
-# ===== 11. SYMBOLS & KEYWORDS =====
-(var status `success)   # `success = (quote success)
-(var error `error)
-(println "Status == `success:" (status == `success))
-
-# ===== 12. MACROS & METAPROGRAMMING =====
-# Macro-like function with unevaluated arguments
-(fn debug! [expr]
-  (println "DEBUG:" expr)
-  ($caller_eval expr)  # Evaluate the expression in the caller's context.
-)
-
-(debug! (5 + 3))                # Prints "DEBUG: (5 + 3)", returns 8
-
-(var a 2)
-(debug! (a + 1))
-
-# ===== 13. COMPLEX NESTED STRUCTURES =====
-(var data =
-  [{^type "user" ^id 123 ^name "Alice" ^verified true}
-   {^type "post" ^id 456 ^title "Introduction" ^comments 5}
-   {^type "comment" ^id 789 ^author "Bob" ^text "Great post!"}]
-)
-
-# Process nested data
-(for item in data
-  (case item/type
-  when "user"
-    (println "User:" item/name)
-  when "post"
-    (println "Post:" item/title)
-  when "comment"
-    (println "Comment by" item/author)
-  )
-)
-
-# ===== 14. IO OPERATIONS =====
-(print "Basic print...")
-(println "With newline")
-
-# Environment variables
-(println "HOME:" $env/HOME)
-(println "Program:" $program)
-
-# ===== 15. COLLECTION PROCESSING =====
-(var items =
-  [{^name "apple" ^price 0.5 ^quantity 10}
-   {^name "banana" ^price 0.3 ^quantity 5}])
-
-(var total 0)
-(for item in items
-  (var cost (item/price * item/quantity))
-  (total += cost)
-  (println item/name ": $" cost)
-)
-(println "Total cost:" total)
-
-# ===== 16. COMPREHENSIVE CLASS EXAMPLE =====
-(class Calculator
-  (ctor []
-    (/memory = {})
-  )
-  (method store [key: String value: Any]
-    (/memory/key = value)
-  )
-  (method recall [key: String] -> Any
-    /memory/key
-  )
-  (method add [x: Int y: Int] -> Int
-    (var result (x + y))
-    (.store "last" result)
-    result
-  )
-)
-
-(var calc (new Calculator))
-(println "Calculator add 5 + 3:" (calc .add 5 3))
-(calc .store "pi" 3.14159)
-(println "Calculator recall pi:" (calc .recall "pi"))
-(println "Calculator recall last:" (calc .recall "last"))
-
-# ===== 17. METHOD CALLS AND ACCESSORS =====
-# Different method call forms
-(calc .add 1 2)               # Method call with explicit receiver
-(calc/value = 0)              # Property access and assignment
-
-# ===== 18. FINAL COMPLEX EXAMPLE =====
-(class API
-  (ctor [base_url: String]
-    (/url = base_url)
-    (/cache = {})
-  )
-  (method request [endpoint: String] -> String
-    (var cached = /cache/endpoint)
-    (if cached
-      cached
-    else
-      (var result (/url .append endpoint))
-      (/cache/endpoint = result)
-      result
-    )
-  )
-)
-
-(var api (new API "https://api.example.com"))
-(println "API request result:" (api .request "/users"))
-
-# ===== 19. WHILE LOOPS =====
-(var n 0)
-(while (n < 5)
-  (n += 1)
-)
-(println "While loop: n =" n)
-
-# Loop with break value
-(var loop_val (loop
-  (break 42)
-))
-(println "Loop break value:" loop_val)
-
-# ===== 20. DO BLOCKS =====
-# do sequences expressions and returns the last value
-(var do_result (do
-  (var x 10)
-  (var y 20)
-  (x + y)
-))
-(println "Do block result:" do_result)
-
-# Nested do blocks
-(var nested_do (do
-  (var outer 5)
-  (do
-    (var inner 10)
-    (outer + inner)
-  )
-))
-(println "Nested do:" nested_do)
-
-# ===== 21. RESULT & OPTION TYPES =====
-# Ok/Err for Result type
-(var ok_val (Ok 42))
-(var err_val (Err "something went wrong"))
-(println "Ok:" ok_val)
-(println "Err:" err_val)
-
-# Some/None for Option type
-(var some_val (Some "hello"))
-(var none_val None)
-(println "Some:" some_val)
-(println "None:" none_val)
-
-# Functions returning Result
-(fn safe_divide [a b]
-  (if (b == 0)
-    (Err "division by zero")
-  else
-    (Ok (a / b))
-  )
-)
-(println "safe_divide(10, 2) =" (safe_divide 10 2))
-(println "safe_divide(10, 0) =" (safe_divide 10 0))
-
-# ===== 22. TRY-UNWRAP ? OPERATOR =====
-# ? unwraps Ok/Some, or returns early with Err/None
-(fn unwrap_ok []
-  (var val ((Ok 42) ?))
-  (val * 2)
-)
-(println "unwrap_ok:" (unwrap_ok))
-
-(fn early_return_err []
-  (var val ((Err "error") ?))
-  val
-)
-(println "early_return_err:" (early_return_err))
-
-(fn unwrap_some []
-  (var val ((Some "hello") ?))
-  val
-)
-(println "unwrap_some:" (unwrap_some))
-
-# ===== 23. CASE/WHEN PATTERN MATCHING =====
-# Pattern matching on Result/Option types
-(var r (Ok 42))
-(case r
-  when (Ok v)
-    (println "Got Ok:" v)
-  when (Err e)
-    (println "Got Err:" e)
-)
-
-(var opt (Some "world"))
-(case opt
-  when (Some x)
-    (println "Got Some:" x)
-  when None
-    (println "Got None")
-)
-
-# case/when with plain values
+# case with literals
 (var day 3)
 (case day
   when 1 (println "Monday")
@@ -474,127 +221,65 @@ catch *
   else   (println "Other day")
 )
 
-# case/when as expression (returns a value)
-(var label
-  (case (Ok 10)
-    when (Ok n) (n * 2)
-    when (Err e) -1
-  ))
-(println "case result:" label)
+# case with Result-like patterns
+(var r (Ok 42))
+(case r
+  when (Ok v)
+    (println "Got Ok:" v)
+  when (Err e)
+    (println "Got Err:" e)
+)
 
-# ===== 24. TYPE CHECKING WITH `is` =====
-(println "42 is Int:" (42 is Int))
-(println "\"hi\" is String:" ("hi" is String))
-(println "true is Bool:" (true is Bool))
-(println "[1] is Array:" ([1] is Array))
-(println "{^a 1} is Map:" ({^a 1} is Map))
+# ============================================================================
+# 6) CLASSES, OBJECTS, INHERITANCE, AND SUPER
+# ============================================================================
 
-# is works with class inheritance
-(class Shape)
-(class Circle < Shape
-  (ctor [radius]
-    (/radius = radius)
+(class Point
+  (ctor [x y]
+    (/x = x)
+    (/y = y)
+  )
+  (method get_x _ /x)
+  (method get_y _ /y)
+  (method sum _ (/x + /y))
+)
+
+(var p (new Point 3 4))
+(println "Point x,y,sum =" p/.get_x p/.get_y p/.sum)
+
+# Inheritance + super
+(class BaseCounter
+  (ctor [start]
+    (/value = start)
+  )
+  (method add [n]
+    (/value = (/value + n))
+    /value
   )
 )
-(var c (new Circle 5))
-(println "c is Circle:" (c is Circle))
-(println "c is Shape:" (c is Shape))    # true - inheritance
 
-# ===== 25. COLLECTION METHODS =====
-# Array methods
-(var nums [1 2 3 4 5])
-(println "Array size:" nums/.size)
-
-(var doubled (nums .map (fn [x] (x * 2))))
-(println "Mapped:" doubled)
-
-(var evens (nums .filter (fn [x] (x % 2 == 0))))
-(println "Filtered:" evens)
-
-(var sum (nums .reduce 0 (fn [acc x] (acc + x))))
-(println "Reduced:" sum)
-
-(nums .each (fn [x] (print x " ")))
-(println "")
-
-# Array mutation
-(var arr2 [1 2])
-(arr2 .add 3)
-(println "After add:" arr2)
-
-# Map higher-order methods
-(var scores {^alice 90 ^bob 85 ^carol 95})
-
-(var boosted (scores .map (fn [k v] (v + 5))))
-(println "Boosted:" boosted)
-
-(var high (scores .filter (fn [k v] (v >= 90))))
-(println "High scores:" high)
-
-(var total_score (scores .reduce 0 (fn [acc k v] (acc + v))))
-(println "Total score:" total_score)
-
-# ===== 26. FUNCTION ARGUMENTS =====
-# Default values
-(fn greet [name = "World"]
-  (println "Hello," name)
-)
-(greet)
-(greet "Gene")
-
-# Rest arguments (variadic)
-(fn sum_all [first rest...]
-  (var total first)
-  (for x in rest
-    (total += x)
+(class FastCounter < BaseCounter
+  (ctor [start]
+    (super .ctor start)
   )
-  total
-)
-(println "sum_all(1):" (sum_all 1))
-(println "sum_all(1 2 3):" (sum_all 1 2 3))
-
-# Keyword arguments
-# ^a     = mandatory keyword arg
-# ^^b    = keyword arg with default value true
-# ^!c    = keyword arg with default value false
-# ^d = 4 = keyword with default value
-(fn kwfn [^a ^^b ^!c ^d = 4]
-  (println "a:" a "b:" b "c:" c "d:" d)
-)
-(kwfn ^a 1)
-(kwfn ^a 1 ^!b ^^c ^d 5)
-
-# ===== 27. REGEX =====
-(var regex #/a/)
-(println "Regex match:" (regex .match "ba"))
-(println "Regex find:" (regex .find "ba"))
-
-# Case-insensitive with flag
-(var ci (new gene/Regexp ^^i "ab"))
-(println "Case insensitive:" (ci .match "AB"))
-
-# Replace all with regex
-(println "Replace:" ("a1b2" .replace_all #/(\d)/ "[\\1]"))
-
-# ===== 28. NAMESPACES =====
-(ns Geometry)
-(class Geometry/Shape2D
-  (method area _ 0)
-)
-(class Geometry/Rect < Geometry/Shape2D
-  (ctor [w h]
-    (/w = w)
-    (/h = h)
-  )
-  (method area _
-    (/w * /h)
+  (method add [n]
+    (super .add (n * 2))
   )
 )
-(var rect (new Geometry/Rect 3 4))
-(println "Rect area:" rect/.area)
 
-# ===== 29. CALLABLE INSTANCES =====
-# A class with a `call` method can be used like a function
+(var fc (new FastCounter 10))
+(println "FastCounter add(3) =" (fc .add 3))
+
+# Macro constructor (unevaluated args)
+(class LazyBox
+  (ctor! [expr]
+    (/raw = expr)
+  )
+)
+(var lb (new! LazyBox (+ 1 2)))
+(println "LazyBox raw expr =" lb/raw)
+
+# Callable instances via method call
 (class Multiplier
   (ctor [factor]
     (/factor = factor)
@@ -603,85 +288,218 @@ catch *
     (x * /factor)
   )
 )
-(var triple (new Multiplier 3))
-(println "Callable instance:" (triple 7))
+(var times3 (new Multiplier 3))
+(println "callable instance result =" (times3 7))
 
-# ===== 30. .call METHOD ON FUNCTIONS =====
-# Functions have a .call method for indirect invocation
-(fn adder [a b] (a + b))
-(println "adder .call:" (adder .call 3 4))
-
-# Works on native functions too
-(println "gene/now .call:" gene/now/.call)
-
-# ===== 31. nil ASSERTION WITH /! =====
-# /! throws if the value is void (missing) or nil
-(var config {^host "localhost" ^port 8080})
-(println "host:" config/host/!)          # ok - value exists
-
-(try
-  (println config/missing/!)             # throws - key doesn't exist
-catch *
-  (println "Caught: missing key")
-)
-
-(try
-  (var m {^key nil})
-  (println m/key/!)                      # throws - value is nil
-catch *
-  (println "Caught: nil value")
-)
-
-# ===== 32. INFIX CHAINING =====
-# Infix operators can be chained
-(println "1 + 2 * 3 =" (1 + 2 * 3))
-(println "2 * 3 * 4 =" (2 * 3 * 4))
-
-# ===== 33. CONTRACTS =====
-# Preconditions with ^pre
-(fn positive_only [x: Int] -> Int
-  ^pre [(x > 0)]
-  x
-)
-(println "positive_only(3):" (positive_only 3))
-
-(try
-  (positive_only -1)
-catch *
-  (println "Caught: precondition failed")
-)
-
-# Postconditions with ^post
-(fn increment [x: Int] -> Int
-  ^post [(result > x)]
-  (x + 1)
-)
-(println "increment(4):" (increment 4))
-
-# ===== 34. FUNCTION METADATA =====
-# Functions can carry intent and example documentation
-(fn my_add [a b]
-  ^intent "Add two values"
-  ^examples [[1 2] -> 3
-             [2 3] -> 5]
-  (a + b)
-)
-(println "Intent:" (function_intent my_add))
-(println "Examples:" (function_examples my_add))
-
-# ===== 35. ^fields CLASS ANNOTATION =====
-# ^fields declares expected properties with types
+# Class fields metadata
 (class Person
   ^fields {^name String ^age Int}
   (ctor [name age]
     (/name = name)
     (/age = age)
   )
-  (method greet _
-    (println "Hi, I'm" /name "age" /age)
-  )
 )
 (var person (new Person "Alice" 30))
-(person .greet)
+(println "Person name/age =" person/name person/age)
 
-(println "=== ALL SYNTAX PATTERNS DEMONSTRATED ===")
+# ============================================================================
+# 7) NAMESPACES, PATHS, AND on_member_missing
+# ============================================================================
+
+(ns Geometry
+  (class /Shape2D
+    (method area _ 0)
+  )
+
+  (class /Rect < Shape2D
+    (ctor [w h]
+      (/w = w)
+      (/h = h)
+    )
+    (method area _
+      (/w * /h)
+    )
+  )
+)
+
+(var rect (new Geometry/Rect 3 4))
+(println "Geometry/Rect area =" rect/.area)
+
+# Namespace-level dynamic member resolution
+(ns Dynamic
+  (.on_member_missing
+    (fn [name]
+      #"Dynamic/#{name}"
+    )
+  )
+)
+(println "Dynamic/foo =" Dynamic/foo)
+
+# ============================================================================
+# 8) MODULE IMPORTS
+# ============================================================================
+
+# Import from a file module
+(import a b from "tests/fixtures/mod1")
+(println "imported a+b =" (a + b))
+
+# Import with alias
+(import n/f:mod_fn from "tests/fixtures/mod1")
+(println "aliased import call =" (mod_fn 123))
+
+# Nested import group
+(import n/[one:x two:y] from "tests/fixtures/mod1")
+(println "group import x+y =" (x + y))
+
+# ============================================================================
+# 9) EXCEPTIONS, CONTRACTS, AND TYPE CHECKS
+# ============================================================================
+
+(try
+  (1 / 0)
+catch *
+  (println "Caught division error:" $ex)
+)
+
+# Preconditions / postconditions
+(fn positive_only [x: Int] -> Int
+  ^pre [(x > 0)]
+  x
+)
+(println "positive_only(3) =" (positive_only 3))
+(try
+  (positive_only -1)
+catch *
+  (println "Caught precondition failure")
+)
+
+(fn increment [x: Int] -> Int
+  ^post [(result > x)]
+  (x + 1)
+)
+(println "increment(10) =" (increment 10))
+
+# is type checks
+(println "42 is Int =" (42 is Int))
+(println "\"hi\" is String =" ("hi" is String))
+(println "[1] is Array =" ([1] is Array))
+(println "{^a 1} is Map =" ({^a 1} is Map))
+(println "person is Person =" (person is Person))
+
+# ============================================================================
+# 10) MACRO-LIKE FUNCTIONS AND CALLER EVAL
+# ============================================================================
+
+(fn debug! [expr]
+  (println "DEBUG expr:" expr)
+  ($caller_eval expr)
+)
+
+(var dbg_x 2)
+(println "debug! result #1 =" (debug! (5 + 3)))
+(println "debug! result #2 =" (debug! (dbg_x + 10)))
+
+# ============================================================================
+# 11) ASYNC, FUTURES, AND THREAD RETURN VALUES
+# ============================================================================
+
+# async/await
+(var async_value (await (async 42)))
+(println "await(async 42) =" async_value)
+
+# Async file I/O
+(var text (await (gene/io/read_async "tests/fixtures/test.txt")))
+(println "read_async length =" text/.length)
+
+# spawn_return + await
+(var thread_sum (await (spawn_return (+ 100 23))))
+(println "spawn_return result =" thread_sum)
+
+# ============================================================================
+# 12) GENERATORS
+# ============================================================================
+
+(fn counter* [n]
+  (var i 0)
+  (while (i < n)
+    (yield i)
+    (i += 1)
+  )
+)
+
+(var gen (counter* 3))
+(println "counter nexts =" [gen/.next gen/.next gen/.next gen/.next])
+
+# Anonymous generator function
+(var make_squares
+  (fn ^^generator [max]
+    (var i 0)
+    (while (i < max)
+      (yield (i * i))
+      (i += 1)
+    )
+  )
+)
+(var squares (make_squares 4))
+(println "square nexts =" [squares/.next squares/.next squares/.next squares/.next squares/.next])
+
+# ============================================================================
+# 13) OPTION/RESULT, ?, ENUMS, REGEX, AND COLLECTION METHODS
+# ============================================================================
+
+# Option / Result
+(var ok_val (Ok 42))
+(var err_val (Err "bad"))
+(var some_val (Some "hello"))
+(var none_val None)
+(println "Ok/Err/Some/None =" ok_val err_val some_val none_val)
+
+# ? early-return operator
+(fn unwrap_ok []
+  (var v ((Ok 7) ?))
+  (v * 3)
+)
+(println "unwrap_ok() =" (unwrap_ok))
+
+# Enum declaration
+(enum Color red green blue)
+(println "enum member =" Color/red)
+
+# Regex
+(var re #/(\d+)/)
+(println "regex match =" (re .match "abc123"))
+(println "replace_all =" ("a1b2" .replace_all #/(\d)/ "[\\1]"))
+
+# Collection methods
+(var nums [1 2 3 4 5])
+(println "nums.size =" nums/.size)
+(println "nums.map =" (nums .map (fn [x] (x * 2))))
+(println "nums.filter =" (nums .filter (fn [x] (x % 2 == 0))))
+(println "nums.reduce =" (nums .reduce 0 (fn [acc x] (acc + x))))
+
+(var scores {^alice 90 ^bob 85 ^carol 95})
+(println "map.filter =" (scores .filter (fn [k v] (v >= 90))))
+
+# ============================================================================
+# 14) FUNCTION METADATA
+# ============================================================================
+
+(fn my_add [a b]
+  ^intent "Add two values"
+  ^examples [[1 2] -> 3
+             [2 3] -> 5]
+  (a + b)
+)
+(println "function_intent =" (function_intent my_add))
+(println "function_examples =" (function_examples my_add))
+
+# ============================================================================
+# 15) ENV HELPERS / SPECIAL VARIABLES
+# ============================================================================
+
+(println "HOME from $env =" $env/HOME)
+(println "Missing env from $env =" ($env/MISSING || "not found"))
+(println "$program =" $program)
+(println "$args =" $args)
+
+(println "=== FULL FEATURE REFERENCE COMPLETE ===")
