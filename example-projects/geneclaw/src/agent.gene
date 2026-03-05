@@ -1,11 +1,12 @@
 # GeneClaw Agent Orchestrator
-# Native OpenAI tool calling: structured tool specs, no text-based JSON parsing
+# Provider-agnostic tool calling: provider translation lives in llm_provider.gene
 
-(import OPENAI_API_KEY OPENAI_MODEL OPENAI_BASE_URL OPENAI_TIMEOUT_MS MAX_STEPS MAX_TOOL_CALLS from "config")
+(import MAX_STEPS MAX_TOOL_CALLS from "config")
 (import memory_append memory_recent from "db")
 (import run_create run_complete from "db")
 (import invoke_tool build_tools_spec from "tools")
 (import is_paused check_pause_timeout get_pause_status from "hotswap_state")
+(import call_llm from "llm_provider")
 
 (var log (new genex/logging/Logger $ns))
 (var RUN_COUNTER 0)
@@ -13,95 +14,6 @@
 (fn make_run_id []
   (RUN_COUNTER += 1)
   #"run-#{RUN_COUNTER}"
-)
-
-(fn build_messages [history user_text]
-  (var messages [])
-
-  # System prompt - no tool listing needed, OpenAI handles that natively
-  (var system_text "You are GeneClaw, a capable AI agent. You can use tools to complete tasks. After receiving a tool result, provide a natural response. For general conversation, respond normally without tool calls.")
-
-  (messages .append {^role "system" ^content system_text})
-
-  # Conversation history
-  (history .each (fn [entry]
-    (var msg {^role entry/role ^content (entry/content || "")})
-    (if (entry/role == "assistant")
-      (if entry/tool_calls
-        (msg .set "tool_calls" entry/tool_calls)
-      )
-    elif (entry/role == "tool")
-      (if entry/tool_call_id
-        (msg .set "tool_call_id" entry/tool_call_id)
-      )
-    )
-    (messages .append msg)
-  ))
-
-  # Current user message
-  (messages .append {^role "user" ^content user_text})
-
-  # Log full content sent to LLM
-  (log .info #"Built #{messages/.size} messages (#{history/.size} history + system + user)")
-  (var msg_idx 0)
-  (messages .each (fn [msg]
-    (log .info #"--- Message #{msg_idx} [#{msg/role}] ---")
-    (log .info msg/content)
-    (msg_idx += 1)
-  ))
-  (log .info "--- End of messages ---")
-  messages
-)
-
-(fn call_llm [messages tools_spec]
-  # Call OpenAI-compatible API with native tool calling
-  (if OPENAI_API_KEY/.empty
-    # Mock mode
-    (log .info "LLM call skipped (mock mode - no API key)")
-    (return {^content "I received your message. (Running in mock mode - set OPENAI_API_KEY to enable LLM)" ^tool_calls []})
-  )
-
-  (if genex/ai
-    (try
-      (log .info #"Calling LLM model=#{OPENAI_MODEL} messages=#{messages/.size} tools=#{tools_spec/.size} timeout_ms=#{OPENAI_TIMEOUT_MS}")
-      (var start_ms gene/now/.call/.to_i)
-      (var client_opts {^api_key OPENAI_API_KEY ^model OPENAI_MODEL ^timeout_ms OPENAI_TIMEOUT_MS})
-      (if_not OPENAI_BASE_URL/.empty
-        (client_opts .set "base_url" OPENAI_BASE_URL)
-      )
-      (var client (new OpenAIClient client_opts))
-      (var response (client .chat {^messages messages ^tools tools_spec}))
-      (log .debug "LLM chat returned")
-      (var duration (gene/now/.call/.to_i - start_ms))
-      (if response
-        # OpenAI bindings return an OpenAIError instance on transport/API failures.
-        (var error_message response/message)
-        (if error_message
-          (log .error #"LLM call failed: #{error_message}")
-          (return {^content #"LLM error: #{error_message}" ^tool_calls []})
-        )
-        (var choices (try (response .get "choices" []) catch * []))
-        (if (choices/.size > 0)
-          (var first_choice choices/0)
-          (var msg first_choice/message)
-          (var content ((msg .get "content" "") .to_s))
-          (var tool_calls (msg .get "tool_calls" []))
-          (if_not tool_calls (tool_calls = []))
-          (log .info #"LLM responded in #{duration}ms content_len=#{content/.size} tool_calls=#{tool_calls/.size}")
-          (log .trace #"LLM response: #{content}")
-          (return {^content content ^tool_calls tool_calls})
-        )
-      )
-      (log .warn #"LLM returned empty response after #{duration}ms")
-      {^content "I could not generate a response." ^tool_calls []}
-    catch *
-      (log .error #"LLM call failed: #{$ex/message}")
-      {^content #"LLM error: #{$ex/message}" ^tool_calls []}
-    )
-  else
-    (log .error "genex/ai module unavailable")
-    {^content "genex/ai module unavailable." ^tool_calls []}
-  )
 )
 
 # --- Main agent run ---
@@ -150,9 +62,8 @@
     (step += 1)
     (log .info #"#{run_id} step #{step}/#{MAX_STEPS}")
 
-    # Build messages and call LLM with native tools
-    (var messages (build_messages history text))
-    (var result (call_llm messages tools_spec))
+    # Build provider request and call the selected LLM provider
+    (var result (call_llm history text tools_spec))
     (var content result/content)
     (var tool_calls result/tool_calls)
 

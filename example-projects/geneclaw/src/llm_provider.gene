@@ -1,0 +1,291 @@
+# GeneClaw LLM provider adapters
+# Translates the internal agent format to provider-specific request/response shapes.
+
+(import LLM_PROVIDER OPENAI_API_KEY OPENAI_MODEL OPENAI_BASE_URL OPENAI_TIMEOUT_MS from "config")
+(import ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL ANTHROPIC_BASE_URL ANTHROPIC_TIMEOUT_MS from "config")
+
+(var log (new genex/logging/Logger $ns))
+
+(var SYSTEM_PROMPT "You are GeneClaw, a capable AI agent. You can use tools to complete tasks. After receiving a tool result, provide a natural response. For general conversation, respond normally without tool calls.")
+
+(fn ensure_array [value]
+  (if (value is Array) value else [])
+)
+
+(fn ensure_map [value]
+  (if (value is Map) value else {})
+)
+
+(fn parse_tool_arguments [args_json]
+  (var parsed (try (gene/json/parse (args_json || "{}")) catch * nil))
+  (if (parsed is Map) parsed else {})
+)
+
+(fn log_openai_messages [messages history]
+  (log .info #"Built OpenAI request messages=#{messages/.size} (#{history/.size} history + system + user)")
+  (var msg_idx 0)
+  (messages .each (fn [msg]
+    (log .info #"--- Message #{msg_idx} [#{msg/role}] ---")
+    (log .info (msg/content || ""))
+    (msg_idx += 1)
+  ))
+  (log .info "--- End of messages ---")
+)
+
+(fn log_anthropic_request [request history]
+  (log .info #"Built Anthropic request messages=#{request/messages/.size} tools=#{request/tools/.size} (#{history/.size} history + user, system separate)")
+  (log .info "--- System ---")
+  (log .info request/system)
+  (var msg_idx 0)
+  (request/messages .each (fn [msg]
+    (log .info #"--- Message #{msg_idx} [#{msg/role}] ---")
+    (log .info msg/.to_json)
+    (msg_idx += 1)
+  ))
+  (log .info "--- End of messages ---")
+)
+
+(fn $ns/build_openai_request [history user_text tools_spec]
+  (var messages [])
+  (messages .append {^role "system" ^content SYSTEM_PROMPT})
+
+  (history .each (fn [entry]
+    (var msg {^role entry/role ^content (entry/content || "")})
+    (if (entry/role == "assistant")
+      (if entry/tool_calls
+        (msg .set "tool_calls" entry/tool_calls)
+      )
+    elif (entry/role == "tool")
+      (if entry/tool_call_id
+        (msg .set "tool_call_id" entry/tool_call_id)
+      )
+    )
+    (messages .append msg)
+  ))
+
+  (messages .append {^role "user" ^content user_text})
+  (log_openai_messages messages history)
+  {^messages messages ^tools tools_spec}
+)
+
+(fn anthropic_tool_from_openai [tool_spec]
+  (var fn_def (ensure_map (tool_spec/function || {})))
+  {^name (fn_def/name || "")
+   ^description (fn_def/description || "")
+   ^input_schema (fn_def/parameters || {^type "object" ^properties {} ^required []})}
+)
+
+(fn anthropic_tool_use_from_call [tool_call]
+  (var fn_info (ensure_map (tool_call/function || {})))
+  {^type "tool_use"
+   ^id (tool_call/id || "")
+   ^name (fn_info/name || "")
+   ^input (parse_tool_arguments (fn_info/arguments || "{}"))}
+)
+
+(fn anthropic_tool_result_from_history [entry]
+  {^type "tool_result"
+   ^tool_use_id (entry/tool_call_id || "")
+   ^content (entry/content || "")}
+)
+
+(fn build_anthropic_messages [history user_text]
+  (var messages [])
+  (var pending_tool_results [])
+
+  (history .each (fn [entry]
+    (if (entry/role == "tool")
+      (do
+        (var tool_use_id (entry/tool_call_id || ""))
+        (if_not tool_use_id/.empty
+          (pending_tool_results .append (anthropic_tool_result_from_history entry))
+        )
+      )
+    else
+      (do
+        (if (pending_tool_results/.size > 0)
+          (messages .append {^role "user" ^content pending_tool_results})
+          (pending_tool_results = [])
+        )
+
+        (var blocks [])
+        (var text (entry/content || ""))
+        (if_not text/.empty
+          (blocks .append {^type "text" ^text text})
+        )
+
+        (if (entry/role == "assistant")
+          (var entry_tool_calls (ensure_array (entry/tool_calls || [])))
+          (entry_tool_calls .each (fn [tool_call]
+            (blocks .append (anthropic_tool_use_from_call tool_call))
+          ))
+        )
+
+        (if (blocks/.size > 0)
+          (messages .append {^role entry/role ^content blocks})
+        )
+      )
+    )
+  ))
+
+  (if (pending_tool_results/.size > 0)
+    (var final_blocks [])
+    (pending_tool_results .each (fn [block]
+      (final_blocks .append block)
+    ))
+    (if_not user_text/.empty
+      (final_blocks .append {^type "text" ^text user_text})
+    )
+    (messages .append {^role "user" ^content final_blocks})
+  else
+    (if_not user_text/.empty
+      (messages .append {^role "user" ^content [{^type "text" ^text user_text}]})
+    )
+  )
+
+  messages
+)
+
+(fn $ns/build_anthropic_request [history user_text tools_spec]
+  (var tools [])
+  (tools_spec .each (fn [tool_spec]
+    (tools .append (anthropic_tool_from_openai tool_spec))
+  ))
+
+  (var request {
+    ^system SYSTEM_PROMPT
+    ^messages (build_anthropic_messages history user_text)
+    ^tools tools
+  })
+  (log_anthropic_request request history)
+  request
+)
+
+(fn $ns/normalize_openai_response [response]
+  (var choices (try (response .get "choices" []) catch * []))
+  (if (choices/.size > 0)
+    (var first_choice choices/0)
+    (var msg first_choice/message)
+    (var content ((msg .get "content" "") .to_s))
+    (var tool_calls (msg .get "tool_calls" []))
+    (if_not tool_calls (tool_calls = []))
+    (return {^content content ^tool_calls tool_calls})
+  )
+  {^content "I could not generate a response." ^tool_calls []}
+)
+
+(fn $ns/normalize_anthropic_response [response]
+  (var blocks (ensure_array (try (response .get "content" []) catch * [])))
+  (var text_parts [])
+  (var tool_calls [])
+
+  (blocks .each (fn [block]
+    (var block_type (block/type || ""))
+    (if (block_type == "text")
+      (var text (block/text || ""))
+      (if_not text/.empty
+        (text_parts .append text)
+      )
+    elif (block_type == "tool_use")
+      (var input_map (ensure_map (block/input || {})))
+      (tool_calls .append {
+        ^id (block/id || "")
+        ^type "function"
+        ^function {
+          ^name (block/name || "")
+          ^arguments input_map/.to_json
+        }
+      })
+    )
+  ))
+
+  {^content (text_parts .join "\n\n") ^tool_calls tool_calls}
+)
+
+(fn provider_has_credentials []
+  (if (LLM_PROVIDER == "anthropic")
+    (return (not (ANTHROPIC_API_KEY/.empty && ANTHROPIC_AUTH_TOKEN/.empty)))
+  )
+  (not OPENAI_API_KEY/.empty)
+)
+
+(fn mock_mode_response []
+  (if (LLM_PROVIDER == "anthropic")
+    (return {^content "I received your message. (Running in mock mode - set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN to enable LLM)" ^tool_calls []})
+  )
+  {^content "I received your message. (Running in mock mode - set OPENAI_API_KEY to enable LLM)" ^tool_calls []}
+)
+
+(fn error_message_from_response [response]
+  (try
+    (response/message || "")
+  catch *
+    ""
+  )
+)
+
+(fn call_openai [history user_text tools_spec]
+  (var request (build_openai_request history user_text tools_spec))
+  (log .info #"Calling LLM provider=openai model=#{OPENAI_MODEL} messages=#{request/messages/.size} tools=#{request/tools/.size} timeout_ms=#{OPENAI_TIMEOUT_MS}")
+  (var client_opts {^api_key OPENAI_API_KEY ^model OPENAI_MODEL ^timeout_ms OPENAI_TIMEOUT_MS})
+  (if_not OPENAI_BASE_URL/.empty
+    (client_opts .set "base_url" OPENAI_BASE_URL)
+  )
+  (var client (new OpenAIClient client_opts))
+  (var response (client .chat request))
+  {^response response ^normalized (normalize_openai_response response)}
+)
+
+(fn call_anthropic [history user_text tools_spec]
+  (var request (build_anthropic_request history user_text tools_spec))
+  (log .info #"Calling LLM provider=anthropic model=#{ANTHROPIC_MODEL} messages=#{request/messages/.size} tools=#{request/tools/.size} timeout_ms=#{ANTHROPIC_TIMEOUT_MS}")
+  (var client_opts {^model ANTHROPIC_MODEL ^timeout_ms ANTHROPIC_TIMEOUT_MS})
+  (if_not ANTHROPIC_API_KEY/.empty
+    (client_opts .set "api_key" ANTHROPIC_API_KEY)
+  )
+  (if_not ANTHROPIC_AUTH_TOKEN/.empty
+    (client_opts .set "auth_token" ANTHROPIC_AUTH_TOKEN)
+  )
+  (if_not ANTHROPIC_BASE_URL/.empty
+    (client_opts .set "base_url" ANTHROPIC_BASE_URL)
+  )
+  (var client (new AnthropicClient client_opts))
+  (var response (client .chat request))
+  {^response response ^normalized (normalize_anthropic_response response)}
+)
+
+(fn $ns/call_llm [history user_text tools_spec]
+  (if_not (provider_has_credentials)
+    (log .info #"LLM call skipped (mock mode - provider=#{LLM_PROVIDER})")
+    (return (mock_mode_response))
+  )
+
+  (if genex/ai
+    (try
+      (var start_ms gene/now/.call/.to_i)
+      (var call_result (if (LLM_PROVIDER == "anthropic")
+        (call_anthropic history user_text tools_spec)
+      else
+        (call_openai history user_text tools_spec)
+      ))
+      (log .debug "LLM chat returned")
+      (var duration (gene/now/.call/.to_i - start_ms))
+      (var response call_result/response)
+      (var error_message (error_message_from_response response))
+      (if_not error_message/.empty
+        (log .error #"LLM call failed: #{error_message}")
+        (return {^content #"LLM error: #{error_message}" ^tool_calls []})
+      )
+      (var normalized call_result/normalized)
+      (log .info #"LLM responded in #{duration}ms provider=#{LLM_PROVIDER} content_len=#{normalized/content/.size} tool_calls=#{normalized/tool_calls/.size}")
+      (log .trace #"LLM response: #{normalized/content}")
+      normalized
+    catch *
+      (log .error #"LLM call failed: #{$ex/message}")
+      {^content #"LLM error: #{$ex/message}" ^tool_calls []}
+    )
+  else
+    (log .error "genex/ai module unavailable")
+    {^content "genex/ai module unavailable." ^tool_calls []}
+  )
+)

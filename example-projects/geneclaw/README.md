@@ -9,7 +9,7 @@ GeneClaw receives commands (via REST API or Slack webhook), runs a bounded agent
 ## Architecture
 
 ```
-Slack/REST → Router → Agent Orchestrator → LLM (OpenAI)
+Slack/REST → Router → Agent Orchestrator → LLM Provider (OpenAI / Anthropic)
                               ↓
                         Tool Registry
                         ↓      ↓       ↓       ↓        ↓
@@ -22,6 +22,7 @@ Slack/REST → Router → Agent Orchestrator → LLM (OpenAI)
 
 - `src/main.gene` - HTTP server, routing, Slack webhook handler
 - `src/agent.gene` - Agent run loop with step/tool-call budget
+- `src/llm_provider.gene` - Provider adapter for OpenAI and Anthropic
 - `src/tools.gene` - Tool registry/orchestration
 - `src/tools/*.gene` - Individual tool modules
 - `src/tools/*.mjs` - Playwright helper scripts
@@ -43,11 +44,26 @@ cd example-projects/geneclaw
 
 | Variable | Default | Description |
 |---|---|---|
+| `GENECLAW_LLM_PROVIDER` | `openai` | Active LLM provider: `openai` or `anthropic` |
 | `OPENAI_API_KEY` | (empty = mock mode) | OpenAI API key |
 | `OPENAI_MODEL` | `gpt-5-mini` | Model to use |
+| `OPENAI_BASE_URL` | client default | Override OpenAI-compatible API base URL |
+| `OPENAI_TIMEOUT_MS` | `60000` | OpenAI request timeout |
+| `ANTHROPIC_API_KEY` | (empty) | Anthropic API key |
+| `ANTHROPIC_AUTH_TOKEN` | (empty) | Anthropic auth token / OAuth token |
+| `ANTHROPIC_MODEL` | `claude-3-5-sonnet-latest` | Anthropic model to use |
+| `ANTHROPIC_BASE_URL` | client default | Override Anthropic API base URL |
+| `ANTHROPIC_TIMEOUT_MS` | `60000` | Anthropic request timeout |
 | `SLACK_SIGNING_SECRET` | | Slack app signing secret |
 | `SLACK_BOT_TOKEN` | | Slack bot OAuth token |
-| `GENECLAW_WORKSPACE` | `/tmp/geneclaw` | Filesystem tool root |
+| `GENECLAW_WORKSPACE` | `$HOME/.geneclaw` | Filesystem tool root |
+
+## LLM providers
+
+- `openai` remains the default and uses the existing OpenAI-compatible chat/tool-calling flow.
+- `anthropic` uses the Anthropic Messages API through `AnthropicClient`.
+- Anthropic auth can use either `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`.
+- If the selected provider has no usable credentials, GeneClaw stays in mock mode.
 
 ## API
 

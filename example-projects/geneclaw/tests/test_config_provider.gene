@@ -1,0 +1,8 @@
+#!/usr/bin/env gene run
+
+(import LLM_PROVIDER from "config")
+
+(var expected ($env/EXPECTED_PROVIDER || "openai"))
+
+(assert (LLM_PROVIDER == expected))
+(println "ok")

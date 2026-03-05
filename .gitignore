@@ -56,3 +56,5 @@ nimble.paths
 
 .cache/
 .nimble_sandbox/
+
+.env
