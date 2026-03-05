@@ -1,0 +1,38 @@
+# GeneClaw tool: grep
+
+(fn $ns/register_grep_tool [register_tool log workspace_root]
+  (register_tool "grep"
+    "Search file contents using ripgrep within the workspace"
+    {^type "object"
+     ^properties {
+       ^pattern {^type "string" ^description "Search pattern (regex)"}
+       ^path {^type "string" ^description "Relative path within workspace (default '.')"}
+       ^flags {^type "string" ^description "Additional rg flags (optional)"}
+     }
+     ^required ["pattern"]}
+    (fn [args]
+      (var pattern args/pattern)
+      (var path (args/path || "."))
+      (var flags (args/flags || ""))
+
+      (if pattern/.empty
+        (return {^error "Missing pattern"})
+      )
+      # Block path traversal
+      (if (path .contains "..")
+        (return {^error "Path traversal not allowed"})
+      )
+
+      (var full_path #"#{workspace_root}/#{path}")
+      (log .debug #"grep: pattern='#{pattern}' path=#{full_path}")
+      (try
+        (var result (system/shell #"rg '#{pattern}' '#{full_path}' #{flags} --max-count 50 2>&1 || true"))
+        (log .info #"grep success: pattern='#{pattern}'")
+        {^pattern pattern ^path path ^matches result/output}
+      catch *
+        (log .error #"grep failed: #{$ex/message}")
+        {^error #"Grep failed: #{$ex/message}"}
+      )
+    )
+  )
+)

@@ -1,0 +1,49 @@
+# GeneClaw tool: delete_file
+
+(fn $ns/register_delete_file_tool [register_tool log workspace_root]
+  (register_tool "delete_file"
+    "Delete a file within the workspace"
+    {^type "object"
+     ^properties {
+       ^path {^type "string" ^description "Relative path within workspace"}
+     }
+     ^required ["path"]}
+    (fn [args]
+      (var path args/path)
+
+      (if path/.empty
+        (return {^error "Missing path"})
+      )
+      # Strict path traversal check
+      (if (path .contains "..")
+        (return {^error "Path traversal not allowed"})
+      )
+
+      (var full_path #"#{workspace_root}/#{path}")
+      (log .debug #"delete_file: #{full_path}")
+      (try
+        # Check it's a file, not a directory
+        (var check (system/shell #"test -f #{full_path} && echo file || (test -d #{full_path} && echo dir || echo missing)"))
+        (var file_type check/output/.trim)
+
+        (if (file_type == "dir")
+          (return {^error "Cannot delete directories, only files"})
+        )
+        (if (file_type == "missing")
+          (return {^error #"File not found: #{path}"})
+        )
+
+        (var result (system/shell #"rm #{full_path}"))
+        (if (result/exit_code != 0)
+          (return {^error #"Delete failed: #{result/output}"})
+        )
+
+        (log .info #"delete_file success: #{path}")
+        {^path path ^deleted true}
+      catch *
+        (log .error #"delete_file failed: #{path} - #{$ex/message}")
+        {^error #"Delete failed: #{$ex/message}"}
+      )
+    )
+  )
+)

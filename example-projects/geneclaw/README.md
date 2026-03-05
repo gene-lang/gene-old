@@ -76,6 +76,15 @@ POST /slack/events
 - `write_file` - Write files within workspace
 - `http_get` - Fetch a URL
 - `browser_playwright` - Browser control (`list_pages`, `navigate`, `click`, `fill`, `text`, `screenshot`, etc.) with auto-attach to Chrome CDP (`http://127.0.0.1:9333`) and managed Playwright server fallback
+- `web_search` - Search the web via Brave Search API (requires `BRAVE_API_KEY`)
+- `list_files` - List files/directories within workspace (supports recursive)
+- `edit_file` - Edit a file by exact text replacement within workspace
+- `patch_file` - Apply a unified diff patch to a file within workspace
+- `send_message` - Send a message to a Slack channel/thread (requires `SLACK_AGENTX_TOKEN`)
+- `delete_file` - Delete a file within workspace (files only, no directories)
+- `tmux_send` - Send keys to a tmux pane
+- `tmux_tail` - Capture recent output from a tmux pane
+- `grep` - Search file contents using ripgrep within workspace
 
 ## Playwright tool prerequisites
 

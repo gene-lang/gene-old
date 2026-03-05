@@ -1,0 +1,51 @@
+# GeneClaw tool: tmux_send
+
+(fn $ns/register_tmux_send_tool [register_tool log]
+  (register_tool "tmux_send"
+    "Send keys to a tmux pane"
+    {^type "object"
+     ^properties {
+       ^target {^type "string" ^description "Tmux target pane (e.g. 'session:window.pane')"}
+       ^text {^type "string" ^description "Text to send"}
+       ^enter {^type "boolean" ^description "Press Enter after text (default true)"}
+     }
+     ^required ["target" "text"]}
+    (fn [args]
+      (var target args/target)
+      (var text args/text)
+      (var enter (if (args/enter == false) false else true))
+
+      (if target/.empty
+        (return {^error "Missing target"})
+      )
+      (if text/.empty
+        (return {^error "Missing text"})
+      )
+
+      (log .debug #"tmux_send: target=#{target} enter=#{enter}")
+      (try
+        # Send the text literally
+        (var result (system/shell #"tmux send-keys -t '#{target}' -l '#{text}'"))
+        (if (result/exit_code != 0)
+          (return {^error #"tmux send-keys failed: #{result/output}"})
+        )
+
+        # Optionally press Enter
+        (if enter
+          (do
+            (var enter_result (system/shell #"tmux send-keys -t '#{target}' Enter"))
+            (if (enter_result/exit_code != 0)
+              (return {^error #"tmux Enter failed: #{enter_result/output}"})
+            )
+          )
+        )
+
+        (log .info #"tmux_send success: target=#{target}")
+        {^ok true ^target target}
+      catch *
+        (log .error #"tmux_send failed: #{$ex/message}")
+        {^error #"tmux_send failed: #{$ex/message}"}
+      )
+    )
+  )
+)

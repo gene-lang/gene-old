@@ -1,0 +1,53 @@
+# GeneClaw tool: edit_file
+
+(fn $ns/register_edit_file_tool [register_tool log workspace_root]
+  (register_tool "edit_file"
+    "Edit a file by replacing exact text within the workspace"
+    {^type "object"
+     ^properties {
+       ^path {^type "string" ^description "Relative path within workspace"}
+       ^old_text {^type "string" ^description "Exact text to find and replace"}
+       ^new_text {^type "string" ^description "Replacement text"}
+     }
+     ^required ["path" "old_text" "new_text"]}
+    (fn [args]
+      (var path args/path)
+      (var old_text args/old_text)
+      (var new_text args/new_text)
+
+      (if path/.empty
+        (return {^error "Missing path"})
+      )
+      (if (path .contains "..")
+        (return {^error "Path traversal not allowed"})
+      )
+
+      (var full_path #"#{workspace_root}/#{path}")
+      (log .debug #"edit_file: #{full_path}")
+      (try
+        (var content (gene/io/read full_path))
+
+        # Count occurrences of old_text
+        (var idx (content .index_of old_text))
+        (if (idx == -1)
+          (return {^error "old_text not found"})
+        )
+
+        # Check for multiple occurrences
+        (var second_idx (content .index_of old_text (idx + 1)))
+        (if (second_idx != -1)
+          (return {^error "old_text found multiple times"})
+        )
+
+        # Replace and write back
+        (var updated (content .replace old_text new_text))
+        (gene/io/write full_path updated)
+        (log .info #"edit_file success: #{path}")
+        {^path path ^ok true}
+      catch *
+        (log .error #"edit_file failed: #{path} - #{$ex/message}")
+        {^error #"Edit failed: #{$ex/message}"}
+      )
+    )
+  )
+)

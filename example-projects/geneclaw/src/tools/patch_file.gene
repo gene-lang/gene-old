@@ -1,0 +1,51 @@
+# GeneClaw tool: patch_file
+
+(fn $ns/register_patch_file_tool [register_tool log workspace_root]
+  (register_tool "patch_file"
+    "Apply a unified diff patch to a file within the workspace"
+    {^type "object"
+     ^properties {
+       ^path {^type "string" ^description "Relative path within workspace"}
+       ^diff {^type "string" ^description "Unified diff content to apply"}
+     }
+     ^required ["path" "diff"]}
+    (fn [args]
+      (var path args/path)
+      (var diff args/diff)
+
+      (if path/.empty
+        (return {^error "Missing path"})
+      )
+      (if (path .contains "..")
+        (return {^error "Path traversal not allowed"})
+      )
+      (if diff/.empty
+        (return {^error "Missing diff"})
+      )
+
+      (var full_path #"#{workspace_root}/#{path}")
+      (log .debug #"patch_file: #{full_path}")
+      (try
+        # Write diff to temp file
+        (var tmp_path "/tmp/geneclaw_patch.diff")
+        (gene/io/write tmp_path diff)
+
+        # Apply patch
+        (var result (system/shell #"cd #{workspace_root} && patch -p0 #{path} < #{tmp_path}"))
+
+        # Clean up temp file
+        (system/shell #"rm -f #{tmp_path}")
+
+        (if (result/exit_code != 0)
+          (return {^error #"patch failed: #{result/output}"})
+        )
+
+        (log .info #"patch_file success: #{path}")
+        {^path path ^ok true ^output result/output}
+      catch *
+        (log .error #"patch_file failed: #{path} - #{$ex/message}")
+        {^error #"Patch failed: #{$ex/message}"}
+      )
+    )
+  )
+)

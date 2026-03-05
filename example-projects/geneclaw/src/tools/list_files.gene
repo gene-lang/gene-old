@@ -1,0 +1,43 @@
+# GeneClaw tool: list_files
+
+(fn $ns/register_list_files_tool [register_tool log workspace_root]
+  (register_tool "list_files"
+    "List files in a directory within the workspace"
+    {^type "object"
+     ^properties {
+       ^path {^type "string" ^description "Relative path within workspace (default '.')"}
+       ^recursive {^type "boolean" ^description "List recursively (default false)"}
+     }
+     ^required []}
+    (fn [args]
+      (var path (args/path || "."))
+      (var recursive (args/recursive || false))
+
+      # Block path traversal
+      (if (path .contains "..")
+        (return {^error "Path traversal not allowed"})
+      )
+
+      (var full_path #"#{workspace_root}/#{path}")
+      (log .debug #"list_files: #{full_path} recursive=#{recursive}")
+      (try
+        (var cmd
+          (if recursive
+            #"find #{full_path} -type f -o -type d | head -200"
+          else
+            #"ls -la #{full_path}"
+          )
+        )
+        (var result (system/shell cmd))
+        (if (result/exit_code != 0)
+          (return {^error #"list_files failed: #{result/output}"})
+        )
+        (log .debug #"list_files success: #{path}")
+        {^path path ^entries result/output}
+      catch *
+        (log .error #"list_files failed: #{$ex/message}")
+        {^error #"Cannot list: #{$ex/message}"}
+      )
+    )
+  )
+)

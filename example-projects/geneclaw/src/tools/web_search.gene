@@ -1,0 +1,54 @@
+# GeneClaw tool: web_search
+
+(import BRAVE_API_KEY from "config")
+
+(fn $ns/register_web_search_tool [register_tool log]
+  (register_tool "web_search"
+    "Search the web using Brave Search API"
+    {^type "object"
+     ^properties {
+       ^query {^type "string" ^description "Search query"}
+       ^count {^type "integer" ^description "Number of results (1-10, default 5)"}
+     }
+     ^required ["query"]}
+    (fn [args]
+      (var query args/query)
+      (if query/.empty
+        (return {^error "Missing query"})
+      )
+
+      (if_not BRAVE_API_KEY
+        (return {^error "BRAVE_API_KEY not configured"})
+      )
+
+      (var count (args/count || 5))
+      (if (count > 10) (count = 10))
+      (if (count < 1) (count = 1))
+
+      (log .debug #"web_search: query=#{query} count=#{count}")
+      (try
+        # URL-encode the query by escaping special chars via curl --data-urlencode
+        (var result (system/shell #"curl -s -G --data-urlencode 'q=#{query}' -H 'Accept: application/json' -H 'X-Subscription-Token: #{BRAVE_API_KEY}' 'https://api.search.brave.com/res/v1/web/search?count=#{count}'"))
+        (if (result/exit_code != 0)
+          (return {^error #"curl failed: #{result/output}"})
+        )
+
+        (var json (gene/json/parse result/output))
+        (var web_results (json/web/results || []))
+        (var items [])
+        (web_results .each (fn [r]
+          (items .append {
+            ^title (r/title || "")
+            ^url (r/url || "")
+            ^description (r/description || "")
+          })
+        ))
+        (log .info #"web_search: #{items/.size} results for '#{query}'")
+        {^query query ^results items}
+      catch *
+        (log .error #"web_search failed: #{$ex/message}")
+        {^error #"Search failed: #{$ex/message}"}
+      )
+    )
+  )
+)

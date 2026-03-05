@@ -1,0 +1,35 @@
+# GeneClaw tool: tmux_tail
+
+(fn $ns/register_tmux_tail_tool [register_tool log]
+  (register_tool "tmux_tail"
+    "Capture recent output from a tmux pane"
+    {^type "object"
+     ^properties {
+       ^target {^type "string" ^description "Tmux target pane (e.g. 'session:window.pane')"}
+       ^lines {^type "integer" ^description "Number of lines to capture (default 50)"}
+     }
+     ^required ["target"]}
+    (fn [args]
+      (var target args/target)
+      (var lines (args/lines || 50))
+
+      (if target/.empty
+        (return {^error "Missing target"})
+      )
+
+      (log .debug #"tmux_tail: target=#{target} lines=#{lines}")
+      (try
+        (var result (system/shell #"tmux capture-pane -t '#{target}' -p -S -#{lines}"))
+        (if (result/exit_code != 0)
+          (return {^error #"tmux capture-pane failed: #{result/output}"})
+        )
+
+        (log .info #"tmux_tail success: target=#{target}")
+        {^target target ^output result/output}
+      catch *
+        (log .error #"tmux_tail failed: #{$ex/message}")
+        {^error #"tmux_tail failed: #{$ex/message}"}
+      )
+    )
+  )
+)

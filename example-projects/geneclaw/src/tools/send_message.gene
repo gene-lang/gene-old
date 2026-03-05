@@ -1,0 +1,64 @@
+# GeneClaw tool: send_message
+
+(import SLACK_AGENTX_TOKEN from "config")
+
+(fn $ns/register_send_message_tool [register_tool log]
+  (register_tool "send_message"
+    "Send a message to a Slack channel or thread"
+    {^type "object"
+     ^properties {
+       ^channel {^type "string" ^description "Slack channel ID"}
+       ^text {^type "string" ^description "Message text"}
+       ^thread_ts {^type "string" ^description "Thread timestamp (optional, for replies)"}
+     }
+     ^required ["channel" "text"]}
+    (fn [args]
+      (var channel args/channel)
+      (var text args/text)
+      (var thread_ts args/thread_ts)
+
+      (if channel/.empty
+        (return {^error "Missing channel"})
+      )
+      (if text/.empty
+        (return {^error "Missing text"})
+      )
+      (if_not SLACK_AGENTX_TOKEN
+        (return {^error "SLACK_AGENTX_TOKEN not configured"})
+      )
+
+      (log .debug #"send_message: channel=#{channel}")
+      (try
+        # Build JSON payload
+        (var payload {^channel channel ^text text})
+        (if thread_ts
+          (if_not thread_ts/.empty
+            (payload .set "thread_ts" thread_ts)
+          )
+        )
+        (var json_payload payload/.to_json)
+
+        (var result (system/shell #"curl -s -X POST -H 'Content-Type: application/json; charset=utf-8' -H 'Authorization: Bearer #{SLACK_AGENTX_TOKEN}' -d '#{json_payload}' https://slack.com/api/chat.postMessage"))
+        (if (result/exit_code != 0)
+          (return {^error #"curl failed: #{result/output}"})
+        )
+
+        (var resp (gene/json/parse result/output))
+        (if resp/ok
+          (do
+            (log .info #"send_message success: channel=#{channel}")
+            {^ok true ^ts resp/ts ^channel channel}
+          )
+        else
+          (do
+            (log .warn #"send_message Slack error: #{resp/error}")
+            {^error #"Slack API error: #{resp/error}"}
+          )
+        )
+      catch *
+        (log .error #"send_message failed: #{$ex/message}")
+        {^error #"Send failed: #{$ex/message}"}
+      )
+    )
+  )
+)
