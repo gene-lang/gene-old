@@ -1,0 +1,83 @@
+# GeneClaw Hot-swap Pause State
+
+(import PAUSE_TIMEOUT_MS PAUSE_CHECK_INTERVAL_MS from "config")
+
+(var $ns/log (new genex/logging/Logger $ns))
+
+($ns/PAUSED = false)
+($ns/PAUSED_AT = nil)
+($ns/PAUSE_REASON = "")
+($ns/PAUSE_REQUESTED_BY = "")
+
+(fn $ns/is_paused []
+  PAUSED
+)
+
+(fn pause_age_ms []
+  (if (PAUSED && PAUSED_AT)
+    (gene/now/.call/.to_i - PAUSED_AT)
+  else
+    0
+  )
+)
+
+(fn $ns/get_pause_status []
+  {^paused PAUSED
+   ^paused_at PAUSED_AT
+   ^pause_reason PAUSE_REASON
+   ^pause_requested_by PAUSE_REQUESTED_BY
+   ^pause_age_ms (pause_age_ms)
+   ^pause_timeout_ms PAUSE_TIMEOUT_MS}
+)
+
+(fn $ns/pause [reason requested_by]
+  (PAUSED = true)
+  (PAUSED_AT = gene/now/.call/.to_i)
+  (PAUSE_REASON = (if reason then reason else "upgrade"))
+  (PAUSE_REQUESTED_BY = (if requested_by then requested_by else "system"))
+  (log .warn #"Entering PAUSED mode reason=#{PAUSE_REASON} requested_by=#{PAUSE_REQUESTED_BY}")
+  (get_pause_status)
+)
+
+(fn $ns/resume [reason]
+  (var resume_reason (if reason then reason else "manual"))
+  (if PAUSED
+    (log .warn #"Leaving PAUSED mode reason=#{resume_reason}")
+  )
+  (PAUSED = false)
+  (PAUSED_AT = nil)
+  (PAUSE_REASON = "")
+  (PAUSE_REQUESTED_BY = "")
+  {^paused false ^reason resume_reason}
+)
+
+(fn $ns/check_pause_timeout []
+  (if (PAUSED && PAUSED_AT)
+    (var age (pause_age_ms))
+    (if (age > PAUSE_TIMEOUT_MS)
+      (log .warn #"PAUSED timeout reached age_ms=#{age}, resuming old instance")
+      (resume "pause_timeout")
+      true
+    else
+      false
+    )
+  else
+    false
+  )
+)
+
+(fn $ns/start_pause_watchdog []
+  (log .info #"Pause watchdog started (interval=#{PAUSE_CHECK_INTERVAL_MS}ms)")
+  (fn tick_loop []
+    (var f (gene/sleep_async PAUSE_CHECK_INTERVAL_MS))
+    (f .on_success (fn [_]
+      (try
+        (check_pause_timeout)
+      catch *
+        (log .error #"Pause watchdog tick failed: #{$ex/message}")
+      )
+      (tick_loop)
+    ))
+  )
+  (tick_loop)
+)

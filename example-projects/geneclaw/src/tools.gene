@@ -11,6 +11,7 @@
 (import register_http_get_tool from "tools/http_get")
 (import register_browser_playwright_tool from "tools/browser_playwright")
 (import register_schedule_tool from "tools/schedule")
+(import register_self_upgrade_tool from "tools/self_upgrade")
 
 (var log (new genex/logging/Logger $ns))
 
@@ -109,6 +110,7 @@
   (register_http_get_tool register_tool log)
   (register_browser_playwright_tool register_tool log WORKSPACE_ROOT)
   (register_schedule_tool register_tool log)
+  (register_self_upgrade_tool register_tool log)
 
   (log .info #"Registered #{TOOLS/.size} tools")
 )

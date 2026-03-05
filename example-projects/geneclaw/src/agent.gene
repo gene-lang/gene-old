@@ -5,6 +5,7 @@
 (import memory_append memory_recent from "db")
 (import run_create run_complete from "db")
 (import invoke_tool build_tools_spec from "tools")
+(import is_paused check_pause_timeout get_pause_status from "hotswap_state")
 
 (var log (new genex/logging/Logger $ns))
 (var RUN_COUNTER 0)
@@ -115,6 +116,18 @@
 
   # Record run start
   (run_create run_id workspace_id user_id)
+
+  # If paused, do not execute LLM/tool pipeline.
+  (check_pause_timeout)
+  (if (is_paused)
+    (var pause_status (get_pause_status))
+    (var paused_response "GeneClaw is paused for self-upgrade. Please retry shortly.")
+    (memory_append workspace_id session_id "user" text {^user_id user_id})
+    (memory_append workspace_id session_id "assistant" paused_response {^run_id run_id ^paused true})
+    (run_complete run_id "paused" nil)
+    (log .warn #"#{run_id} skipped: paused reason=#{pause_status/pause_reason}")
+    (return {^run_id run_id ^response paused_response ^steps 0 ^tool_calls 0 ^paused true ^pause_status pause_status})
+  )
 
   # Load conversation history
   (var history (memory_recent session_id 20))

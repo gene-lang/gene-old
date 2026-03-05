@@ -5,6 +5,7 @@
 (import job_list_due job_mark_running job_mark_completed job_mark_failed job_update_next_run job_update_state from "db")
 (import compute_cron_next from "cron")
 (import run_agent from "agent")
+(import is_paused check_pause_timeout from "hotswap_state")
 (import genex/http/http_post)
 
 (var log (new genex/logging/Logger $ns))
@@ -73,6 +74,11 @@
 # Tick — find due jobs and dispatch them
 # ------------------------------------------------------------------
 (fn scheduler_tick []
+  (check_pause_timeout)
+  (if (is_paused)
+    (log .debug "Scheduler tick skipped (paused)")
+    (return)
+  )
   (if scheduler_busy (return))
   (scheduler_busy = true)
   (try

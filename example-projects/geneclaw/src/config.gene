@@ -3,7 +3,7 @@
 
 (var $ns/log (new genex/logging/Logger $ns))
 
-($ns/PORT = 4090)
+($ns/PORT = (($env/PORT || "4090") .to_i))
 ($ns/DB_PATH = "geneclaw.sqlite")
 ($ns/OPENAI_API_KEY = $env/OPENAI_API_KEY)
 ($ns/OPENAI_MODEL = ($env/OPENAI_MODEL || "gpt-5-mini"))
@@ -21,11 +21,19 @@
 # Scheduler tick interval
 ($ns/SCHEDULER_TICK_MS = (($env/GENECLAW_SCHEDULER_TICK_MS || "30000") .to_i))
 
+# Hot-swap controls
+($ns/PAUSE_TIMEOUT_MS = (($env/GENECLAW_PAUSE_TIMEOUT_MS || "120000") .to_i))
+($ns/PAUSE_CHECK_INTERVAL_MS = (($env/GENECLAW_PAUSE_CHECK_INTERVAL_MS || "5000") .to_i))
+($ns/UPGRADE_HEALTH_ATTEMPTS = (($env/GENECLAW_UPGRADE_HEALTH_ATTEMPTS || "15") .to_i))
+($ns/UPGRADE_HEALTH_INTERVAL_MS = (($env/GENECLAW_UPGRADE_HEALTH_INTERVAL_MS || "2000") .to_i))
+
 # Log loaded configuration (redact secrets)
 (log .info #"PORT=#{PORT} DB_PATH=#{DB_PATH} MODEL=#{OPENAI_MODEL}")
 (log .info #"MAX_STEPS=#{MAX_STEPS} MAX_TOOL_CALLS=#{MAX_TOOL_CALLS} SCHEDULER_TICK_MS=#{SCHEDULER_TICK_MS}")
 (log .info #"OPENAI_TIMEOUT_MS=#{OPENAI_TIMEOUT_MS}")
 (log .info #"WORKSPACE_ROOT=#{WORKSPACE_ROOT}")
+(log .info #"PAUSE_TIMEOUT_MS=#{PAUSE_TIMEOUT_MS} PAUSE_CHECK_INTERVAL_MS=#{PAUSE_CHECK_INTERVAL_MS}")
+(log .info #"UPGRADE_HEALTH_ATTEMPTS=#{UPGRADE_HEALTH_ATTEMPTS} UPGRADE_HEALTH_INTERVAL_MS=#{UPGRADE_HEALTH_INTERVAL_MS}")
 (if OPENAI_BASE_URL/.empty
   (log .info "OPENAI_BASE_URL not set; using client default")
 else

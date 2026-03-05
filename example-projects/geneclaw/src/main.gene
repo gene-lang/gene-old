@@ -8,6 +8,7 @@
 (import init_tools from "tools")
 (import run_agent from "agent")
 (import start_scheduler from "scheduler")
+(import is_paused check_pause_timeout get_pause_status start_pause_watchdog from "hotswap_state")
 (import genex/http/http_post)
 
 (var log (new genex/logging/Logger $ns))
@@ -37,7 +38,21 @@
 # ============================================================
 (fn handle_health [req]
   (log .trace "Health check")
-  (json_response 200 {^status "ok" ^service "geneclaw" ^version "0.1.0"})
+  (check_pause_timeout)
+  (var pause_status (get_pause_status))
+  (if pause_status/paused
+    (json_response 200 {
+      ^status "paused"
+      ^service "geneclaw"
+      ^version "0.1.0"
+      ^paused true
+      ^pause_reason pause_status/pause_reason
+      ^pause_age_ms pause_status/pause_age_ms
+      ^pause_timeout_ms pause_status/pause_timeout_ms
+    })
+  else
+    (json_response 200 {^status "ok" ^service "geneclaw" ^version "0.1.0" ^paused false})
+  )
 )
 
 (fn handle_chat [req]
@@ -159,7 +174,18 @@
   (var method req/.method)
   (log .info #"#{method} #{path}")
 
-  (if (path == "/health")
+  (check_pause_timeout)
+  (if ((path != "/health") && (is_paused))
+    (log .warn #"Request rejected while paused: #{method} #{path}")
+    (var pause_status (get_pause_status))
+    (json_response 503 {
+      ^status "paused"
+      ^message "Upgrading"
+      ^pause_reason pause_status/pause_reason
+      ^pause_age_ms pause_status/pause_age_ms
+      ^pause_timeout_ms pause_status/pause_timeout_ms
+    })
+  elif (path == "/health")
     (handle_health req)
   elif ((path == "/api/chat") && (method == "POST"))
     (handle_chat req)
@@ -177,6 +203,7 @@
 (log .info "=== GeneClaw Agent Platform ===")
 (init_db)
 (init_tools)
+(start_pause_watchdog)
 (start_scheduler)
 
 (if SLACK_APP_TOKEN

@@ -1,0 +1,121 @@
+# GeneClaw tool: self_upgrade
+# Create temp git branch/worktree, pause old instance, boot new instance, cut over by killing old pid on port.
+
+(import PORT UPGRADE_HEALTH_ATTEMPTS UPGRADE_HEALTH_INTERVAL_MS from "config")
+(import pause resume from "hotswap_state")
+
+(fn register_and_check [cmd]
+  (var r (system/shell cmd))
+  (if (r/exit_code != 0)
+    (throw #"Command failed: #{cmd}\n#{r/output}")
+  )
+  r
+)
+
+(fn $ns/register_self_upgrade_tool [register_tool log]
+  (register_tool "self_upgrade"
+    "Apply code changes and hot-swap to a new instance (requires confirm=true and human approval)"
+    {^type "object"
+     ^required ["reason" "confirm"]
+     ^properties {
+       ^reason  {^type "string"  ^description "Why this upgrade is needed"}
+       ^confirm {^type "boolean" ^description "Must be true to execute self-upgrade"}
+     }}
+    (fn [args]
+      (if_not args/confirm
+        (return {^ok false ^error "confirmation required: pass confirm=true after human approval"})
+      )
+
+      (var reason ((args .get "reason" "") .to_s))
+      (if reason/.empty
+        (return {^ok false ^error "Missing reason"})
+      )
+
+      (var old_port PORT)
+      (var new_port (PORT + 1))
+      (var ts gene/now/.call/.to_i)
+      (var upgrade_branch #"geneclaw-upgrade-#{ts}")
+      (var upgrade_dir #"/tmp/geneclaw-upgrade-#{ts}")
+      (var upgrade_log #"/tmp/geneclaw-upgrade-#{ts}.log")
+      (var current_branch "")
+
+      (try
+        # Ensure commands run from repository root.
+        (register_and_check "git rev-parse --is-inside-work-tree >/dev/null 2>&1")
+        (var branch_res (register_and_check "git branch --show-current"))
+        (current_branch = branch_res/output/.trim)
+        (if current_branch/.empty
+          (throw "Could not determine current git branch")
+        )
+
+        # Save modified state in a temp branch, then return to current branch.
+        (register_and_check #"git checkout -b #{upgrade_branch}")
+        (register_and_check "git add -A")
+        (register_and_check #"git commit -m 'self_upgrade checkpoint #{ts}'")
+        (register_and_check #"git checkout #{current_branch}")
+
+        # Create isolated worktree from checkpointed branch.
+        (register_and_check #"rm -rf #{upgrade_dir}")
+        (register_and_check #"git worktree add #{upgrade_dir} #{upgrade_branch}")
+
+        # Pause old process before spawning the new one.
+        (pause reason "self_upgrade")
+        (log .warn #"Self-upgrade paused old instance on port #{old_port}; starting new instance on #{new_port}")
+
+        # Launch new instance in the background from the temp worktree.
+        (register_and_check #"cd #{upgrade_dir} && nohup env PORT=#{new_port} gene run src/main.gene > #{upgrade_log} 2>&1 &")
+
+        # Health poll for new instance.
+        (var healthy false)
+        (var attempts 0)
+        (loop
+          (if (attempts >= UPGRADE_HEALTH_ATTEMPTS) (break))
+          (attempts += 1)
+          (gene/sleep UPGRADE_HEALTH_INTERVAL_MS)
+          (try
+            (var resp (genex/http/http_get #"http://localhost:#{new_port}/health"))
+            (if (resp/status == 200)
+              (healthy = true)
+              (break)
+            )
+          catch * nil)
+        )
+
+        (if healthy
+          # Delay old-process kill slightly so tool response can be returned.
+          (register_and_check #"sh -c 'pid=$(lsof -ti tcp:#{old_port} | head -n1); if [ -n \"$pid\" ]; then (sleep 1; kill -TERM \"$pid\"; sleep 2; kill -KILL \"$pid\" 2>/dev/null || true) >/dev/null 2>&1 & fi'")
+          {^ok true
+           ^message "Upgrade started; old instance scheduled for termination"
+           ^old_port old_port
+           ^new_port new_port
+           ^upgrade_branch upgrade_branch
+           ^upgrade_dir upgrade_dir
+           ^upgrade_log upgrade_log}
+        else
+          (system/shell #"sh -c 'pid=$(lsof -ti tcp:#{new_port} | head -n1); if [ -n \"$pid\" ]; then kill -TERM \"$pid\"; fi'")
+          (resume "new_instance_unhealthy")
+          {^ok false
+           ^error "New instance failed health check; resumed old instance"
+           ^attempts attempts
+           ^upgrade_branch upgrade_branch
+           ^upgrade_dir upgrade_dir
+           ^upgrade_log upgrade_log}
+        )
+      catch *
+        (try
+          (resume "upgrade_error")
+        catch *
+          nil
+        )
+        (try
+          (if_not current_branch/.empty
+            (system/shell #"git checkout #{current_branch}")
+          )
+        catch *
+          nil
+        )
+        {^ok false ^error #"self_upgrade failed: #{$ex/message}"}
+      )
+    )
+  )
+)
