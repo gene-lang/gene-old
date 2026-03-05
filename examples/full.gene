@@ -11,7 +11,7 @@
 (var f 3.14)
 (var s "hello")
 (var b true)
-(var nothing NIL)
+(var nothing nil)
 (var ch ?A)
 
 # Assignment + augmented assignment

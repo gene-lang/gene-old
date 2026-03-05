@@ -53,7 +53,30 @@
       )")
       (DB .exec "CREATE INDEX IF NOT EXISTS idx_audit_run ON tool_audit(run_id)")
 
-      (log .info #"Database initialized: #{DB_PATH} (3 tables ready)")
+      # Scheduled jobs table
+      (DB .exec "CREATE TABLE IF NOT EXISTS scheduled_jobs (
+        job_id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL DEFAULT '',
+        thread_ts TEXT DEFAULT '',
+        schedule_type TEXT NOT NULL,
+        text TEXT NOT NULL,
+        interval_ms INTEGER DEFAULT 0,
+        cron_expr TEXT DEFAULT '',
+        next_run_ms INTEGER NOT NULL,
+        state TEXT NOT NULL DEFAULT 'active',
+        retry_count INTEGER DEFAULT 0,
+        max_retries INTEGER DEFAULT 3,
+        backoff_ms INTEGER DEFAULT 5000,
+        last_error TEXT DEFAULT '',
+        last_run_ms INTEGER DEFAULT 0,
+        meta_json TEXT DEFAULT '{}',
+        created_at_ms INTEGER NOT NULL
+      )")
+      (DB .exec "CREATE INDEX IF NOT EXISTS idx_sched_due ON scheduled_jobs(state, next_run_ms)")
+
+      (log .info #"Database initialized: #{DB_PATH} (4 tables ready)")
     catch *
       (log .error #"Failed to open SQLite: #{$ex/message}")
       (DB = nil)
@@ -142,5 +165,127 @@
       state now (if error then error else "") run_id)
   catch *
     (log .error #"run_complete failed: #{$ex/message}")
+  )
+)
+
+# --- Scheduled job operations ---
+
+(fn $ns/job_create [job_id workspace_id user_id channel_id thread_ts
+                     schedule_type text interval_ms cron_expr next_run_ms meta]
+  (if_not DB then (return))
+  (var now gene/now/.call/.to_i)
+  (var meta_str (if meta then meta/.to_json else "{}"))
+  (log .info #"job_create #{job_id} type=#{schedule_type} next=#{next_run_ms}")
+  (try
+    (DB .exec "INSERT INTO scheduled_jobs (job_id, workspace_id, user_id, channel_id, thread_ts, schedule_type, text, interval_ms, cron_expr, next_run_ms, state, meta_json, created_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)"
+      job_id workspace_id user_id channel_id thread_ts
+      schedule_type text interval_ms cron_expr next_run_ms meta_str now)
+  catch *
+    (log .error #"job_create failed: #{$ex/message}")
+  )
+)
+
+(fn $ns/job_get [job_id]
+  (if_not DB then (return nil))
+  (try
+    (var rows (DB .query "SELECT job_id, workspace_id, user_id, channel_id, thread_ts, schedule_type, text, interval_ms, cron_expr, next_run_ms, state, retry_count, last_error, last_run_ms, meta_json, created_at_ms FROM scheduled_jobs WHERE job_id = ?" job_id))
+    (if_not rows (return nil))
+    (if (rows/.size == 0) (return nil))
+    (var r rows/0)
+    {^job_id r/0 ^workspace_id r/1 ^user_id r/2 ^channel_id r/3
+     ^thread_ts r/4 ^schedule_type r/5 ^text r/6 ^interval_ms r/7
+     ^cron_expr r/8 ^next_run_ms r/9 ^state r/10 ^retry_count r/11
+     ^last_error r/12 ^last_run_ms r/13 ^meta_json r/14 ^created_at_ms r/15}
+  catch *
+    (log .error #"job_get failed: #{$ex/message}")
+    nil
+  )
+)
+
+(fn $ns/job_list_all [workspace_id]
+  (if_not DB then (return []))
+  (try
+    (var rows (DB .query "SELECT job_id, schedule_type, text, state, next_run_ms, cron_expr, interval_ms, last_run_ms, last_error FROM scheduled_jobs WHERE workspace_id = ? ORDER BY created_at_ms DESC" workspace_id))
+    (if_not rows (return []))
+    (var result [])
+    (for r in rows
+      (result .append {^job_id r/0 ^schedule_type r/1 ^text r/2 ^state r/3
+                        ^next_run_ms r/4 ^cron_expr r/5 ^interval_ms r/6
+                        ^last_run_ms r/7 ^last_error r/8})
+    )
+    result
+  catch *
+    (log .error #"job_list_all failed: #{$ex/message}")
+    []
+  )
+)
+
+(fn $ns/job_list_due [now_ms]
+  (if_not DB then (return []))
+  (try
+    (var rows (DB .query "SELECT job_id, workspace_id, user_id, channel_id, thread_ts, schedule_type, text, interval_ms, cron_expr, next_run_ms FROM scheduled_jobs WHERE state = 'active' AND next_run_ms <= ? ORDER BY next_run_ms ASC" now_ms))
+    (if_not rows (return []))
+    (var result [])
+    (for r in rows
+      (result .append {^job_id r/0 ^workspace_id r/1 ^user_id r/2
+                        ^channel_id r/3 ^thread_ts r/4 ^schedule_type r/5
+                        ^text r/6 ^interval_ms r/7 ^cron_expr r/8
+                        ^next_run_ms r/9})
+    )
+    result
+  catch *
+    (log .error #"job_list_due failed: #{$ex/message}")
+    []
+  )
+)
+
+(fn $ns/job_update_state [job_id new_state]
+  (if_not DB then (return))
+  (log .debug #"job_update_state #{job_id} -> #{new_state}")
+  (try
+    (DB .exec "UPDATE scheduled_jobs SET state = ? WHERE job_id = ?" new_state job_id)
+  catch *
+    (log .error #"job_update_state failed: #{$ex/message}")
+  )
+)
+
+(fn $ns/job_update_next_run [job_id next_run_ms]
+  (if_not DB then (return))
+  (log .debug #"job_update_next_run #{job_id} -> #{next_run_ms}")
+  (try
+    (DB .exec "UPDATE scheduled_jobs SET next_run_ms = ? WHERE job_id = ?" next_run_ms job_id)
+  catch *
+    (log .error #"job_update_next_run failed: #{$ex/message}")
+  )
+)
+
+(fn $ns/job_mark_running [job_id]
+  (if_not DB then (return))
+  (var now gene/now/.call/.to_i)
+  (try
+    (DB .exec "UPDATE scheduled_jobs SET state = 'running', last_run_ms = ? WHERE job_id = ?" now job_id)
+  catch *
+    (log .error #"job_mark_running failed: #{$ex/message}")
+  )
+)
+
+(fn $ns/job_mark_completed [job_id]
+  (if_not DB then (return))
+  (try
+    (DB .exec "UPDATE scheduled_jobs SET state = 'active', retry_count = 0, last_error = '' WHERE job_id = ?" job_id)
+  catch *
+    (log .error #"job_mark_completed failed: #{$ex/message}")
+  )
+)
+
+(fn $ns/job_mark_failed [job_id error_msg]
+  (if_not DB then (return))
+  (var now gene/now/.call/.to_i)
+  (log .warn #"job_mark_failed #{job_id}: #{error_msg}")
+  (try
+    (DB .exec "UPDATE scheduled_jobs SET retry_count = retry_count + 1, last_error = ?, last_run_ms = ?, state = CASE WHEN retry_count + 1 > max_retries THEN 'dead_letter' ELSE 'active' END, next_run_ms = CASE WHEN retry_count + 1 > max_retries THEN next_run_ms ELSE ? + backoff_ms END WHERE job_id = ?"
+      error_msg now now job_id)
+  catch *
+    (log .error #"job_mark_failed failed: #{$ex/message}")
   )
 )

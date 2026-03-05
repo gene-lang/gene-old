@@ -249,7 +249,6 @@ m/key                         # Map access
 - **Maps**: Use `^` prefix for keys: `{^name "Alice"}`
 - **Arrays**: Use slash for access: `arr/0`
 - **Classes**: Use `/` for properties, `/.` for methods
-- **Variables**: Use `NIL` not `nil`
 
 **STUDY `examples/full.gene` BEFORE WRITING GENE CODE!**
 

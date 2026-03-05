@@ -1,0 +1,31 @@
+# GeneClaw Cron Utilities
+# Shared cron-next helper for scheduler and schedule tool.
+
+(var log (new genex/logging/Logger $ns))
+
+(fn $ns/compute_cron_next [cron_expr base_ms]
+  (var script_path "src/tools/cron_next.mjs")
+  (var check (system/shell #"test -f #{script_path}"))
+  (if (check/exit_code != 0)
+    (script_path = "example-projects/geneclaw/src/tools/cron_next.mjs")
+  )
+  (var cmd #"node #{script_path} '#{cron_expr}' #{base_ms}")
+  (log .debug #"cron_next cmd: #{cmd}")
+  (var result (system/shell cmd))
+  (if (result/exit_code != 0)
+    (log .error #"cron_next failed: #{result/output}")
+    (return nil)
+  )
+  (try
+    (var parsed (gene/json/parse result/output))
+    (if parsed/ok
+      parsed/next_run_ms
+    else
+      (log .error #"cron_next error: #{parsed/error}")
+      nil
+    )
+  catch *
+    (log .error #"cron_next parse error: #{$ex/message}")
+    nil
+  )
+)

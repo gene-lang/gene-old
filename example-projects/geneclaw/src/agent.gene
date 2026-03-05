@@ -169,7 +169,7 @@
 
       # Parse arguments JSON string
       (var tool_args (try (gene/json/parse tool_args_str) catch * {}))
-      (var tool_result (invoke_tool run_id workspace_id tool_name tool_args))
+      (var tool_result (invoke_tool run_id workspace_id user_id channel_id tool_name tool_args))
 
       # Build result text
       (var result_text (if tool_result/ok

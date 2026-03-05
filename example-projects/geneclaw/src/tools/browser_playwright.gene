@@ -29,8 +29,11 @@
      }
      ^required ["action"]}
     (fn [args]
-      (var tool_dir "src/tools")
-      (var script_path #"#{tool_dir}/playwright_action.mjs")
+      (var script_path "src/tools/playwright_action.mjs")
+      (var check (system/shell #"test -f #{script_path}"))
+      (if (check/exit_code != 0)
+        (script_path = "example-projects/geneclaw/src/tools/playwright_action.mjs")
+      )
       (var state_dir #"#{workspace_root}/playwright")
       (var state_file #"#{state_dir}/state.json")
 
@@ -50,7 +53,7 @@
       (try
         (system/shell #"rm -f #{req_file}")
       catch *
-        NIL
+        nil
       )
 
       (if (result/exit_code != 0)

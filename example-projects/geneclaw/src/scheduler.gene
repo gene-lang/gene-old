@@ -1,0 +1,111 @@
+# GeneClaw Scheduler
+# Polls DB for due jobs, dispatches them asynchronously, reports to Slack.
+
+(import SCHEDULER_TICK_MS SLACK_BOT_TOKEN from "config")
+(import job_list_due job_mark_running job_mark_completed job_mark_failed job_update_next_run job_update_state from "db")
+(import compute_cron_next from "cron")
+(import run_agent from "agent")
+(import genex/http/http_post)
+
+(var log (new genex/logging/Logger $ns))
+(var scheduler_busy false)
+
+# ------------------------------------------------------------------
+# Dispatch a single due job
+# ------------------------------------------------------------------
+(fn dispatch_job [job]
+  (var job_id job/job_id)
+  (log .info #"Dispatching scheduled job #{job_id}")
+
+  (try
+    (var result (run_agent job/workspace_id job/user_id job/channel_id job/text))
+
+    # Report to Slack channel/thread if configured
+    (if (SLACK_BOT_TOKEN && job/channel_id)
+      (var reply {
+        ^channel job/channel_id
+        ^text #"[Scheduled: #{job_id}] #{result/response}"
+      })
+      (if (job/thread_ts && ((job/thread_ts .to_s) != ""))
+        (reply .set "thread_ts" job/thread_ts)
+      )
+      (try
+        (await (http_post "https://slack.com/api/chat.postMessage"
+          reply/.to_json
+          {
+            ^Content-Type "application/json; charset=utf-8"
+            ^Authorization #"Bearer #{SLACK_BOT_TOKEN}"
+          }))
+        (log .info #"Slack report sent for job #{job_id}")
+      catch *
+        (log .error #"Slack report failed for job #{job_id}: #{$ex/message}")
+      )
+    )
+
+    # Advance schedule
+    (var now gene/now/.call/.to_i)
+    (if (job/schedule_type == "once")
+      (job_update_state job_id "completed")
+      (log .info #"One-shot job #{job_id} completed")
+    elif (job/schedule_type == "interval")
+      (var next (now + job/interval_ms))
+      (job_mark_completed job_id)
+      (job_update_next_run job_id next)
+      (log .info #"Interval job #{job_id} next run at #{next}")
+    elif (job/schedule_type == "cron")
+      (var next (compute_cron_next job/cron_expr now))
+      (if next
+        (job_mark_completed job_id)
+        (job_update_next_run job_id next)
+        (log .info #"Cron job #{job_id} next run at #{next}")
+      else
+        (job_mark_failed job_id "Could not compute next cron run")
+      )
+    )
+
+  catch *
+    (log .error #"Job #{job_id} failed: #{$ex/message}")
+    (job_mark_failed job_id $ex/message)
+  )
+)
+
+# ------------------------------------------------------------------
+# Tick — find due jobs and dispatch them
+# ------------------------------------------------------------------
+(fn scheduler_tick []
+  (if scheduler_busy (return))
+  (scheduler_busy = true)
+  (try
+    (var now gene/now/.call/.to_i)
+    (var due_jobs (job_list_due now))
+    (if (due_jobs/.size > 0)
+      (log .info #"Scheduler tick: #{due_jobs/.size} job(s) due")
+      (due_jobs .each (fn [job]
+        (job_mark_running job/job_id)
+        (dispatch_job job)
+      ))
+    )
+  catch *
+    (log .error #"Scheduler tick error: #{$ex/message}")
+  )
+  (scheduler_busy = false)
+)
+
+# ------------------------------------------------------------------
+# Start — chain sleep_async callbacks inside run_forever
+# ------------------------------------------------------------------
+(fn $ns/start_scheduler []
+  (log .info #"Scheduler started (tick every #{SCHEDULER_TICK_MS}ms)")
+  (fn tick_loop []
+    (var f (gene/sleep_async SCHEDULER_TICK_MS))
+    (f .on_success (fn [_]
+      (try
+        (scheduler_tick)
+      catch *
+        (log .error #"Scheduler loop error: #{$ex/message}")
+      )
+      (tick_loop)
+    ))
+  )
+  (tick_loop)
+)

@@ -18,9 +18,12 @@
 # Workspace root for filesystem tool
 ($ns/WORKSPACE_ROOT = ($env/GENECLAW_WORKSPACE || #"#{$env/HOME}/.geneclaw"))
 
+# Scheduler tick interval
+($ns/SCHEDULER_TICK_MS = (($env/GENECLAW_SCHEDULER_TICK_MS || "30000") .to_i))
+
 # Log loaded configuration (redact secrets)
 (log .info #"PORT=#{PORT} DB_PATH=#{DB_PATH} MODEL=#{OPENAI_MODEL}")
-(log .info #"MAX_STEPS=#{MAX_STEPS} MAX_TOOL_CALLS=#{MAX_TOOL_CALLS}")
+(log .info #"MAX_STEPS=#{MAX_STEPS} MAX_TOOL_CALLS=#{MAX_TOOL_CALLS} SCHEDULER_TICK_MS=#{SCHEDULER_TICK_MS}")
 (log .info #"OPENAI_TIMEOUT_MS=#{OPENAI_TIMEOUT_MS}")
 (log .info #"WORKSPACE_ROOT=#{WORKSPACE_ROOT}")
 (if OPENAI_BASE_URL/.empty

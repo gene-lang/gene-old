@@ -7,6 +7,7 @@
 (import init_db from "db")
 (import init_tools from "tools")
 (import run_agent from "agent")
+(import start_scheduler from "scheduler")
 (import genex/http/http_post)
 
 (var log (new genex/logging/Logger $ns))
@@ -176,6 +177,7 @@
 (log .info "=== GeneClaw Agent Platform ===")
 (init_db)
 (init_tools)
+(start_scheduler)
 
 (if SLACK_APP_TOKEN
   # Socket Mode: connect to Slack via outbound WebSocket (no public URL needed)

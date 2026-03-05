@@ -10,6 +10,7 @@
 (import register_write_file_tool from "tools/write_file")
 (import register_http_get_tool from "tools/http_get")
 (import register_browser_playwright_tool from "tools/browser_playwright")
+(import register_schedule_tool from "tools/schedule")
 
 (var log (new genex/logging/Logger $ns))
 
@@ -25,9 +26,17 @@
   (log .debug #"Registered tool: #{name}")
 )
 
-(fn $ns/invoke_tool [run_id workspace_id tool_name args]
+(fn $ns/invoke_tool [run_id workspace_id user_id channel_id tool_name args]
   (log .info #"invoke_tool run=#{run_id} tool=#{tool_name}")
   (log .debug #"invoke_tool args=#{args/.to_json}")
+
+  # Inject invocation context so tools like 'schedule' can access it
+  (args .set "_context" {
+    ^run_id run_id
+    ^workspace_id workspace_id
+    ^user_id user_id
+    ^channel_id channel_id
+  })
 
   (var tool (TOOLS .get tool_name))
   (if_not tool
@@ -94,6 +103,7 @@
   (register_write_file_tool register_tool log WORKSPACE_ROOT)
   (register_http_get_tool register_tool log)
   (register_browser_playwright_tool register_tool log WORKSPACE_ROOT)
+  (register_schedule_tool register_tool log)
 
   (log .info #"Registered #{TOOLS/.size} tools")
 )

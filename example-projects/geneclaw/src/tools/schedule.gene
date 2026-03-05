@@ -1,0 +1,102 @@
+# GeneClaw tool: schedule
+# LLM-facing tool for creating and managing scheduled jobs.
+
+(import job_create job_get job_list_all job_update_state from "db")
+(import compute_cron_next from "cron")
+
+(fn $ns/register_schedule_tool [register_tool log]
+  (register_tool "schedule"
+    "Create, list, or manage scheduled jobs. Supports one-shot delays, recurring intervals, and cron expressions. Results are sent to the specified Slack channel/thread."
+    {^type "object"
+     ^properties {
+       ^action       {^type "string"  ^description "create | list | get | cancel | pause | resume"}
+       ^type         {^type "string"  ^description "Schedule type (create only): once | interval | cron"}
+       ^text         {^type "string"  ^description "The prompt/command text the agent will execute when the job fires"}
+       ^delay_ms     {^type "integer" ^description "Delay in ms from now (type=once)"}
+       ^interval_ms  {^type "integer" ^description "Repeat interval in ms (type=interval)"}
+       ^cron         {^type "string"  ^description "5-field cron expression (type=cron), e.g. '30 9 * * 1-5'"}
+       ^job_id       {^type "string"  ^description "Job ID (get/cancel/pause/resume)"}
+       ^channel_id   {^type "string"  ^description "Slack channel to report results to"}
+       ^thread_ts    {^type "string"  ^description "Slack thread timestamp (optional)"}
+       ^meta         {^type "object"  ^description "Arbitrary metadata stored with the job"}
+     }
+     ^required ["action"]}
+    (fn [args]
+      (var action args/action)
+      (var ctx (args .get "_context" {}))
+
+      (if (action == "create")
+        (var stype (args .get "type" "once"))
+        (var text (args .get "text" ""))
+        (if text/.empty
+          (return {^error "Missing 'text' for scheduled job"})
+        )
+        (var workspace_id (ctx .get "workspace_id" "default"))
+        (var user_id      (ctx .get "user_id" "anonymous"))
+        (var channel_id   (args .get "channel_id" (ctx .get "channel_id" "")))
+        (var thread_ts    (args .get "thread_ts" ""))
+        (var meta         (args .get "meta" {}))
+        (var now gene/now/.call/.to_i)
+
+        (var interval_ms 0)
+        (var cron_expr "")
+        (var next_run_ms 0)
+
+        (if (stype == "once")
+          (var delay (args .get "delay_ms" 60000))
+          (next_run_ms = (now + delay))
+        elif (stype == "interval")
+          (interval_ms = (args .get "interval_ms" 60000))
+          (var delay (args .get "delay_ms" interval_ms))
+          (next_run_ms = (now + delay))
+        elif (stype == "cron")
+          (cron_expr = (args .get "cron" ""))
+          (if cron_expr/.empty
+            (return {^error "Missing 'cron' expression for cron job"})
+          )
+          (var next (compute_cron_next cron_expr now))
+          (if_not next
+            (return {^ok false ^error "Invalid cron expression or no match within search window"})
+          )
+          (next_run_ms = next)
+        else
+          (return {^error #"Unknown schedule type: #{stype}"})
+        )
+
+        # Generate job_id
+        (var job_id #"sched-#{now}-#{(math/random_int 99999 10000)}")
+
+        (job_create job_id workspace_id user_id channel_id thread_ts
+          stype text interval_ms cron_expr next_run_ms meta)
+
+        (log .info #"Created #{stype} job #{job_id} next_run=#{next_run_ms}")
+        {^ok true ^job_id job_id ^schedule_type stype ^next_run_ms next_run_ms}
+
+      elif (action == "list")
+        (var workspace_id (ctx .get "workspace_id" "default"))
+        (var jobs (job_list_all workspace_id))
+        {^ok true ^jobs jobs}
+
+      elif (action == "get")
+        (var jid args/job_id)
+        (if jid/.empty (return {^error "Missing job_id"}))
+        (var job (job_get jid))
+        (if job then {^ok true ^job job}
+        else {^ok false ^error #"Job not found: #{jid}"})
+
+      elif ((action == "cancel") || (action == "pause") || (action == "resume"))
+        (var jid args/job_id)
+        (if jid/.empty (return {^error "Missing job_id"}))
+        (var new_state (if (action == "cancel") "cancelled"
+                       elif (action == "pause") "paused"
+                       else "active"))
+        (job_update_state jid new_state)
+        (log .info #"Job #{jid} -> #{new_state}")
+        {^ok true ^job_id jid ^state new_state}
+
+      else
+        {^error #"Unknown schedule action: #{action}"}
+      )
+    )
+  )
+)
