@@ -23,10 +23,26 @@ Gene relies on a single `Value` type that can represent maps, arrays, genes, nam
   `.../!` throws if the current selector value is `void` (missing). This can appear mid-path (`a/!/b`) or at the end (`a/b/!`).
 
 - **Selector call `./`**  
-  Form: `(./ target key [default])`. Compiles with `compile_selector` and executes using `IkGetMemberOrNil` or `IkGetMemberDefault`. Behaves like a function so it can be partially applied or embedded in macros.
+  Form: `(target ./ key [default])`. Compiles with `compile_selector` and executes using `IkGetMemberOrNil` or `IkGetMemberDefault`. Behaves like a function so it can be partially applied or embedded in macros.
 
-- **Selector literal `(@ "prop")`**  
-  `compile_at_selector` wraps the property in a gene that the VM understands. When invoked like `((@ "name") user)` it desugars to `(./ user "name")`.
+- **Selector literals and shorthand**  
+  `(@ "name")`, `(@ "a" "b")`, `@a/b`, `@0/name`, and `@users/*/name` all compile to selector values (`VkSelector`). The shorthand path is split on `/` during compilation, and numeric / special segments are preserved as selector segments rather than normal symbol lookups.
+
+- **Selector method shorthand**  
+  Selectors can be applied as an object method:
+  ```gene
+  (data .@users/0/name)
+  (data .@ "users" 1 "name")
+  ```
+  These compile to the `@` method on `Object`, which constructs a selector and immediately applies it to the receiver.
+
+- **Selection-mode token segments**  
+  Inside selector paths, the following segments are implemented today:
+  - `*` expands array items or gene children into a value stream
+  - `**` expands map / namespace / class / instance / gene props into an entry stream
+  - `@` collects the current stream into an array value
+  - `@@` collects an entry stream into a map
+  - `!` asserts that the current selector result is not missing / empty
 
 - **Shorthand for `$set`**  
   `$set` accepts selector shorthand such as `@prop` or `@0`. During compilation the shorthand is expanded to the `(@ ...)` form. Only a single property/index is supported today.
@@ -36,63 +52,64 @@ Gene relies on a single `Value` type that can represent maps, arrays, genes, nam
   ```gene
   (var user {^profile {^name "Ada"}})
   ($set user @profile  {^name "Ada Lovelace"})
-  ($set user @profile/name "Ada L.")
+  ($set user @profile {^name "Ada L."})
   ```
 
 - **Callable path segments (transform)**  
   A selector path can include a function segment (usually created with `fn`). The function receives the currently matched value and its return value is passed to the next segment. The return value is **not** automatically written back into the parent container; use `$set` (and future `$update`) for assignment-style updates. In-place mutation is still possible when the matched value is a mutable container.  
   ```gene
   (var data {^a 1})
-  ((@ a (fn [item] (item + 1))) data)   # returns 2, does not change data/a
-  ((@ a (fn [item] (item .append 10) item)) data)  # mutates item in place
+  ((@ "a" (fn [item] (item + 1))) data)   # returns 2, does not change data/a
+  ((@ "test" "x" 1 (fn [v] (v + 1))) {^test {^x [0 10 20]}})  # returns 11
   ```
 
 ### Runtime Semantics
 
-- `IkGetMemberOrNil` is the workhorse instruction. It accepts string/symbol/int selectors and returns `void` when the key/index is missing. Arrays support negative indexing. Gene properties, namespace members, class static members, and instance properties are all handled.
+- Selector literals are runtime values of kind `VkSelector`. They are callable through `Selector.call`, rather than being special-cased at every call site.
+- `IkGetMemberOrNil` is the workhorse instruction for plain `/` access. It accepts string/symbol/int selectors and returns `void` when the key/index is missing. Arrays support negative indexing. Gene properties, namespace members, class static members, and instance properties are all handled.
 - `IkGetMemberDefault` mirrors the above but takes a default value. The compiler emits it automatically when a third argument is present in `(./ target key default)`.
 - `IkSetMember` and `IkSetChild` perform mutation for string/symbol keys and integer indices respectively.
-- `IkAssertNotVoid` throws if the current value is `void`. This is the runtime primitive backing `/!`.
+- `IkAssertValue` is the runtime primitive backing plain `/!` path assertions. Selector-literal `!` checks are handled inside `Selector.call`.
+- `Selector.call` has three execution modes:
+  - value mode: a single current value
+  - value-stream mode: multiple values produced by `*`
+  - entry-stream mode: key/value pairs produced by `**`
+- In stream modes, subsequent normal selector segments are applied element-wise. At the end of evaluation:
+  - value streams are collected into arrays
+  - entry streams are collected into arrays of `[key value]` pairs unless `@@` is used
+- Callable selector segments are executed directly by the runtime:
+  - in value mode: `fn(value)`
+  - in entry mode: `fn(key, value)`
+- Missing values are skipped in stream mode. A default argument to `Selector.call` is used when the final result is empty / missing.
 
-## Recommendations: Map/Reduce as First-Class Selector Operators
+## Current Selection-Mode Behavior
 
-To approach CSS selector + XPath query power, selectors need to support **match-many** queries and then **transform/aggregate** them. The recommended model is:
+Selectors already support a basic match-many pipeline.
 
-- Keep current `/`, `./`, `Selector.call` as **value-mode** (single value, missing → `void`).
-- Add **selection-mode** APIs that return a collection of matches (possibly empty), and allow *operators* like map/reduce to run on that selection.
+- `(@ users * name)` means:
+  - lookup `users`
+  - expand array items
+  - lookup `name` on each item
+  - collect the results into an array
 
-### 1) Selection Mode vs Value Mode
+Examples:
 
-`void` is a great sentinel for “missing key/index/member” in value-mode, but it is awkward for match-many queries (where “no matches” should be an empty set).
+```gene
+# Nested map/array traversal via shorthand
+(@users/*/name data)
 
-Recommendation:
-- `Selector.call(selector, target, [default])` → value-mode (existing)
-- ``Selector.query(selector, target, ^mode `all|`first)`` → selection-mode (new)
-  - ``^mode `all``: returns an array (empty when no matches)
-  - ``^mode `first``: returns first match or `void`
+# Explicit selector literal form
+((@ "users" "*" "name") data)
 
-This cleanly separates “missing member” (`void`) from “matched nothing” (`[]`).
+# Entry-stream transform, then collect back to map
+((@ props ** (fn [k v] [k (f v)]) @@) target)
+```
 
-### 2) Operator Segments: `(map ...)`, `(filter ...)`, `(reduce ...)`, `(collect)`
-
-Define a small set of selector-specific operator segments:
-- `(map fn)` → apply `fn` to each element of the current selection/array
-- `(filter pred)` → keep elements where `pred` returns truthy
-- `(reduce init fn)` → fold elements into an accumulator
-- `(collect)` → normalize the current selection into an array (convenience; often the implicit final step in `query`)
-
-Important semantic recommendation (to avoid surprises):
-- A **callable segment** `(fn ...)` continues to mean “transform the current value”.
-- A **map** operator is always explicit; we do not implicitly map just because the current value happens to be an array.
-
-### 2.1) Token Operators: `*`, `**`, `@`, `@@`
-
-For ergonomics (especially in selector-heavy code), we can introduce single-token operators as selector path segments:
-
+Supported token operators today:
 - `*` (**expand children**)  
   Converts an array / gene into a stream of individual child values.
   - On arrays: expands elements
-  - On genes: expands children (equivalent to `:$children`)
+  - On genes: expands children
   - On other types: produces an empty stream
 
 - `**` (**expand entries**)  
@@ -110,107 +127,58 @@ For ergonomics (especially in selector-heavy code), we can introduce single-toke
 - `@@` (**collect entries**)  
   Collects the current stream of `[key value]` pairs into a map and switches back to value-mode.
 
-Pair representation:
-- Entry streams are represented as 2-element arrays `[key value]`, so `@@` can rebuild a map deterministically (last write wins on duplicate keys).
-- When mapping an entry stream with a callable segment, the callable is invoked as `fn(k, v)` (2 args). If it returns `[key value]`, both key and value are replaced; otherwise only the value is replaced and the key is preserved.
-
-Syntax/compatibility notes:
-- These token operators are intended to work **inside selector literals** like `(@ ... )`. Until the shorthand grammar is extended, forms like `@a/*/b/@` will be parsed as plain member lookups, not selector operators.
-- `@@` currently looks like an `@`-prefixed symbol in normal code; outside selector literals it may be interpreted as selector shorthand by the compiler. Inside `(@ ... )` it is just a selector segment value.
-
-### 2.2) Implicit Mapping in Selection Mode
-
 Once `*` or `**` has turned the pipeline into selection-mode, subsequent **normal path segments** are applied element-wise (i.e. the pipeline implicitly maps over the current selection). This yields the “map array children, process” behavior without requiring an explicit `(map ...)`.
 
-Default end-of-selector reduction (recommended):
+Default end-of-selector reduction:
 - If selector execution ends while in **value-stream** mode, the result is automatically collected to an array (equivalent to appending a trailing `@`).
 - If selector execution ends while in **entry-stream** mode, the result is an array of `[key value]` pairs unless an explicit `@@` is used to collect into a map.
 
-Missing values in selection-mode should behave like “no match”:
+Missing values in selection-mode behave like “no match”:
 - `void` is skipped when processing streams of values or pairs (it does not appear in collected output).
 - Use `/!` when you want to assert that at least one match exists (throws if the current value is `void` in value-mode, or if the current stream is empty in selection-mode).
 
-### 3) Example: Map Children and Reduce Into a Collection
+## Future Direction
 
-```gene
-# Select children, transform each, then reduce into an array accumulator.
-# (acc .append v) returns acc, so it works well as a reducer.
-((@ a :$children
-    (map (fn [child] ...))
-    (reduce [] (fn [acc v] (acc .append v)))
- ) target)
-```
-
-This pattern directly supports “map array children, process, then reduce to a collection at the end”.
-
-Token-operator equivalent:
-
-```gene
-((@ a *               # expand children/items
-    (fn [child] ...)  # transform each selected child
- ) target)
-```
-
-And for keyed collections:
-
-```gene
-((@ props **                  # stream [k v] pairs
-    (fn [k v] [k (f v)])       # transform values (key is preserved unless you return [k v])
-    @@                        # collect back into a map (otherwise you get an array of [k v])
- ) target)
-```
-
-### 4) Implementation Notes (for later)
-
-- Start by supporting operators when the current value is a `VkArray` (low risk).
-- Extend selection-mode once descendant traversal / `:$children` / `_` land.
-- For performance, compile common operator chains into dedicated fast paths (avoid allocating intermediate arrays when `map → reduce` can stream).
+Selectors are useful today, but they are still missing the pieces needed for full CSS/XPath-style querying. The next design layer should build on the existing `VkSelector` + `Selector.call` model rather than replace it.
 
 ## Tests Exercising the Implementation
 
 `tests/test_selector.nim` contains the active coverage:
 - `m/x` and `arr/idx` for maps and arrays.
 - `./` for map lookup with and without default.
-- Invocation of `(@ "prop")` and `$set` using `@` selectors.
-- Negative array indices are covered indirectly inside the VM but not yet asserted via tests.
+- Invocation of `(@ "prop")` and multi-segment selector literals.
+- Shorthand selectors such as `@a/b`, `@0/name`, and `@users/*/name`.
+- Selector method shorthand such as `(data .@users/0/name)` and `(data .@ "users" 1 "name")`.
+- Selection-mode behavior with `*`.
 
-Many more scenarios are sketched but commented out, signalling the intended scope for selectors once features land.
+The existing tests show that shorthand selectors and stream-style expansion are already part of the current surface area, not just future plans.
 
 ## Gaps and Missing Features
 
-- **Chained shorthand selectors**: Parsing for `@prop/child`, `@0/name`, `@.method`, `@*` aggregation, and composite selector lists is unfinished.
 - **Range, slices, and list selectors**: Index ranges (`(0 .. 2)`), lists (`@ [0 1]`), and composite selectors are commented out in tests and lack compiler/VM support.
 - **Map key patterns and property lists**: Regex/prefix matches, selecting multiple keys at once, and retrieving keys/properties as collections are unimplemented.
 - **Gene-specific views**: Accessors for type, props, keys, values, children, and descendants (`:$type`, `:$children`, `_`, etc.) exist only in the design notes.
-- **Predicate-based selectors**: There is no mechanism to pass a predicate function (`fn`) that filters descendants or siblings.
-- **Selector flags and modes**: Concepts like `match-first` vs `match-all` and `error_on_no_match` are undefined beyond comments.
-- **Transform pipelines**: We do not yet surface APIs to apply transformations or callbacks to selector matches (akin to CSS selectors + rules).
-- **Selector collection operators**: There is no native selector support for `(map ...)`, `(filter ...)`, `(reduce ...)`, or `(collect)` over match sets.
+- **Predicate filtering**: Callable segments can transform values, but there is no dedicated predicate/filter selector operator yet.
+- **Selector query API**: There is no separate `Selector.query` / match-first vs match-all API surface; everything routes through `Selector.call`.
+- **Higher-order selector operators**: There is no native `(map ...)`, `(filter ...)`, or `(reduce ...)` selector operator syntax. Current behavior relies on `*`, `**`, callable segments, and implicit stream mapping.
 - **Mutation breadth**: `$set` handles only direct property/index assignment. There is no support for appending, removing, or mutating collections returned by composite selectors.
-- **Dedicated error handling**: Without `void` propagation and flags, callers must manually guard against `nil` and cannot distinguish “missing” from “present but empty”.
+- **Multi-segment update/delete**: There is no generalized `selector_update`, `selector_delete`, or `$update`/`$remove` API yet.
 
 ## Design Direction
 
 1. **Absence Semantics**
-   - Update `IkGetMemberOrNil` (and friends) to return `VOID` when a member/index is not found.
-   - Keep `(./ target key default)` returning the default even if the target is `void`, so defaults stay predictable.
+   - Keep the current distinction: `nil` is data, `void` is selector miss.
+   - Keep `(./ target key default)` and `Selector.call(... default)` returning the default when the final result is missing / empty.
    - Consider an `error_on_no_match` flag or explicit function when callers want hard failures.
 
 2. **Selector Expression Grammar**
-   - Formalize the grammar for selectors: literals (`@`, `/`), composites (`@*`, `[ ... ]`), predicates, and descendant operators.
-   - Extend the compiler’s desugaring logic to produce dedicated instructions or data structures instead of ad-hoc genes.
+   - Formalize the grammar for ranges, list selectors, predicates, and descendant operators.
+   - Preserve current shorthand forms (`@a/b`, `@0/name`, `@users/*/name`) as the base grammar rather than treating them as legacy syntax.
 
 3. **Execution Model**
-   - Distinguish strict vs tolerant path segments: intermediate segments use `IkGetMember` (which should raise on missing members once `void` semantics land) while the final segment uses `IkGetMemberOrNil` to provide a soft default.
-   - Introduce an `IkAssertNotVoid` instruction emitted by suffix operators such as `!` (e.g. `x/a/!` compiles to `IkResolve x; IkGetMember a; IkAssertNotVoid`) so callers can opt into hard guarantees inline.
-   - Represent `@...` selectors as compact values and delegate execution to a small set of native functions:
-     - `selector_call(selector, target)` → perform the read traversal and return the value (used for `(@a/b) obj` and `/` shorthand).
-     - `selector_update(selector, target, value)` → walk the path and assign the new value (used by `$set` and future `$update`).
-     - `selector_delete(selector, target)` → remove the addressed member/index.
-     - `selector_insert(selector, target, value)` → optional helper for collection inserts/appends when we need it.
-   - The compiler only needs to emit the selector literal and call the appropriate native function; traversal logic stays centralized in Nim.
-   - Introduce richer selector values (structs) that carry mode flags, predicate callbacks, and path steps.
-   - Implement traversal in the VM that can handle match-all vs match-first, descendant searches, and predicate evaluation efficiently, possibly via iterators or generators.
+   - Keep selectors as compact runtime values and continue delegating traversal to `Selector.call`.
+   - Extend the existing stream-mode execution with predicates, descendant traversal, and richer query flags rather than introducing a second selector engine.
+   - Add native helpers like `selector_update`, `selector_delete`, and `selector_insert` for multi-segment mutation paths.
 
 4. **Mutation and Transformation APIs**
    - Add primitives like `$update`, `$remove`, and `$transform` that compose selectors with callbacks.
@@ -222,10 +190,10 @@ Many more scenarios are sketched but commented out, signalling the intended scop
 
 ## Next Steps
 
-1. Ship `void` propagation and adjust tests to assert the distinction between `nil` and `void`.
-2. Re-enable simple shorthand (`@prop/child`, ranges) and add VM support for composite selectors.
-3. Document and implement namespace/gene specific selectors (`:$type`, `_`, descendants).
-4. Design the API for selector-driven transformations and mutations, validating the ergonomics on real-world data structures.
+1. Add tests for `**`, `@`, `@@`, callable entry transforms, and `!` in stream mode.
+2. Implement ranges and list selectors.
+3. Add namespace/gene specific selectors (`:$type`, `:$children`, descendants).
+4. Design mutation helpers for multi-segment selector paths.
 5. Iterate on performance once the feature set stabilizes; selector-heavy code should remain fast thanks to the bytecode VM.
 
 Selectors are central to making Gene feel fluid when manipulating nested data. By closing these gaps and committing to `void` semantics, we can deliver an access and transformation system that matches the flexibility promised by the language’s generic value model.
@@ -237,8 +205,8 @@ Selectors are central to making Gene feel fluid when manipulating nested data. B
    - Expand `tests/test_selector.nim` to cover nil vs void behaviour so regressions are caught early.
 
 2. **Selector Surface Clean-up**
-   - Fix the compiler/parser to support chained shorthand (`@foo/bar`) and update docs/tests accordingly.
    - Implement range and list selectors for arrays (`(0 .. 2)`, `@ [0 1]`) alongside VM opcodes that can return multiple values.
+   - Expand tests/docs around the already-supported shorthand forms and stream operators.
 
 3. **Namespace & Gene Introspection**
    - Deliver the planned built-ins like `:$type`, `:$children`, `_`, and key/value selectors so gene manipulation patterns become expressive.

@@ -2,7 +2,19 @@
 
 ## Overview
 
-Generator functions are special functions that can pause execution and yield multiple values over time. Unlike regular functions that return once, generators maintain state between calls and can produce a sequence of values lazily.
+Generator functions are pull-based producers. Unlike regular functions that return once, generators suspend at `yield`, preserve local state, and resume when the caller requests the next value.
+
+Current semantics:
+- Exhaustion is reported with `NOT_FOUND`.
+- `void` is distinct from exhaustion. If a generator explicitly yields `void`, that is a real yielded value.
+- The public runtime API today is `.next` and `.has_next`.
+- Generators are currently a low-level lazy sequence primitive, not yet a full language-wide iteration protocol.
+
+Typical uses:
+- Lazy counters and ranges
+- Stateful sequences such as Fibonacci
+- Wrapping pagination or streaming behind a pull API
+- Tree or token traversal without materializing all results up front
 
 ## Syntax
 
@@ -52,6 +64,39 @@ Generator functions are special functions that can pause execution and yield mul
 (gen .next)  # 1
 (gen .next)  # NOT_FOUND
 ```
+
+### Exhaustion vs `void`
+
+Generator exhaustion is `NOT_FOUND`, not `void`.
+
+```gene
+(fn values* []
+  (yield 1)
+  (yield void)
+  (yield 3))
+
+(var g (values*))
+(g .next)  # 1
+(g .next)  # void
+(g .next)  # 3
+(g .next)  # NOT_FOUND
+```
+
+This distinction is intentional:
+- `NOT_FOUND` means there is no next value.
+- `void` means the generator produced a value whose content is `void`.
+
+### Current Iteration Style
+
+Generators are currently meant to be consumed manually:
+
+```gene
+(var g (fibonacci* 5))
+(while (g .has_next)
+  (println (g .next)))
+```
+
+`for ... in` integration is not implemented yet, so generators should be treated as manual pull iterators for now.
 
 ## Implementation Architecture
 
@@ -160,17 +205,17 @@ Generator functions are special functions that can pause execution and yield mul
 
 ### Generator with State
 ```gene
-(fn accumulator* []
+(fn running-total* [xs]
   (var sum 0)
-  (while true
-    (var val (yield sum))
-    (if (!= val NOT_FOUND)
-      (sum = (+ sum val)))))
+  (for x in xs
+    (sum = (+ sum x))
+    (yield sum)))
 
-(var acc (accumulator*))
-(acc .next)      # 0
-(acc .send 5)    # 5
-(acc .send 10)   # 15
+(var totals (running-total* [1 2 3]))
+(totals .next)   # 1
+(totals .next)   # 3
+(totals .next)   # 6
+(totals .next)   # NOT_FOUND
 ```
 
 ## Future Enhancements
@@ -222,6 +267,8 @@ Generator functions are special functions that can pause execution and yield mul
    - Generators in higher-order functions
    - Generators as arguments
    - Generators in collections
+   - Explicitly cover `yield void` vs exhaustion
+   - Document that `for ... in generator` is not supported yet
 
 ## Implementation Phases
 
