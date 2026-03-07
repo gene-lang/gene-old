@@ -58,9 +58,9 @@
 # if / elif / else
 (if (i > 20)
   (println "i > 20")
-elif (i == 20)
+ elif (i == 20)
   (println "i == 20")
-else
+ else
   (println "i < 20")
 )
 
@@ -146,7 +146,7 @@ else
 (println "cfg/host/! =" cfg/host/!)
 (try
   (println cfg/missing/!)
-catch *
+ catch *
   (println "caught missing key")
 )
 
@@ -215,19 +215,19 @@ catch *
 # case with literals
 (var day 3)
 (case day
-  when 1 (println "Monday")
-  when 2 (println "Tuesday")
-  when 3 (println "Wednesday")
-  else   (println "Other day")
+ when 1 (println "Monday")
+ when 2 (println "Tuesday")
+ when 3 (println "Wednesday")
+ else   (println "Other day")
 )
 
 # case with Result-like patterns
 (var r (Ok 42))
 (case r
-  when (Ok v)
-    (println "Got Ok:" v)
-  when (Err e)
-    (println "Got Err:" e)
+ when (Ok v)
+  (println "Got Ok:" v)
+ when (Err e)
+  (println "Got Err:" e)
 )
 
 # ============================================================================
@@ -357,7 +357,7 @@ catch *
 
 (try
   (1 / 0)
-catch *
+ catch *
   (println "Caught division error:" $ex)
 )
 
@@ -369,7 +369,7 @@ catch *
 (println "positive_only(3) =" (positive_only 3))
 (try
   (positive_only -1)
-catch *
+ catch *
   (println "Caught precondition failure")
 )
 
@@ -508,8 +508,10 @@ catch *
 
 (fn my_add [a b]
   ^intent "Add two values"
-  ^examples [[1 2] -> 3
-             [2 3] -> 5]
+  ^examples [
+    [1 2] -> 3
+    [2 3] -> 5
+  ]
   (a + b)
 )
 (println "function_intent =" (function_intent my_add))
