@@ -125,16 +125,15 @@ proc normalize_if*(self: ptr Gene) =
 proc normalize_if_not*(self: ptr Gene) =
   ## Normalize (if_not cond body...) into the same props format as if,
   ## wrapping the condition with (not ...).
-  ## No elif branches are supported.
+  ## No elif or else branches are supported.
   if self.props.has_key("cond".to_key()):
     return
 
   type IfNotState = enum
-    Cond, CondDone, Body, Else
+    Cond, CondDone, Body
 
   var state = Cond
   var body: seq[Value]
-  var else_body: seq[Value]
 
   proc handler(input: Value) =
     case state:
@@ -152,31 +151,28 @@ proc normalize_if_not*(self: ptr Gene) =
       body = @[]
       if input == nil:
         not_allowed("if_not: missing body after condition")
+      elif input == "elif".to_symbol_value() or input == "elif_not".to_symbol_value():
+        not_allowed("if_not: elif branches are not supported; use if ... elif ... or nest if_not")
       elif input == "else".to_symbol_value():
-        state = Else
-        else_body = @[]
+        not_allowed("if_not: else branches are not supported; use if ... else ... or nest if_not")
       elif input != "then".to_symbol_value():
         body.add(input)
     of Body:
       if input == nil:
         discard
+      elif input == "elif".to_symbol_value() or input == "elif_not".to_symbol_value():
+        not_allowed("if_not: elif branches are not supported; use if ... elif ... or nest if_not")
       elif input == "else".to_symbol_value():
-        state = Else
-        else_body = @[]
+        not_allowed("if_not: else branches are not supported; use if ... else ... or nest if_not")
       else:
         body.add(input)
-    of Else:
-      if input == nil:
-        discard
-      else:
-        else_body.add(input)
 
   for item in self.children:
     handler(item)
   handler(nil)
 
   self.props["then".to_key()] = new_stream_value(body)
-  self.props["else".to_key()] = new_stream_value(else_body)
+  self.props["else".to_key()] = new_stream_value()
 
   if self.props["then".to_key()].ref.stream.len == 0:
     self.props["then".to_key()].ref.stream.add(NIL)

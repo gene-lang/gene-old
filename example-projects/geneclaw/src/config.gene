@@ -176,14 +176,14 @@ else
 else
   (log .info #"ANTHROPIC_BASE_URL=#{ANTHROPIC_BASE_URL}")
 )
-(if_not OPENAI_API_KEY/.empty
+(if (OPENAI_API_KEY/.empty == false)
   (log .info "OPENAI_API_KEY is set")
 else
   (log .warn "OPENAI_API_KEY not set - will run in mock mode")
 )
-(if_not ANTHROPIC_AUTH_TOKEN/.empty
+(if (ANTHROPIC_AUTH_TOKEN/.empty == false)
   (log .info "ANTHROPIC_AUTH_TOKEN is set")
-elif_not ANTHROPIC_API_KEY/.empty
+elif (ANTHROPIC_API_KEY/.empty == false)
   (log .info "ANTHROPIC_API_KEY is set")
 else
   (log .warn "Anthropic credentials not set - Anthropic provider will run in mock mode")

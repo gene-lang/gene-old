@@ -95,6 +95,34 @@ test_vm """
   )
 """, 2
 
+test_vm_error """
+  (if_not false
+    1
+  elif true
+    2
+  else
+    3
+  )
+"""
+
+test_vm_error """
+  (if_not false
+    1
+  else
+    3
+  )
+"""
+
+test_vm_error """
+  (if_not false
+    1
+  elif_not false
+    2
+  else
+    3
+  )
+"""
+
 test_vm """
   (var i 1)
 """, 1
