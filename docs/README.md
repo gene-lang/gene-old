@@ -22,6 +22,7 @@ Files live in `docs/` unless stated otherwise.
 - [generator_functions.md](generator_functions.md) — generator semantics and VM support
 - [arg_counter.md](arg_counter.md) — argument counting logic used by function matchers
 - [regex.md](regex.md) — Regexp literals and regex/string helper API
+- [json_serialization.md](json_serialization.md) — proposed tagged JSON format for round-tripping Gene values
 - [string_regex_design.md](string_regex_design.md) — design direction for UTF-8 strings, `CString` FFI, and Ruby-inspired string/regex support
 - [http_server_and_client.md](http_server_and_client.md) — HTTP extensions and runtime hooks
 - [packaging.md](packaging.md) — proposed package/dependency install workflow (Git refs + native build)

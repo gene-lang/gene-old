@@ -11,3 +11,11 @@
     "some string"
   ].to_json)
 )
+
+(println
+  (gene/json/serialize `hello)
+)
+
+(println
+  (gene/json/deserialize (gene/json/serialize "#GENE#tagged-string"))
+)

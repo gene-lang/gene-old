@@ -1,0 +1,13 @@
+# Tagged Gene JSON tests
+# Expected: "#GENE#hello"
+# Expected: #GENE#tagged-string
+# Expected: f
+# Expected: 2
+# Expected: Tagged Gene JSON tests done
+
+(println (gene/json/serialize `hello))
+(println (gene/json/deserialize (gene/json/serialize "#GENE#tagged-string")))
+(var node (gene/json/deserialize (gene/json/serialize `(f ^a 1 2))))
+(println node/.type)
+(println node/0)
+(println "Tagged Gene JSON tests done")
