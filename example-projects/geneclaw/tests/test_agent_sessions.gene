@@ -1,0 +1,9 @@
+#!/usr/bin/env gene run
+
+(import build_session_id from "agent")
+
+(assert ((build_session_id "ws" "chan") == "ws:chan"))
+(assert ((build_session_id "ws" "chan" "") == "ws:chan"))
+(assert ((build_session_id "ws" "chan" "1741553030.123456") == "ws:chan:1741553030.123456"))
+
+(println "ok")

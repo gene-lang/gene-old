@@ -34,7 +34,7 @@
         (var workspace_id (ctx .get "workspace_id" "default"))
         (var user_id      (ctx .get "user_id" "anonymous"))
         (var channel_id   (args .get "channel_id" (ctx .get "channel_id" "")))
-        (var thread_ts    (args .get "thread_ts" ""))
+        (var thread_ts    (args .get "thread_ts" (ctx .get "thread_ts" (ctx .get "thread_id" ""))))
         (var meta         (args .get "meta" {}))
         (var now gene/now/.call/.to_i)
 

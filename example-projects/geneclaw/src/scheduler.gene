@@ -19,7 +19,7 @@
   (log .info #"Dispatching scheduled job #{job_id}")
 
   (try
-    (var result (run_agent job/workspace_id job/user_id job/channel_id job/text))
+    (var result (run_agent job/workspace_id job/user_id job/channel_id job/text (job/thread_ts || "")))
 
     # Report to Slack channel/thread if configured
     (if (SLACK_BOT_TOKEN && job/channel_id)

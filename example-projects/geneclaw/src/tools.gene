@@ -36,7 +36,7 @@
   (log .debug #"Registered tool: #{name}")
 )
 
-(fn $ns/invoke_tool [run_id workspace_id user_id channel_id tool_name args]
+(fn $ns/invoke_tool [run_id workspace_id user_id channel_id thread_id tool_name args]
   (log .info #"invoke_tool run=#{run_id} tool=#{tool_name}")
   (var tool_args (if (args is Map) args else {}))
   (if (args is Map)
@@ -51,6 +51,8 @@
     ^workspace_id workspace_id
     ^user_id user_id
     ^channel_id channel_id
+    ^thread_id thread_id
+    ^thread_ts thread_id
   })
 
   (var tool (TOOLS .get tool_name))

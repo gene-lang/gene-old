@@ -24,6 +24,10 @@
   (genex/http/respond status body {^Content-Type "text/plain; charset=utf-8"})
 )
 
+(fn handle_socket_slack_command [workspace_id user_id channel_id thread_id text]
+  (run_agent workspace_id user_id channel_id text thread_id)
+)
+
 (fn get_header [req name default_val]
   # (try
     (var headers req/.headers)
@@ -67,9 +71,14 @@
     (var workspace_id (body/workspace_id || "default"))
     (var user_id (body/user_id || "anonymous"))
     (var channel_id (body/channel_id || "general"))
+    (var thread_id (body/thread_id || body/thread_ts || ""))
     (var text body/text)
 
-    (log .info #"Chat request workspace=#{workspace_id} user=#{user_id} channel=#{channel_id}")
+    (if thread_id/.empty
+      (log .info #"Chat request workspace=#{workspace_id} user=#{user_id} channel=#{channel_id}")
+    else
+      (log .info #"Chat request workspace=#{workspace_id} user=#{user_id} channel=#{channel_id} thread=#{thread_id}")
+    )
     (log .debug #"Chat text: #{text}")
 
     (if text/.empty
@@ -77,7 +86,7 @@
       (return (json_response 400 {^error "Missing text field"}))
     )
 
-    (var result (run_agent workspace_id user_id channel_id text))
+    (var result (run_agent workspace_id user_id channel_id text thread_id))
     (log .info #"Chat response run=#{result/run_id} steps=#{result/steps} tool_calls=#{result/tool_calls}")
     (json_response 200 {
       ^ok true
@@ -144,6 +153,7 @@
     (var workspace_id (body/team_id || "default"))
     (var user_id (event/user || "unknown"))
     (var channel_id event/channel)
+    (var thread_id (event/thread_ts || event/ts || ""))
     (var text event/text)
 
     (if (text/.empty || channel_id/.empty)
@@ -151,21 +161,24 @@
       (return (json_response 200 {^ok true}))
     )
 
-    (log .info #"Slack event workspace=#{workspace_id} user=#{user_id} channel=#{channel_id}")
+    (if thread_id/.empty
+      (log .info #"Slack event workspace=#{workspace_id} user=#{user_id} channel=#{channel_id}")
+    else
+      (log .info #"Slack event workspace=#{workspace_id} user=#{user_id} channel=#{channel_id} thread=#{thread_id}")
+    )
     (log .debug #"Slack text: #{text}")
 
     # Run agent
-    (var result (run_agent workspace_id user_id channel_id text))
+    (var result (run_agent workspace_id user_id channel_id text thread_id))
     (log .info #"Slack agent done run=#{result/run_id} steps=#{result/steps}")
 
     # Reply to Slack
     (if (SLACK_BOT_TOKEN && result/response)
-      (var thread_ts (event/thread_ts || event/ts))
       (var reply_payload {
         ^channel channel_id
         ^text result/response
       })
-      (if thread_ts then (reply_payload/thread_ts = thread_ts))
+      (if thread_id then (reply_payload/thread_ts = thread_id))
       (try
         (log .debug #"Posting Slack reply to channel=#{channel_id}")
         (await (http_post "https://slack.com/api/chat.postMessage"
@@ -233,7 +246,7 @@
   (log .info #"Starting Slack Socket Mode on http://localhost:#{PORT}")
   (log .info "Endpoints: GET /health, GET /api/config, POST /api/chat, POST /slack/events (disabled)")
   (genex/http/start_server PORT handle_request)
-  (genex/ai/start_slack_socket_mode SLACK_APP_TOKEN SLACK_BOT_TOKEN run_agent)
+  (genex/ai/start_slack_socket_mode SLACK_APP_TOKEN SLACK_BOT_TOKEN handle_socket_slack_command)
 else
   # Webhook mode: Slack sends events via HTTP POST
   (log .info #"Starting server on http://localhost:#{PORT}")

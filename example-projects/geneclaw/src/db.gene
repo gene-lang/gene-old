@@ -8,6 +8,22 @@
 
 (fn $ns/get_db [] DB)
 
+(fn error_text [err]
+  (try
+    (if (err is Map)
+      (if (err .contains "message")
+        ((err .get "message") .to_s)
+      else
+        (err .to_s)
+      )
+    else
+      (err .to_s)
+    )
+  catch *
+    "<unprintable error>"
+  )
+)
+
 (fn $ns/init_db []
   (if genex/sqlite
     (try
@@ -78,7 +94,7 @@
 
       (log .info #"Database initialized: #{DB_PATH} (4 tables ready)")
     catch *
-      (log .error #"Failed to open SQLite: #{$ex/message}")
+      (log .error #"Failed to open SQLite: #{(error_text $ex)}")
       (DB = nil)
     )
   else
@@ -97,7 +113,7 @@
     (DB .exec "INSERT INTO memory_events (workspace_id, session_id, role, content, meta_json, created_at_ms) VALUES (?, ?, ?, ?, ?, ?)"
       workspace_id session_id role content meta_str now)
   catch *
-    (log .error #"memory_append failed: #{$ex/message}")
+    (log .error #"memory_append failed: #{(error_text $ex)}")
   )
 )
 
@@ -105,17 +121,21 @@
   (if_not DB then (return []))
   (try
     (log .debug #"memory_recent session=#{session_id} limit=#{limit}")
-    # Order ASC so oldest-first; sub-select with DESC LIMIT gives the N most recent rows
-    (var rows (DB .query "SELECT role, content FROM (SELECT role, content, created_at_ms FROM memory_events WHERE session_id = ? ORDER BY created_at_ms DESC, id DESC LIMIT ?) ORDER BY created_at_ms ASC" session_id limit))
-    (if_not rows (return []))
-    (var result [])
+    # Avoid the nested LIMIT query shape here; on the current sqlite binding it can
+    # degrade into a float sentinel after prior writes on the same connection.
+    (var rows_desc (DB .query "SELECT role, content FROM memory_events WHERE session_id = ? ORDER BY created_at_ms DESC, id DESC LIMIT ?" session_id limit))
+    (if_not rows_desc (return []))
+    (var rows (rows_desc .reverse))
+    (var entries [])
+    (var entry_count 0)
     (for row in rows
-      (result .append {^role row/0 ^content row/1})
+      (entries .append {^role row/0 ^content row/1})
+      (entry_count += 1)
     )
-    (log .debug #"memory_recent returned #{result/.size} entries")
-    result
+    (log .debug #"memory_recent returned #{entry_count} entries")
+    entries
   catch *
-    (log .error #"memory_recent failed: #{$ex/message}")
+    (log .error #"memory_recent failed: #{(error_text $ex)}")
     []
   )
 )
@@ -133,7 +153,7 @@
       (if result_json then result_json/.to_json else "{}")
       duration_ms now)
   catch *
-    (log .error #"audit_log failed: #{$ex/message}")
+    (log .error #"audit_log failed: #{(error_text $ex)}")
   )
 )
 
@@ -147,7 +167,7 @@
     (DB .exec "INSERT INTO agent_runs (run_id, workspace_id, user_id, state, started_at_ms) VALUES (?, ?, ?, 'running', ?)"
       run_id workspace_id user_id now)
   catch *
-    (log .error #"run_create failed: #{$ex/message}")
+    (log .error #"run_create failed: #{(error_text $ex)}")
   )
 )
 
@@ -164,7 +184,7 @@
     (DB .exec "UPDATE agent_runs SET state = ?, ended_at_ms = ?, error = ? WHERE run_id = ?"
       state now (if error then error else "") run_id)
   catch *
-    (log .error #"run_complete failed: #{$ex/message}")
+    (log .error #"run_complete failed: #{(error_text $ex)}")
   )
 )
 
@@ -181,7 +201,7 @@
       job_id workspace_id user_id channel_id thread_ts
       schedule_type text interval_ms cron_expr next_run_ms meta_str now)
   catch *
-    (log .error #"job_create failed: #{$ex/message}")
+    (log .error #"job_create failed: #{(error_text $ex)}")
   )
 )
 
@@ -197,7 +217,7 @@
      ^cron_expr r/8 ^next_run_ms r/9 ^state r/10 ^retry_count r/11
      ^last_error r/12 ^last_run_ms r/13 ^meta_json r/14 ^created_at_ms r/15}
   catch *
-    (log .error #"job_get failed: #{$ex/message}")
+    (log .error #"job_get failed: #{(error_text $ex)}")
     nil
   )
 )
@@ -215,7 +235,7 @@
     )
     result
   catch *
-    (log .error #"job_list_all failed: #{$ex/message}")
+    (log .error #"job_list_all failed: #{(error_text $ex)}")
     []
   )
 )
@@ -234,7 +254,7 @@
     )
     result
   catch *
-    (log .error #"job_list_due failed: #{$ex/message}")
+    (log .error #"job_list_due failed: #{(error_text $ex)}")
     []
   )
 )
@@ -245,7 +265,7 @@
   (try
     (DB .exec "UPDATE scheduled_jobs SET state = ? WHERE job_id = ?" new_state job_id)
   catch *
-    (log .error #"job_update_state failed: #{$ex/message}")
+    (log .error #"job_update_state failed: #{(error_text $ex)}")
   )
 )
 
@@ -255,7 +275,7 @@
   (try
     (DB .exec "UPDATE scheduled_jobs SET next_run_ms = ? WHERE job_id = ?" next_run_ms job_id)
   catch *
-    (log .error #"job_update_next_run failed: #{$ex/message}")
+    (log .error #"job_update_next_run failed: #{(error_text $ex)}")
   )
 )
 
@@ -265,7 +285,7 @@
   (try
     (DB .exec "UPDATE scheduled_jobs SET state = 'running', last_run_ms = ? WHERE job_id = ?" now job_id)
   catch *
-    (log .error #"job_mark_running failed: #{$ex/message}")
+    (log .error #"job_mark_running failed: #{(error_text $ex)}")
   )
 )
 
@@ -274,7 +294,7 @@
   (try
     (DB .exec "UPDATE scheduled_jobs SET state = 'active', retry_count = 0, last_error = '' WHERE job_id = ?" job_id)
   catch *
-    (log .error #"job_mark_completed failed: #{$ex/message}")
+    (log .error #"job_mark_completed failed: #{(error_text $ex)}")
   )
 )
 
@@ -286,6 +306,6 @@
     (DB .exec "UPDATE scheduled_jobs SET retry_count = retry_count + 1, last_error = ?, last_run_ms = ?, state = CASE WHEN retry_count + 1 > max_retries THEN 'dead_letter' ELSE 'active' END, next_run_ms = CASE WHEN retry_count + 1 > max_retries THEN next_run_ms ELSE ? + backoff_ms END WHERE job_id = ?"
       error_msg now now job_id)
   catch *
-    (log .error #"job_mark_failed failed: #{$ex/message}")
+    (log .error #"job_mark_failed failed: #{(error_text $ex)}")
   )
 )

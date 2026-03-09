@@ -3,7 +3,7 @@
 
 (import MAX_STEPS MAX_TOOL_CALLS from "config")
 (import memory_append memory_recent from "db")
-(import run_create run_complete from "db")
+(import run_complete from "db")
 (import invoke_tool build_tools_spec from "tools")
 (import is_paused check_pause_timeout get_pause_status from "hotswap_state")
 (import call_llm from "llm_provider")
@@ -16,42 +16,22 @@
   #"run-#{RUN_COUNTER}"
 )
 
-# --- Main agent run ---
-
-(fn $ns/run_agent [workspace_id user_id channel_id text]
-  (var run_id (make_run_id))
-  (var session_id #"#{workspace_id}:#{channel_id}")
-
-  (log .info #"=== Agent run started: #{run_id} ===")
-  (log .info #"workspace=#{workspace_id} user=#{user_id} channel=#{channel_id}")
-  (log .debug #"Input text: #{text}")
-
-  # Record run start
-  (run_create run_id workspace_id user_id)
-
-  # If paused, do not execute LLM/tool pipeline.
-  (check_pause_timeout)
-  (if (is_paused)
-    (var pause_status (get_pause_status))
-    (var paused_response "GeneClaw is paused for self-upgrade. Please retry shortly.")
-    (memory_append workspace_id session_id "user" text {^user_id user_id})
-    (memory_append workspace_id session_id "assistant" paused_response {^run_id run_id ^paused true})
-    (run_complete run_id "paused" nil)
-    (log .warn #"#{run_id} skipped: paused reason=#{pause_status/pause_reason}")
-    (return {^run_id run_id ^response paused_response ^steps 0 ^tool_calls 0 ^paused true ^pause_status pause_status})
+(fn $ns/build_session_id [workspace_id channel_id thread_id = ""]
+  (var thread_part (if thread_id then (thread_id .to_s) else ""))
+  (if (thread_part/.empty == false)
+    #"#{workspace_id}:#{channel_id}:#{thread_part}"
+  else
+    #"#{workspace_id}:#{channel_id}"
   )
+)
 
-  # Load conversation history
-  (var history (memory_recent session_id 20))
-  (log .info #"Loaded #{history/.size} history entries for session #{session_id}")
-
-  # Record user message
-  (memory_append workspace_id session_id "user" text {^user_id user_id})
-
-  (var tools_spec (build_tools_spec))
+# Keep the LLM/tool loop in a helper. Re-entering the larger run_agent frame
+# after repeated LLM calls was corrupting subsequent history loads.
+(fn execute_agent_steps [run_id workspace_id user_id channel_id thread_id history initial_text tools_spec]
   (var step 0)
   (var tool_call_count 0)
   (var final_response "")
+  (var text initial_text)
 
   (loop
     (if (step >= MAX_STEPS)
@@ -94,7 +74,7 @@
       # Parse arguments JSON string; coerce to map for tool handlers.
       (var parsed_args (try (gene/json/parse tool_args_str) catch * nil))
       (var tool_args (if (parsed_args is Map) parsed_args else {}))
-      (var tool_result (invoke_tool run_id workspace_id user_id channel_id tool_name tool_args))
+      (var tool_result (invoke_tool run_id workspace_id user_id channel_id thread_id tool_name tool_args))
 
       # Build result text
       (var result_text (if tool_result/ok
@@ -111,6 +91,48 @@
     # Update text for next iteration context
     (text = "Continue based on the tool results above.")
   )
+
+  {^response final_response ^steps step ^tool_calls tool_call_count}
+)
+
+# --- Main agent run ---
+
+(fn $ns/run_agent [workspace_id user_id channel_id text thread_id = ""]
+  (var run_id (make_run_id))
+  (var session_id (build_session_id workspace_id channel_id thread_id))
+
+  (log .info #"=== Agent run started: #{run_id} ===")
+  (if ((thread_id .to_s) .empty)
+    (log .info #"workspace=#{workspace_id} user=#{user_id} channel=#{channel_id}")
+  else
+    (log .info #"workspace=#{workspace_id} user=#{user_id} channel=#{channel_id} thread=#{thread_id}")
+  )
+  (log .debug #"Input text: #{text}")
+
+  # If paused, do not execute LLM/tool pipeline.
+  (check_pause_timeout)
+  (if (is_paused)
+    (var pause_status (get_pause_status))
+    (var paused_response "GeneClaw is paused for self-upgrade. Please retry shortly.")
+    (memory_append workspace_id session_id "user" text {^user_id user_id})
+    (memory_append workspace_id session_id "assistant" paused_response {^run_id run_id ^paused true})
+    (run_complete run_id "paused" nil)
+    (log .warn #"#{run_id} skipped: paused reason=#{pause_status/pause_reason}")
+    (return {^run_id run_id ^response paused_response ^steps 0 ^tool_calls 0 ^paused true ^pause_status pause_status})
+  )
+
+  # Load conversation history
+  (var history (memory_recent session_id 20))
+  (log .info #"Loaded #{history/.size} history entries for session #{session_id}")
+
+  # Record user message
+  (memory_append workspace_id session_id "user" text {^user_id user_id})
+
+  (var tools_spec (build_tools_spec))
+  (var phase (execute_agent_steps run_id workspace_id user_id channel_id thread_id history text tools_spec))
+  (var final_response phase/response)
+  (var step phase/steps)
+  (var tool_call_count phase/tool_calls)
 
   # Record agent response
   (memory_append workspace_id session_id "assistant" final_response {^run_id run_id})

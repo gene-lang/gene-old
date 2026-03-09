@@ -816,6 +816,7 @@ proc drain_slack_command_queue() {.gcsafe.} =
           pending.envelope.workspace_id.to_value,
           pending.envelope.user_id.to_value,
           pending.envelope.channel_id.to_value,
+          pending.envelope.thread_id.to_value,
           pending.envelope.text.to_value
         ])
       except CatchableError as e:
