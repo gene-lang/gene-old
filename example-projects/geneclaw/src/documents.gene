@@ -1,0 +1,415 @@
+# GeneClaw document ingestion and prompt shaping
+
+(import WORKSPACE_ROOT DOCUMENT_ROOT ARTIFACT_ROOT DOCUMENT_MAX_UPLOAD_BYTES DOCUMENT_MAX_INLINE_CHARS SLACK_BOT_TOKEN from "config")
+(import document_save from "db")
+
+(var log (new genex/logging/Logger $ns))
+(var DOCUMENT_COUNTER 0)
+
+(fn make_document_id []
+  (DOCUMENT_COUNTER += 1)
+  #"doc-#{gene/now/.call/.to_i}-#{DOCUMENT_COUNTER}"
+)
+
+(fn sanitize_component [value fallback = "unknown"]
+  (var result ((value || fallback) .to_s))
+  (result = (result .replace "/" "_"))
+  (result = (result .replace "\\" "_"))
+  (result = (result .replace ".." "_"))
+  (if (result .empty?) fallback else result)
+)
+
+(fn sanitize_filename [value]
+  (sanitize_component value "upload.bin")
+)
+
+(fn blank_string? [value]
+  (var text (if value (value .to_s) else ""))
+  ((text .length) == 0)
+)
+
+(fn filename_extension [filename]
+  (var parts (((filename || "") .to_s) .split "."))
+  (if (parts/.size > 1)
+    (((parts/(parts/.size - 1)) .to_s) .to_lower)
+  else
+    ""
+  )
+)
+
+(fn attachment_download_url [attachment]
+  (attachment/download_url || attachment/url_private_download || attachment/url_private || "")
+)
+
+(fn supported_document? [filename mime_type]
+  (var ext (filename_extension filename))
+  (var normalized_mime (((mime_type || "") .to_s) .to_lower))
+  (if ((normalized_mime .starts_with "text/") ||
+       (ext == "txt") ||
+       (ext == "md") ||
+       (ext == "pdf") ||
+       (normalized_mime == "application/pdf") ||
+       (normalized_mime .starts_with "image/") ||
+       (ext == "png") ||
+       (ext == "jpg") ||
+       (ext == "jpeg"))
+    true
+  else
+    false
+  )
+)
+
+(fn extract_document_text [path filename mime_type]
+  (var ext (filename_extension filename))
+  (var normalized_mime (((mime_type || "") .to_s) .to_lower))
+  (if ((normalized_mime .starts_with "text/") || (ext == "txt") || (ext == "md"))
+    (gene/io/read path)
+  elif ((normalized_mime == "application/pdf") || (ext == "pdf"))
+    ((genex/ai/documents/extract_pdf path) .join "\n\n")
+  elif ((normalized_mime .starts_with "image/") || (ext == "png") || (ext == "jpg") || (ext == "jpeg"))
+    (genex/ai/documents/extract_image path)
+  else
+    (throw #"Unsupported document type: #{filename}")
+  )
+)
+
+(fn normalize_chunk [chunk idx]
+  {^chunk_index idx
+   ^text (chunk/text || "")
+   ^meta (chunk/metadata || chunk/meta || {})}
+)
+
+(fn chunk_document_text [text source]
+  (var chunks_raw (genex/ai/documents/chunk text {^source source ^size 800 ^overlap 120}))
+  (var chunks [])
+  (var idx 0)
+  (for chunk in chunks_raw
+    (chunks .append (normalize_chunk chunk idx))
+    (idx += 1)
+  )
+  chunks
+)
+
+(fn hydrate_attachment [attachment]
+  (var resolved (if (attachment is Map) attachment else {}))
+  (var download_url (attachment_download_url resolved))
+  (var missing_fields false)
+
+  (if ((blank_string? download_url) ||
+       (blank_string? resolved/filename) ||
+       (blank_string? resolved/mime_type) ||
+       ((resolved/size || 0) == 0))
+    (missing_fields = true)
+  )
+
+  (if (missing_fields &&
+       ((blank_string? resolved/file_id) == false) &&
+       ((blank_string? SLACK_BOT_TOKEN) == false))
+    (try
+      (var info (genex/ai/slack_file_info SLACK_BOT_TOKEN resolved/file_id))
+      (resolved/file_id = (info/file_id || resolved/file_id))
+      (resolved/filename = (info/filename || resolved/filename))
+      (resolved/title = (info/title || resolved/title))
+      (resolved/mime_type = (info/mime_type || resolved/mime_type))
+      (resolved/filetype = (info/filetype || resolved/filetype))
+      (resolved/size = (info/size || resolved/size))
+      (resolved/url_private = (info/url_private || resolved/url_private))
+      (resolved/url_private_download = (info/url_private_download || resolved/url_private_download))
+      (resolved/download_url = (info/download_url || resolved/download_url))
+    catch *
+      (log .warn #"slack_file_info failed for #{resolved/file_id}: #{$ex/message}")
+    )
+  )
+
+  resolved
+)
+
+(fn build_document_record [session_id envelope attachment]
+  (var workspace_id (envelope/workspace_id || "default"))
+  (var document_id (make_document_id))
+  (var resolved (hydrate_attachment attachment))
+  (var filename (sanitize_filename (resolved/filename || resolved/title || #"#{document_id}.bin")))
+  (var mime_type ((resolved/mime_type || "") .to_s))
+  (var declared_size (resolved/size || 0))
+  (var local_dir #"#{DOCUMENT_ROOT}/inbox/#{sanitize_component workspace_id}/#{sanitize_component (envelope/channel_id || "general")}/#{sanitize_component (envelope/thread_id || "root")}/#{document_id}")
+  (var local_path #"#{local_dir}/#{filename}")
+  (var source_ref (resolved/file_id || ""))
+  (var meta {^attachment resolved ^channel_id (envelope/channel_id || "") ^thread_id (envelope/thread_id || "") ^user_id (envelope/user_id || "")})
+  (var record {
+    ^document_id document_id
+    ^workspace_id workspace_id
+    ^session_id session_id
+    ^source "slack_upload"
+    ^source_ref source_ref
+    ^filename filename
+    ^mime_type mime_type
+    ^byte_size declared_size
+    ^sha256 ""
+    ^local_path local_path
+    ^extracted_text ""
+    ^status "failed"
+    ^error ""
+    ^meta meta
+  })
+  (var chunks [])
+
+  (if (blank_string? SLACK_BOT_TOKEN)
+    (record/error = "SLACK_BOT_TOKEN is required for document download")
+    (document_save record chunks "inbound")
+    (return record)
+  )
+
+  (if (blank_string? resolved/file_id)
+    (record/error = "Slack attachment is missing file_id")
+    (document_save record chunks "inbound")
+    (return record)
+  )
+
+  (if (blank_string? (attachment_download_url resolved))
+    (record/error = "Slack attachment is missing download URL")
+    (document_save record chunks "inbound")
+    (return record)
+  )
+
+  (if ((declared_size > 0) && (declared_size > DOCUMENT_MAX_UPLOAD_BYTES))
+    (record/error = #"Upload exceeds #{DOCUMENT_MAX_UPLOAD_BYTES} bytes")
+    (document_save record chunks "inbound")
+    (return record)
+  )
+
+  (if_not (supported_document? filename mime_type)
+    (record/error = #"Unsupported document type: #{filename}")
+    (document_save record chunks "inbound")
+    (return record)
+  )
+
+  (try
+    (system/shell #"mkdir -p '#{local_dir}'")
+    (var transfer (genex/ai/slack_download_file SLACK_BOT_TOKEN (attachment_download_url resolved) local_path))
+    (record/byte_size = (transfer/byte_size || record/byte_size || 0))
+    (record/sha256 = (transfer/sha256 || ""))
+    (record/local_path = (transfer/path || local_path))
+
+    (var text (extract_document_text record/local_path filename mime_type))
+    (if (blank_string? text)
+      (record/status = "failed")
+      (record/error = "No extractable text found")
+    else
+      (record/extracted_text = text)
+      (record/status = "extracted")
+      (chunks = (chunk_document_text text filename))
+    )
+  catch *
+    (record/status = "failed")
+    (record/error = $ex/message)
+  )
+
+  (document_save record chunks "inbound")
+  record
+)
+
+(fn $ns/ingest_attachments [session_id envelope]
+  (var attachments (if (envelope/attachments is Array) envelope/attachments else []))
+  (if (attachments/.size == 0)
+    (return {^documents [] ^usable_count 0 ^notices [] ^context ""})
+  )
+
+  (var documents [])
+  (var notices [])
+  (var usable_count 0)
+
+  (for attachment in attachments
+    (var record (build_document_record session_id envelope attachment))
+    (documents .append record)
+    (if (record/status == "extracted")
+      (usable_count += 1)
+    else
+      (notices .append #"#{record/filename}: #{record/error}")
+    )
+  )
+
+  {^documents documents
+   ^usable_count usable_count
+   ^notices notices
+   ^context (build_document_context_text documents)}
+)
+
+(fn document_excerpt [text max_chars]
+  (var normalized (((text || "") .to_s) .replace "\r\n" "\n"))
+  (normalized = (normalized .replace "\n" " "))
+  (if ((normalized/.length > max_chars) && (max_chars > 0))
+    #"#{(normalized .substr 0 max_chars)}..."
+  else
+    normalized
+  )
+)
+
+(fn $ns/build_document_context_text [documents]
+  (var lines ["Attached documents:"])
+  (var remaining DOCUMENT_MAX_INLINE_CHARS)
+  (var index 0)
+
+  (for doc in documents
+    (if (doc/status == "extracted")
+      (index += 1)
+      (lines .append #"#{index}. #{doc/filename} (#{doc/byte_size} bytes, document_id=#{doc/document_id})")
+      (if (remaining > 0)
+        (var excerpt (document_excerpt doc/extracted_text remaining))
+        (if_not (blank_string? excerpt)
+          (lines .append #"   Excerpt: #{excerpt}")
+          (remaining -= excerpt/.length)
+        )
+      )
+    )
+  )
+
+  (if (index == 0)
+    ""
+  else
+    (lines .join "\n")
+  )
+)
+
+(fn $ns/build_document_notice_response [notices]
+  (if (notices/.size == 0)
+    ""
+  else
+    #"I received document uploads, but some could not be read:\n- #{(notices .join "\n- ")}"
+  )
+)
+
+(fn $ns/append_document_notices [response notices]
+  (if (notices/.size == 0)
+    response
+  elif (blank_string? response)
+    (build_document_notice_response notices)
+  else
+    #"#{response}\n\nDocument notices:\n- #{(notices .join "\n- ")}"
+  )
+)
+
+(fn $ns/build_prompt_text [user_text ingest]
+  (var parts [])
+  (var text ((user_text || "") .to_s))
+  (var context (ingest/context || ""))
+  (var notices (if (ingest/notices is Array) ingest/notices else []))
+
+  (if (blank_string? text)
+    (if (blank_string? context)
+      (if (notices/.size > 0)
+        (parts .append "The user uploaded one or more documents, but GeneClaw could not read all of them. Explain what happened clearly.")
+      )
+    else
+      (parts .append "The user uploaded one or more documents without additional text. Review the attached document context and respond helpfully.")
+    )
+  else
+    (parts .append text)
+  )
+
+  (if_not (blank_string? context)
+    (parts .append context)
+  )
+  (if (notices/.size > 0)
+    (parts .append #"Document ingestion notices:\n- #{(notices .join "\n- ")}")
+  )
+
+  (parts .join "\n\n")
+)
+
+(fn successful_document_names [documents]
+  (var names [])
+  (for doc in documents
+    (if_not (blank_string? doc/filename)
+      (names .append doc/filename)
+    )
+  )
+  names
+)
+
+(fn $ns/build_memory_user_text [user_text ingest]
+  (var text ((user_text || "") .to_s))
+  (var documents (if (ingest/documents is Array) ingest/documents else []))
+  (var names (successful_document_names documents))
+  (var parts [])
+
+  (if_not (blank_string? text)
+    (parts .append text)
+  )
+
+  (if (names/.size > 0)
+    (parts .append #"[Attached documents: #{(names .join ", ")}]")
+  elif (documents/.size > 0)
+    (parts .append "[Uploaded documents]")
+  )
+
+  (if (parts/.size == 0)
+    ""
+  else
+    (parts .join "\n\n")
+  )
+)
+
+(fn $ns/record_outbound_document [session_id workspace_id role upload_result meta]
+  (var real_path (upload_result/real_path || ""))
+  (if (blank_string? real_path)
+    (return nil)
+  )
+
+  (var path_parts (real_path .split "/"))
+  (var filename (if (path_parts/.size > 0) (path_parts/(path_parts/.size - 1)) else "artifact.bin"))
+  (var record {
+    ^document_id (make_document_id)
+    ^workspace_id workspace_id
+    ^session_id session_id
+    ^source "generated"
+    ^source_ref (upload_result/file_id || "")
+    ^filename filename
+    ^mime_type (upload_result/mime_type || "")
+    ^byte_size (upload_result/byte_size || 0)
+    ^sha256 ""
+    ^local_path real_path
+    ^extracted_text ""
+    ^status "uploaded"
+    ^error ""
+    ^meta (meta || {})
+  })
+
+  (document_save record [] (role || "outbound"))
+  record
+)
+
+(fn $ns/send_document_candidate_paths [path]
+  (var requested ((path || "") .to_s))
+  (if (requested .starts_with "/")
+    [requested]
+  else
+    [#"#{ARTIFACT_ROOT}/#{requested}" #"#{WORKSPACE_ROOT}/#{requested}"]
+  )
+)
+
+(fn shell_file_exists? [path]
+  (try
+    (var result (system/shell #"test -f '#{path}'"))
+    (result/exit_code == 0)
+  catch *
+    false
+  )
+)
+
+(fn $ns/select_send_document_path [path]
+  (var candidates (send_document_candidate_paths path))
+  (for candidate in candidates
+    (if (shell_file_exists? candidate)
+      (return candidate)
+    )
+  )
+  (if (candidates/.size > 0)
+    candidates/0
+  else
+    ""
+  )
+)
+
+(fn $ns/resolve_send_document_path [path]
+  (select_send_document_path path)
+)

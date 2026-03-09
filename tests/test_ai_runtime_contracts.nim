@@ -15,6 +15,14 @@ suite "AI runtime contracts":
       channel_id = "ch-1",
       thread_id = "th-1",
       text = "run tool",
+      attachments = %*[
+        {
+          "source": "slack",
+          "file_id": "F123",
+          "filename": "spec.pdf",
+          "mime_type": "application/pdf"
+        }
+      ],
       metadata = %*{"priority": "high"}
     )
 
@@ -22,6 +30,9 @@ suite "AI runtime contracts":
     check decoded.command_id == "c-1"
     check decoded.source == CsSlack
     check decoded.workspace_id == "ws-1"
+    check decoded.attachments.kind == JArray
+    check decoded.attachments.len == 1
+    check decoded.attachments[0]["file_id"].getStr() == "F123"
     check decoded.metadata["priority"].getStr() == "high"
 
   test "AgentRun state machine accepts valid transitions":

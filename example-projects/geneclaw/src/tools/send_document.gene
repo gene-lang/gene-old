@@ -1,0 +1,95 @@
+# GeneClaw tool: send_document
+
+(import WORKSPACE_ROOT ARTIFACT_ROOT SLACK_BOT_TOKEN from "config")
+(import select_send_document_path record_outbound_document from "documents")
+
+(fn blank_string? [value]
+  (var text (if value (value .to_s) else ""))
+  ((text .length) == 0)
+)
+
+(fn $ns/register_send_document_tool [register_tool log]
+  (register_tool "send_document"
+    "Upload a managed local file to Slack so the user can download it"
+    {^type "object"
+     ^properties {
+       ^path {^type "string" ^description "Relative artifact path or absolute managed path"}
+       ^title {^type "string" ^description "Optional Slack file title"}
+       ^comment {^type "string" ^description "Optional Slack message/comment shown with the upload"}
+       ^channel_id {^type "string" ^description "Slack channel ID (defaults to current channel)"}
+       ^thread_ts {^type "string" ^description "Slack thread timestamp (defaults to current thread)"}
+     }
+     ^required ["path"]}
+    (fn [args]
+      (var ctx (args .get "_context" {}))
+      (var path ((args/path || "") .to_s))
+      (var title ((args/title || "") .to_s))
+      (var comment ((args/comment || args/initial_comment || "") .to_s))
+      (var channel_id (((args/channel_id || (ctx .get "channel_id" "")) || "") .to_s))
+      (var thread_ts (((args/thread_ts || (ctx .get "thread_ts" "") || (ctx .get "thread_id" "")) || "") .to_s))
+      (var workspace_id (((ctx .get "workspace_id" "default") || "default") .to_s))
+      (var session_id (((ctx .get "session_id" "") || "") .to_s))
+
+      (if (blank_string? path)
+        (return {^ok false ^error "Missing path"})
+      )
+      (if (blank_string? channel_id)
+        (return {^ok false ^error "Missing channel_id"})
+      )
+      (if_not SLACK_BOT_TOKEN
+        (return {^ok false ^error "SLACK_BOT_TOKEN not configured"})
+      )
+
+      (var resolved_path (select_send_document_path path))
+
+      (try
+        (log .info #"send_document: path=#{resolved_path} channel=#{channel_id}")
+        (var upload (genex/ai/slack_upload_file
+          SLACK_BOT_TOKEN
+          resolved_path
+          {
+            ^allowed_roots [WORKSPACE_ROOT ARTIFACT_ROOT]
+            ^channel_id channel_id
+            ^thread_ts thread_ts
+            ^title title
+            ^initial_comment comment
+          }))
+
+        (var uploaded_file_id ((upload/file_id || "") .to_s))
+        (var uploaded_title ((upload/title || title || path) .to_s))
+        (var uploaded_real_path ((upload/real_path || "") .to_s))
+        (var uploaded_mime_type ((upload/mime_type || "") .to_s))
+        (var uploaded_permalink ((upload/permalink || "") .to_s))
+        (var uploaded_byte_size (upload/byte_size || 0))
+
+        (if (blank_string? uploaded_file_id)
+          (throw "Slack upload returned no file_id")
+        )
+        (if (blank_string? uploaded_real_path)
+          (throw "Slack upload returned no real_path")
+        )
+
+        (record_outbound_document session_id workspace_id "outbound" upload {
+          ^channel_id channel_id
+          ^thread_id thread_ts
+          ^requested_path path
+          ^title uploaded_title
+          ^comment comment
+        })
+
+        {^ok true
+         ^file_id uploaded_file_id
+         ^title uploaded_title
+         ^permalink uploaded_permalink
+         ^path uploaded_real_path
+         ^mime_type uploaded_mime_type
+         ^byte_size uploaded_byte_size
+         ^channel_id channel_id
+         ^thread_ts thread_ts}
+      catch *
+        (log .error #"send_document failed: #{$ex/message}")
+        {^ok false ^error #"send_document failed: #{$ex/message}"}
+      )
+    )
+  )
+)

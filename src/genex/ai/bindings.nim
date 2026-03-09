@@ -22,6 +22,14 @@ var next_anthropic_client_id: system.int64 = 1
 proc openai_client_constructor(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.}
 proc anthropic_client_constructor(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.}
 
+proc value_to_string_arg(args: ptr UncheckedArray[Value], idx: int, has_keyword_args: bool, label: string): string =
+  let val = get_positional_arg(args, idx, has_keyword_args)
+  case val.kind
+  of VkString, VkSymbol:
+    val.str
+  else:
+    raise new_exception(types.Exception, label & " must be a string")
+
 # Helper to convert Gene Value to JsonNode
 proc geneValueToJson*(value: Value): JsonNode =
   case value.kind
@@ -691,6 +699,100 @@ proc vm_start_slack_socket_mode*(vm: ptr VirtualMachine, args: ptr UncheckedArra
   echo "Slack Socket Mode client started"
   return NIL
 
+proc vm_slack_file_info*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  discard vm
+  if get_positional_count(arg_count, has_keyword_args) < 2:
+    raise new_exception(types.Exception, "slack_file_info requires bot_token and file_id")
+
+  let bot_token = value_to_string_arg(args, 0, has_keyword_args, "slack_file_info bot_token")
+  let file_id = value_to_string_arg(args, 1, has_keyword_args, "slack_file_info file_id")
+  let client = new_slack_client(bot_token)
+
+  try:
+    let info = slack_file_info(client, file_id)
+    result = jsonToGeneValue(info)
+  except CatchableError as e:
+    raise new_exception(types.Exception, e.msg)
+
+proc vm_slack_download_file*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  discard vm
+  if get_positional_count(arg_count, has_keyword_args) < 3:
+    raise new_exception(types.Exception, "slack_download_file requires bot_token, url, and destination path")
+
+  let bot_token = value_to_string_arg(args, 0, has_keyword_args, "slack_download_file bot_token")
+  let download_url = value_to_string_arg(args, 1, has_keyword_args, "slack_download_file url")
+  let dest_path = value_to_string_arg(args, 2, has_keyword_args, "slack_download_file destination")
+  let client = new_slack_client(bot_token)
+  let transfer = slack_download_to_path(client, download_url, dest_path)
+  if not transfer.ok:
+    raise new_exception(types.Exception, transfer.error)
+
+  result = jsonToGeneValue(%*{
+    "path": transfer.path,
+    "byte_size": transfer.byte_size,
+    "sha256": transfer.sha256
+  })
+
+proc vm_slack_upload_file*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  discard vm
+  if get_positional_count(arg_count, has_keyword_args) < 3:
+    raise new_exception(types.Exception, "slack_upload_file requires bot_token, file path, and options")
+
+  let bot_token = value_to_string_arg(args, 0, has_keyword_args, "slack_upload_file bot_token")
+  let file_path = value_to_string_arg(args, 1, has_keyword_args, "slack_upload_file path")
+  let options = geneValueToJson(get_positional_arg(args, 2, has_keyword_args))
+  if options.kind != JObject:
+    raise new_exception(types.Exception, "slack_upload_file options must be an object")
+
+  let channel_id =
+    if options.hasKey("channel_id") and options["channel_id"].kind == JString:
+      options["channel_id"].getStr()
+    else:
+      ""
+  let thread_ts =
+    if options.hasKey("thread_ts") and options["thread_ts"].kind == JString:
+      options["thread_ts"].getStr()
+    else:
+      ""
+  let title =
+    if options.hasKey("title") and options["title"].kind == JString:
+      options["title"].getStr()
+    else:
+      ""
+  let initial_comment =
+    if options.hasKey("initial_comment") and options["initial_comment"].kind == JString:
+      options["initial_comment"].getStr()
+    else:
+      ""
+
+  var allowed_roots: seq[string] = @[]
+  if options.hasKey("allowed_roots") and options["allowed_roots"].kind == JArray:
+    for root in options["allowed_roots"]:
+      if root.kind == JString:
+        allowed_roots.add(root.getStr())
+
+  let client = new_slack_client(bot_token)
+  let upload = slack_upload_file(
+    client,
+    file_path,
+    allowed_roots,
+    channel_id,
+    thread_ts,
+    title,
+    initial_comment
+  )
+  if not upload.ok:
+    raise new_exception(types.Exception, upload.error)
+
+  result = jsonToGeneValue(%*{
+    "file_id": upload.file_id,
+    "title": upload.title,
+    "permalink": upload.permalink,
+    "byte_size": upload.byte_size,
+    "real_path": upload.real_path,
+    "mime_type": upload.mime_type
+  })
+
 # Initialize OpenAI classes and functions
 proc init_openai_classes*() =
   VmCreatedCallbacks.add proc() {.gcsafe.} =
@@ -762,6 +864,9 @@ proc init_openai_classes*() =
     ai_ns["anthropic_messages".to_key()] = vm_anthropic_messages.to_value()
     global_ns["anthropic_messages".to_key()] = vm_anthropic_messages.to_value()
     ai_ns["start_slack_socket_mode".to_key()] = vm_start_slack_socket_mode.to_value()
+    ai_ns["slack_file_info".to_key()] = vm_slack_file_info.to_value()
+    ai_ns["slack_download_file".to_key()] = vm_slack_download_file.to_value()
+    ai_ns["slack_upload_file".to_key()] = vm_slack_upload_file.to_value()
 
     let documents_ns = new_namespace("documents")
     documents_ns["extract_pdf".to_key()] = vm_ai_documents_extract_pdf.to_value()
@@ -813,11 +918,7 @@ proc drain_slack_command_queue() {.gcsafe.} =
         continue
       try:
         result = execute_gene_callback(stored_vm, stored_cb, @[
-          pending.envelope.workspace_id.to_value,
-          pending.envelope.user_id.to_value,
-          pending.envelope.channel_id.to_value,
-          pending.envelope.thread_id.to_value,
-          pending.envelope.text.to_value
+          jsonToGeneValue(command_to_json(pending.envelope))
         ])
       except CatchableError as e:
         echo "Socket Mode: agent error: ", e.msg

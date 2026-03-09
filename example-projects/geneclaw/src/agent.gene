@@ -7,6 +7,7 @@
 (import invoke_tool build_tools_spec from "tools")
 (import is_paused check_pause_timeout get_pause_status from "hotswap_state")
 (import call_llm from "llm_provider")
+(import ingest_attachments build_prompt_text build_memory_user_text append_document_notices from "documents")
 
 (var log (new genex/logging/Logger $ns))
 (var RUN_COUNTER 0)
@@ -18,7 +19,7 @@
 
 (fn $ns/build_session_id [workspace_id channel_id thread_id = ""]
   (var thread_part (if thread_id then (thread_id .to_s) else ""))
-  (if (thread_part/.empty == false)
+  (if ((thread_part .length) > 0)
     #"#{workspace_id}:#{channel_id}:#{thread_part}"
   else
     #"#{workspace_id}:#{channel_id}"
@@ -27,7 +28,7 @@
 
 # Keep the LLM/tool loop in a helper. Re-entering the larger run_agent frame
 # after repeated LLM calls was corrupting subsequent history loads.
-(fn execute_agent_steps [run_id workspace_id user_id channel_id thread_id history initial_text tools_spec]
+(fn execute_agent_steps [run_id workspace_id user_id channel_id thread_id session_id history initial_text tools_spec]
   (var step 0)
   (var tool_call_count 0)
   (var final_response "")
@@ -74,7 +75,7 @@
       # Parse arguments JSON string; coerce to map for tool handlers.
       (var parsed_args (try (gene/json/parse tool_args_str) catch * nil))
       (var tool_args (if (parsed_args is Map) parsed_args else {}))
-      (var tool_result (invoke_tool run_id workspace_id user_id channel_id thread_id tool_name tool_args))
+      (var tool_result (invoke_tool run_id workspace_id user_id channel_id thread_id session_id tool_name tool_args))
 
       # Build result text
       (var result_text (if tool_result/ok
@@ -97,15 +98,43 @@
 
 # --- Main agent run ---
 
-(fn $ns/run_agent [workspace_id user_id channel_id text thread_id = ""]
+(fn normalize_envelope [envelope]
+  (var input (if (envelope is Map) envelope else {}))
+  {^workspace_id (input/workspace_id || "default")
+   ^user_id (input/user_id || "anonymous")
+   ^channel_id (input/channel_id || "general")
+   ^thread_id (input/thread_id || input/thread_ts || "")
+   ^text (input/text || "")
+   ^attachments (if (input/attachments is Array) input/attachments else [])
+   ^metadata (if (input/metadata is Map) input/metadata else {})}
+)
+
+(fn paused_memory_text [text attachment_count]
+  (if ((((text || "") .to_s) .length == 0) && (attachment_count > 0))
+    "[Uploaded documents]"
+  elif (attachment_count > 0)
+    #"#{text}\n\n[Attached documents]"
+  else
+    text
+  )
+)
+
+(fn $ns/run_agent_envelope [envelope]
+  (var input (normalize_envelope envelope))
+  (var workspace_id input/workspace_id)
+  (var user_id input/user_id)
+  (var channel_id input/channel_id)
+  (var thread_id input/thread_id)
+  (var text ((input/text || "") .to_s))
+  (var attachment_count input/attachments/.size)
   (var run_id (make_run_id))
   (var session_id (build_session_id workspace_id channel_id thread_id))
 
   (log .info #"=== Agent run started: #{run_id} ===")
-  (if ((thread_id .to_s) .empty)
-    (log .info #"workspace=#{workspace_id} user=#{user_id} channel=#{channel_id}")
+  (if ((((thread_id || "") .to_s) .length) == 0)
+    (log .info #"workspace=#{workspace_id} user=#{user_id} channel=#{channel_id} attachments=#{attachment_count}")
   else
-    (log .info #"workspace=#{workspace_id} user=#{user_id} channel=#{channel_id} thread=#{thread_id}")
+    (log .info #"workspace=#{workspace_id} user=#{user_id} channel=#{channel_id} thread=#{thread_id} attachments=#{attachment_count}")
   )
   (log .debug #"Input text: #{text}")
 
@@ -114,7 +143,7 @@
   (if (is_paused)
     (var pause_status (get_pause_status))
     (var paused_response "GeneClaw is paused for self-upgrade. Please retry shortly.")
-    (memory_append workspace_id session_id "user" text {^user_id user_id})
+    (memory_append workspace_id session_id "user" (paused_memory_text text attachment_count) {^user_id user_id ^attachments attachment_count})
     (memory_append workspace_id session_id "assistant" paused_response {^run_id run_id ^paused true})
     (run_complete run_id "paused" nil)
     (log .warn #"#{run_id} skipped: paused reason=#{pause_status/pause_reason}")
@@ -125,12 +154,19 @@
   (var history (memory_recent session_id 20))
   (log .info #"Loaded #{history/.size} history entries for session #{session_id}")
 
+  (var ingest (ingest_attachments session_id input))
+  (if (attachment_count > 0)
+    (log .info #"#{run_id} ingested #{attachment_count} attachment(s), usable=#{ingest/usable_count}")
+  )
+  (var prompt_text (build_prompt_text text ingest))
+  (var memory_text (build_memory_user_text text ingest))
+
   # Record user message
-  (memory_append workspace_id session_id "user" text {^user_id user_id})
+  (memory_append workspace_id session_id "user" memory_text {^user_id user_id ^attachments attachment_count ^usable_documents (ingest/usable_count || 0)})
 
   (var tools_spec (build_tools_spec))
-  (var phase (execute_agent_steps run_id workspace_id user_id channel_id thread_id history text tools_spec))
-  (var final_response phase/response)
+  (var phase (execute_agent_steps run_id workspace_id user_id channel_id thread_id session_id history prompt_text tools_spec))
+  (var final_response (append_document_notices phase/response (ingest/notices || [])))
   (var step phase/steps)
   (var tool_call_count phase/tool_calls)
 
@@ -141,4 +177,15 @@
   (log .info #"=== Agent run completed: #{run_id} steps=#{step} tool_calls=#{tool_call_count} response_len=#{final_response/.length} ===")
 
   {^run_id run_id ^response final_response ^steps step ^tool_calls tool_call_count}
+)
+
+(fn $ns/run_agent [workspace_id user_id channel_id text thread_id = ""]
+  (run_agent_envelope {
+    ^workspace_id workspace_id
+    ^user_id user_id
+    ^channel_id channel_id
+    ^thread_id thread_id
+    ^text text
+    ^attachments []
+  })
 )

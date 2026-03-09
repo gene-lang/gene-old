@@ -18,6 +18,7 @@ type
     channel_id*: string
     thread_id*: string
     text*: string
+    attachments*: JsonNode
     metadata*: JsonNode
     received_at_ms*: int64
 
@@ -69,6 +70,7 @@ proc new_command_envelope*(
   channel_id = "";
   thread_id = "";
   text = "";
+  attachments: JsonNode = nil;
   metadata: JsonNode = nil
 ): CommandEnvelope =
   CommandEnvelope(
@@ -79,6 +81,7 @@ proc new_command_envelope*(
     channel_id: channel_id,
     thread_id: thread_id,
     text: text,
+    attachments: if attachments.isNil: newJArray() else: attachments,
     metadata: if metadata.isNil: newJObject() else: metadata,
     received_at_ms: now_unix_ms()
   )
@@ -92,6 +95,7 @@ proc command_to_json*(cmd: CommandEnvelope): JsonNode =
     "channel_id": cmd.channel_id,
     "thread_id": cmd.thread_id,
     "text": cmd.text,
+    "attachments": if cmd.attachments.isNil: newJArray() else: cmd.attachments,
     "metadata": if cmd.metadata.isNil: newJObject() else: cmd.metadata,
     "received_at_ms": cmd.received_at_ms
   }
@@ -119,6 +123,9 @@ proc command_from_json*(obj: JsonNode): CommandEnvelope =
     channel_id = get_str_field(obj, "channel_id"),
     thread_id = get_str_field(obj, "thread_id"),
     text = get_str_field(obj, "text"),
+    attachments =
+      if obj.hasKey("attachments") and obj["attachments"].kind == JArray: obj["attachments"]
+      else: newJArray(),
     metadata =
       if obj.hasKey("metadata") and obj["metadata"].kind == JObject: obj["metadata"]
       else: newJObject()

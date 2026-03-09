@@ -1,7 +1,7 @@
 # GeneClaw Tool Registry
 # Registry/orchestration; individual tools live in src/tools/*.gene
 
-(import WORKSPACE_ROOT from "config")
+(import WORKSPACE_ROOT DOCUMENT_ROOT ARTIFACT_ROOT from "config")
 (import audit_log from "db")
 
 (import register_get_time_tool from "tools/get_time")
@@ -17,6 +17,7 @@
 (import register_edit_file_tool from "tools/edit_file")
 (import register_patch_file_tool from "tools/patch_file")
 (import register_send_message_tool from "tools/send_message")
+(import register_send_document_tool from "tools/send_document")
 (import register_delete_file_tool from "tools/delete_file")
 (import register_tmux_send_tool from "tools/tmux_send")
 (import register_tmux_tail_tool from "tools/tmux_tail")
@@ -36,7 +37,7 @@
   (log .debug #"Registered tool: #{name}")
 )
 
-(fn $ns/invoke_tool [run_id workspace_id user_id channel_id thread_id tool_name args]
+(fn $ns/invoke_tool [run_id workspace_id user_id channel_id thread_id session_id tool_name args]
   (log .info #"invoke_tool run=#{run_id} tool=#{tool_name}")
   (var tool_args (if (args is Map) args else {}))
   (if (args is Map)
@@ -53,6 +54,7 @@
     ^channel_id channel_id
     ^thread_id thread_id
     ^thread_ts thread_id
+    ^session_id session_id
   })
 
   (var tool (TOOLS .get tool_name))
@@ -107,10 +109,10 @@
 
   # Ensure workspace directory exists
   (try
-    (system/shell #"mkdir -p #{WORKSPACE_ROOT}")
-    (log .debug #"Workspace directory ready: #{WORKSPACE_ROOT}")
+    (system/shell #"mkdir -p '#{WORKSPACE_ROOT}' '#{DOCUMENT_ROOT}' '#{ARTIFACT_ROOT}'")
+    (log .debug #"Workspace directories ready: #{WORKSPACE_ROOT}, #{DOCUMENT_ROOT}, #{ARTIFACT_ROOT}")
   catch *
-    (log .warn #"Could not create workspace directory: #{$ex/message}")
+    (log .warn #"Could not create workspace directories: #{$ex/message}")
   )
 
   # Register tool modules
@@ -127,6 +129,7 @@
   (register_edit_file_tool register_tool log WORKSPACE_ROOT)
   (register_patch_file_tool register_tool log WORKSPACE_ROOT)
   (register_send_message_tool register_tool log)
+  (register_send_document_tool register_tool log)
   (register_delete_file_tool register_tool log WORKSPACE_ROOT)
   (register_tmux_send_tool register_tool log)
   (register_tmux_tail_tool register_tool log)

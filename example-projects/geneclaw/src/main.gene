@@ -6,7 +6,7 @@
 (import PORT SLACK_SIGNING_SECRET SLACK_BOT_TOKEN SLACK_APP_TOKEN get_public_config_gene get_public_config_at_path render_public_config_value from "config")
 (import init_db from "db")
 (import init_tools from "tools")
-(import run_agent from "agent")
+(import run_agent run_agent_envelope from "agent")
 (import start_scheduler from "scheduler")
 (import is_paused check_pause_timeout get_pause_status start_pause_watchdog from "hotswap_state")
 (import genex/http/http_post)
@@ -24,8 +24,82 @@
   (genex/http/respond status body {^Content-Type "text/plain; charset=utf-8"})
 )
 
-(fn handle_socket_slack_command [workspace_id user_id channel_id thread_id text]
-  (run_agent workspace_id user_id channel_id text thread_id)
+(fn ensure_attachments [value]
+  (if (value is Array) value else [])
+)
+
+(fn blank_string? [value]
+  (var text (if value (value .to_s) else ""))
+  ((text .length) == 0)
+)
+
+(fn normalize_slack_attachment [file]
+  (var url_private (file/url_private || ""))
+  (var url_private_download (file/url_private_download || ""))
+  (var download_url (if (blank_string? url_private_download)
+    url_private
+  else
+    url_private_download
+  ))
+  {
+    ^source "slack"
+    ^file_id (file/id || "")
+    ^filename (file/name || "")
+    ^title (file/title || "")
+    ^mime_type (file/mimetype || "")
+    ^filetype (file/filetype || "")
+    ^pretty_type (file/pretty_type || "")
+    ^url_private url_private
+    ^url_private_download url_private_download
+    ^download_url download_url
+    ^size (file/size || 0)
+  }
+)
+
+(fn extract_slack_attachments [event]
+  (var attachments [])
+  (if (event/files is Array)
+    (for file in event/files
+      (attachments .append (normalize_slack_attachment file))
+    )
+  )
+  (if ((attachments/.size == 0) && event/file)
+    (attachments .append (normalize_slack_attachment event/file))
+  )
+  attachments
+)
+
+(fn build_web_envelope [body]
+  {
+    ^workspace_id (body/workspace_id || "default")
+    ^user_id (body/user_id || "anonymous")
+    ^channel_id (body/channel_id || "general")
+    ^thread_id (body/thread_id || body/thread_ts || "")
+    ^text (body/text || "")
+    ^attachments (ensure_attachments body/attachments)
+    ^metadata {^source "web"}
+  }
+)
+
+(fn build_slack_envelope [body event]
+  {
+    ^workspace_id (body/team_id || "default")
+    ^user_id (event/user || "unknown")
+    ^channel_id (event/channel || "")
+    ^thread_id (event/thread_ts || event/ts || "")
+    ^text (event/text || "")
+    ^attachments (extract_slack_attachments event)
+    ^metadata {
+      ^source "slack"
+      ^event_type (event/type || "")
+      ^subtype (event/subtype || "")
+      ^slack_ts (event/ts || "")
+    }
+  }
+)
+
+(fn handle_socket_slack_command [envelope]
+  (run_agent_envelope envelope)
 )
 
 (fn get_header [req name default_val]
@@ -68,25 +142,27 @@
   # Body: {"workspace_id": "...", "user_id": "...", "channel_id": "...", "text": "..."}
   (try
     (var body (gene/json/parse req/.body))
-    (var workspace_id (body/workspace_id || "default"))
-    (var user_id (body/user_id || "anonymous"))
-    (var channel_id (body/channel_id || "general"))
-    (var thread_id (body/thread_id || body/thread_ts || ""))
-    (var text body/text)
+    (var envelope (build_web_envelope body))
+    (var workspace_id envelope/workspace_id)
+    (var user_id envelope/user_id)
+    (var channel_id envelope/channel_id)
+    (var thread_id envelope/thread_id)
+    (var text envelope/text)
+    (var attachments envelope/attachments)
 
-    (if thread_id/.empty
-      (log .info #"Chat request workspace=#{workspace_id} user=#{user_id} channel=#{channel_id}")
+    (if (blank_string? thread_id)
+      (log .info #"Chat request workspace=#{workspace_id} user=#{user_id} channel=#{channel_id} attachments=#{attachments/.size}")
     else
-      (log .info #"Chat request workspace=#{workspace_id} user=#{user_id} channel=#{channel_id} thread=#{thread_id}")
+      (log .info #"Chat request workspace=#{workspace_id} user=#{user_id} channel=#{channel_id} thread=#{thread_id} attachments=#{attachments/.size}")
     )
     (log .debug #"Chat text: #{text}")
 
-    (if text/.empty
-      (log .warn "Chat request missing text field")
-      (return (json_response 400 {^error "Missing text field"}))
+    (if ((blank_string? text) && (attachments/.size == 0))
+      (log .warn "Chat request missing text and attachments")
+      (return (json_response 400 {^error "Missing text or attachments"}))
     )
 
-    (var result (run_agent workspace_id user_id channel_id text thread_id))
+    (var result (run_agent_envelope envelope))
     (log .info #"Chat response run=#{result/run_id} steps=#{result/steps} tool_calls=#{result/tool_calls}")
     (json_response 200 {
       ^ok true
@@ -105,7 +181,7 @@
   # REST endpoint: GET /api/config
   (log .trace "Config export request")
   (var config_path ((req/.params .get "path" "") .trim))
-  (if config_path/.empty
+  (if (blank_string? config_path)
     (gene_response 200 (get_public_config_gene))
   else
     (var path_result (get_public_config_at_path config_path))
@@ -150,30 +226,32 @@
       (return (json_response 200 {^ok true}))
     )
 
-    (var workspace_id (body/team_id || "default"))
-    (var user_id (event/user || "unknown"))
-    (var channel_id event/channel)
-    (var thread_id (event/thread_ts || event/ts || ""))
-    (var text event/text)
+    (var envelope (build_slack_envelope body event))
+    (var workspace_id envelope/workspace_id)
+    (var user_id envelope/user_id)
+    (var channel_id envelope/channel_id)
+    (var thread_id envelope/thread_id)
+    (var text envelope/text)
+    (var attachments envelope/attachments)
 
-    (if (text/.empty || channel_id/.empty)
-      (log .debug "Slack event missing text or channel - skipping")
+    (if ((blank_string? channel_id) || ((blank_string? text) && (attachments/.size == 0)))
+      (log .debug "Slack event missing channel or message content - skipping")
       (return (json_response 200 {^ok true}))
     )
 
-    (if thread_id/.empty
-      (log .info #"Slack event workspace=#{workspace_id} user=#{user_id} channel=#{channel_id}")
+    (if (blank_string? thread_id)
+      (log .info #"Slack event workspace=#{workspace_id} user=#{user_id} channel=#{channel_id} attachments=#{attachments/.size}")
     else
-      (log .info #"Slack event workspace=#{workspace_id} user=#{user_id} channel=#{channel_id} thread=#{thread_id}")
+      (log .info #"Slack event workspace=#{workspace_id} user=#{user_id} channel=#{channel_id} thread=#{thread_id} attachments=#{attachments/.size}")
     )
     (log .debug #"Slack text: #{text}")
 
     # Run agent
-    (var result (run_agent workspace_id user_id channel_id text thread_id))
+    (var result (run_agent_envelope envelope))
     (log .info #"Slack agent done run=#{result/run_id} steps=#{result/steps}")
 
     # Reply to Slack
-    (if (SLACK_BOT_TOKEN && result/response)
+    (if (SLACK_BOT_TOKEN && result/response && ((blank_string? result/response) == false))
       (var reply_payload {
         ^channel channel_id
         ^text result/response

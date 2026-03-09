@@ -1,0 +1,28 @@
+#!/usr/bin/env gene run
+
+(import build_document_context_text build_prompt_text build_memory_user_text append_document_notices from "documents")
+
+(var docs [
+  {
+    ^document_id "doc-1"
+    ^filename "spec.pdf"
+    ^byte_size 42
+    ^status "extracted"
+    ^extracted_text "Alpha beta gamma"
+  }
+])
+
+(var ingest {
+  ^documents docs
+  ^usable_count 1
+  ^notices ["scan.png: OCR failed"]
+  ^context (build_document_context_text docs)
+})
+
+(assert ((ingest/context .include? "Attached documents:") == true))
+(assert ((ingest/context .include? "spec.pdf") == true))
+(assert (((build_prompt_text "summarize this" ingest) .include? "Document ingestion notices") == true))
+(assert (((build_memory_user_text "summarize this" ingest) .include? "[Attached documents: spec.pdf]") == true))
+(assert (((append_document_notices "done" ingest/notices) .include? "Document notices") == true))
+
+(println "ok")

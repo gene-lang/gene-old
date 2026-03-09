@@ -75,6 +75,66 @@ suite "Slack control adapter":
     check cmd.text == "run build"
     check cmd.metadata["event_type"].getStr() == "message"
 
+  test "file attachments are normalized into attachments":
+    let payload = %*{
+      "type": "event_callback",
+      "team_id": "T123",
+      "event_id": "EvFile",
+      "event": {
+        "type": "message",
+        "subtype": "file_share",
+        "user": "U123",
+        "text": "please review",
+        "channel": "C123",
+        "ts": "1700000000.001",
+        "files": [
+          {
+            "id": "F123",
+            "name": "spec.pdf",
+            "title": "spec.pdf",
+            "mimetype": "application/pdf",
+            "size": 1234,
+            "url_private": "https://files.slack.test/spec.pdf"
+          }
+        ]
+      }
+    }
+
+    let cmd = slack_event_to_command(payload)
+    check cmd.attachments.kind == JArray
+    check cmd.attachments.len == 1
+    check cmd.attachments[0]["file_id"].getStr() == "F123"
+    check cmd.attachments[0]["filename"].getStr() == "spec.pdf"
+    check cmd.attachments[0]["download_url"].getStr() == "https://files.slack.test/spec.pdf"
+    check cmd.metadata["attachments_count"].getInt() == 1
+
+  test "file only messages are accepted":
+    let payload = %*{
+      "type": "event_callback",
+      "team_id": "T123",
+      "event_id": "EvFileOnly",
+      "event": {
+        "type": "message",
+        "subtype": "file_share",
+        "user": "U123",
+        "text": "",
+        "channel": "C123",
+        "ts": "1700000000.001",
+        "file": {
+          "id": "F999",
+          "name": "notes.txt",
+          "mimetype": "text/plain",
+          "size": 12,
+          "url_private_download": "https://files.slack.test/notes.txt"
+        }
+      }
+    }
+
+    let cmd = slack_event_to_command(payload)
+    check cmd.text == ""
+    check cmd.attachments.len == 1
+    check cmd.attachments[0]["file_id"].getStr() == "F999"
+
   test "bot messages are ignored":
     let payload = %*{
       "type": "event_callback",

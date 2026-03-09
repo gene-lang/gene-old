@@ -1,0 +1,27 @@
+#!/usr/bin/env gene run
+
+(import WORKSPACE_ROOT from "config")
+(import send_document_candidate_paths select_send_document_path from "documents")
+(import init_tools invoke_tool from "tools")
+
+(var workspace_file #"#{WORKSPACE_ROOT}/send_document_test.md")
+(gene/io/write workspace_file "# test")
+
+(var candidates (send_document_candidate_paths "send_document_test.md"))
+(var artifact_candidate candidates/0)
+(var workspace_candidate candidates/1)
+(assert ((candidates/.size == 2) == true))
+(assert ((artifact_candidate .end_with? "/artifacts/send_document_test.md") == true))
+(assert ((workspace_candidate .start_with? WORKSPACE_ROOT) == true))
+(assert ((workspace_candidate .end_with? "/send_document_test.md") == true))
+(assert ((select_send_document_path "send_document_test.md") == workspace_candidate))
+
+(init_tools)
+
+(var result (invoke_tool "run-1" "ws" "u1" "C1" "T1" "ws:C1:T1" "send_document" {}))
+
+(assert ((result/ok == true) == true))
+(assert ((result/result/ok == false) == true))
+(assert (((result/result/error || "") .include? "Missing path") == true))
+
+(println "ok")

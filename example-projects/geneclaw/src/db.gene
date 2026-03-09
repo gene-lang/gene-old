@@ -92,7 +92,44 @@
       )")
       (DB .exec "CREATE INDEX IF NOT EXISTS idx_sched_due ON scheduled_jobs(state, next_run_ms)")
 
-      (log .info #"Database initialized: #{DB_PATH} (4 tables ready)")
+      # Documents table
+      (DB .exec "CREATE TABLE IF NOT EXISTS documents (
+        document_id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        source_ref TEXT DEFAULT '',
+        filename TEXT NOT NULL,
+        mime_type TEXT DEFAULT '',
+        byte_size INTEGER DEFAULT 0,
+        sha256 TEXT DEFAULT '',
+        local_path TEXT DEFAULT '',
+        extracted_text TEXT DEFAULT '',
+        status TEXT NOT NULL,
+        error TEXT DEFAULT '',
+        meta_json TEXT DEFAULT '{}',
+        created_at_ms INTEGER NOT NULL
+      )")
+      (DB .exec "CREATE INDEX IF NOT EXISTS idx_documents_session ON documents(session_id, created_at_ms)")
+
+      (DB .exec "CREATE TABLE IF NOT EXISTS document_chunks (
+        document_id TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        text TEXT NOT NULL,
+        meta_json TEXT DEFAULT '{}',
+        PRIMARY KEY (document_id, chunk_index)
+      )")
+
+      (DB .exec "CREATE TABLE IF NOT EXISTS session_documents (
+        session_id TEXT NOT NULL,
+        document_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL,
+        PRIMARY KEY (session_id, document_id, role)
+      )")
+      (DB .exec "CREATE INDEX IF NOT EXISTS idx_session_documents_session ON session_documents(session_id, created_at_ms)")
+
+      (log .info #"Database initialized: #{DB_PATH} (7 tables ready)")
     catch *
       (log .error #"Failed to open SQLite: #{(error_text $ex)}")
       (DB = nil)
@@ -185,6 +222,76 @@
       state now (if error then error else "") run_id)
   catch *
     (log .error #"run_complete failed: #{(error_text $ex)}")
+  )
+)
+
+# --- Document storage ---
+
+(fn $ns/document_save [record chunks role]
+  (if_not DB then (return))
+  (var now gene/now/.call/.to_i)
+  (var meta_str (if record/meta then record/meta/.to_json else "{}"))
+  (var chunk_list (if (chunks is Array) chunks else []))
+  (log .info #"document_save id=#{record/document_id} session=#{record/session_id} status=#{record/status} chunks=#{chunk_list/.size}")
+  (try
+    (DB .exec "INSERT OR REPLACE INTO documents (document_id, workspace_id, session_id, source, source_ref, filename, mime_type, byte_size, sha256, local_path, extracted_text, status, error, meta_json, created_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      record/document_id
+      record/workspace_id
+      record/session_id
+      record/source
+      (record/source_ref || "")
+      record/filename
+      (record/mime_type || "")
+      (record/byte_size || 0)
+      (record/sha256 || "")
+      (record/local_path || "")
+      (record/extracted_text || "")
+      record/status
+      (record/error || "")
+      meta_str
+      now)
+
+    (DB .exec "DELETE FROM document_chunks WHERE document_id = ?" record/document_id)
+    (for chunk in chunk_list
+      (DB .exec "INSERT INTO document_chunks (document_id, chunk_index, text, meta_json) VALUES (?, ?, ?, ?)"
+        record/document_id
+        (chunk/chunk_index || 0)
+        (chunk/text || "")
+        (if chunk/meta then chunk/meta/.to_json else "{}"))
+    )
+
+    (DB .exec "INSERT OR REPLACE INTO session_documents (session_id, document_id, role, created_at_ms) VALUES (?, ?, ?, ?)"
+      record/session_id record/document_id (role || "inbound") now)
+  catch *
+    (log .error #"document_save failed: #{(error_text $ex)}")
+  )
+)
+
+(fn $ns/document_list_for_session [session_id]
+  (if_not DB then (return []))
+  (try
+    (var rows (DB .query "SELECT d.document_id, d.filename, d.mime_type, d.byte_size, d.status, d.error, d.source, d.source_ref, d.local_path, d.created_at_ms, sd.role FROM documents d JOIN session_documents sd ON sd.document_id = d.document_id WHERE sd.session_id = ? ORDER BY d.created_at_ms ASC" session_id))
+    (if_not rows (return []))
+    (var result [])
+    (for r in rows
+      (result .append {
+        ^document_id r/0
+        ^filename r/1
+        ^mime_type r/2
+        ^byte_size r/3
+        ^status r/4
+        ^error r/5
+        ^source r/6
+        ^source_ref r/7
+        ^local_path r/8
+        ^created_at_ms r/9
+        ^role r/10
+      })
+    )
+    result
+  catch *
+    (log .error #"document_list_for_session failed: #{(error_text $ex)}")
+    []
   )
 )
 

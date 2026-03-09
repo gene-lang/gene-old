@@ -29,6 +29,11 @@ Slack/REST → Router → Agent Orchestrator → LLM Provider (OpenAI / Anthropi
 - `src/config.gene` - Environment variable configuration
 - `src/db.gene` - SQLite schema, memory, audit log, run tracking
 
+## Docs
+
+- `docs/hotswap.md` - self-upgrade and restart design
+- `docs/document_support.md` - inbound and outbound Slack document handling design
+
 ## Quick start
 
 ```bash
