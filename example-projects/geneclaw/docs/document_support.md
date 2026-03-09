@@ -159,7 +159,7 @@ V1 should process multiple attachments sequentially. That keeps implementation a
 Reuse existing helpers in `src/genex/ai/documents.nim`:
 
 - `extract_pdf`
-- `extract_image`
+- `file_to_base64`
 - `extract_and_chunk`
 - `chunk`
 
@@ -171,8 +171,19 @@ V1 supported types:
 - `png`
 - `jpg`
 - `jpeg`
+- `gif`
+- `webp`
 
 Plain text and markdown should be read directly without OCR/external extraction.
+
+Images should not go through OCR in GeneClaw. For image attachments:
+
+- download and persist the original file
+- mark the record as staged/usable without extracted text
+- pass the image itself to the configured multimodal LLM request
+- fail explicitly if the current provider/model configuration cannot accept images
+
+Only PDFs and text-like files should contribute extracted text/chunks to prompt context in V1.
 
 If extraction fails:
 

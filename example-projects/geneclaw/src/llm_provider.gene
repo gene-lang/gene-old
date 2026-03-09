@@ -3,6 +3,7 @@
 
 (import LLM_PROVIDER OPENAI_API_KEY OPENAI_MODEL OPENAI_BASE_URL OPENAI_TIMEOUT_MS from "config")
 (import ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL ANTHROPIC_BASE_URL ANTHROPIC_TIMEOUT_MS from "config")
+(import DOCUMENT_MAX_UPLOAD_BYTES IMAGE_MAX_COUNT from "config")
 
 (var log (new genex/logging/Logger $ns))
 
@@ -21,12 +22,175 @@
   (if (parsed is Map) parsed else {})
 )
 
+(fn blank_string? [value]
+  (var text (if value (value .to_s) else ""))
+  ((text .length) == 0)
+)
+
+(fn supported_image_mime? [mime_type]
+  (var normalized (((mime_type || "") .to_s) .to_lower))
+  (if ((normalized == "image/png") ||
+       (normalized == "image/jpeg") ||
+       (normalized == "image/jpg") ||
+       (normalized == "image/gif") ||
+       (normalized == "image/webp"))
+    true
+  else
+    false
+  )
+)
+
+(fn $ns/provider_supports_images? [provider = nil]
+  (var selected (((provider || LLM_PROVIDER) .to_s) .to_lower))
+  (if ((selected == "openai") || (selected == "anthropic"))
+    true
+  else
+    false
+  )
+)
+
+(fn image_attachment_error [image_attachments provider = nil]
+  (var images (ensure_array image_attachments))
+  (var selected_provider (((provider || LLM_PROVIDER) .to_s) .to_lower))
+  (if (images/.size == 0)
+    (return "")
+  )
+
+  (if_not (provider_supports_images? selected_provider)
+    (return #"The current model provider (#{selected_provider}) does not support image inputs.")
+  )
+
+  (if (images/.size > IMAGE_MAX_COUNT)
+    (return #"This request includes #{images/.size} images, but the current limit is #{IMAGE_MAX_COUNT}.")
+  )
+
+  (for image in images
+    (if (blank_string? image/local_path)
+      (return #"Image attachment #{(image/filename || image/document_id || "unknown")} is missing a local file path.")
+    )
+    (if_not (supported_image_mime? image/mime_type)
+      (return #"Unsupported image type for #{(image/filename || image/document_id || "unknown")}: #{(image/mime_type || "unknown")}")
+    )
+    (if (((image/byte_size || 0) > 0) && ((image/byte_size || 0) > DOCUMENT_MAX_UPLOAD_BYTES))
+      (return #"Image attachment #{(image/filename || image/document_id || "unknown")} exceeds #{DOCUMENT_MAX_UPLOAD_BYTES} bytes.")
+    )
+  )
+
+  ""
+)
+
+(fn $ns/validate_image_inputs [image_attachments provider = nil]
+  (var error (image_attachment_error image_attachments provider))
+  (if (blank_string? error)
+    {^ok true ^error ""}
+  else
+    {^ok false ^error error}
+  )
+)
+
+(fn read_image_base64 [image]
+  (var existing (image/base64_data || ""))
+  (if_not (blank_string? existing)
+    (return existing)
+  )
+  (var encoded (genex/ai/documents/file_to_base64 image/local_path))
+  (image/base64_data = encoded)
+  encoded
+)
+
+(fn openai_image_part [image]
+  {^type "image_url"
+   ^image_url {
+     ^url #"data:#{image/mime_type};base64,#{(read_image_base64 image)}"
+     ^detail "auto"
+   }}
+)
+
+(fn anthropic_image_block [image]
+  {^type "image"
+   ^source {
+     ^type "base64"
+     ^media_type image/mime_type
+     ^data (read_image_base64 image)
+   }}
+)
+
+(fn build_openai_user_content [user_text image_attachments]
+  (var images (ensure_array image_attachments))
+  (if (images/.size == 0)
+    (return user_text)
+  )
+
+  (var content [])
+  (if_not (blank_string? user_text)
+    (content .append {^type "text" ^text user_text})
+  )
+  (images .each (fn [image]
+    (content .append (openai_image_part image))
+  ))
+  content
+)
+
+(fn build_anthropic_user_blocks [user_text image_attachments]
+  (var blocks [])
+  (var images (ensure_array image_attachments))
+  (if_not (blank_string? user_text)
+    (blocks .append {^type "text" ^text user_text})
+  )
+  (images .each (fn [image]
+    (blocks .append (anthropic_image_block image))
+  ))
+  blocks
+)
+
+(fn openai_message_log_text [msg]
+  (var content (msg/content || ""))
+  (if (content is Array)
+    (var parts [])
+    (content .each (fn [part]
+      (if ((part is Map) && (part/type == "text"))
+        (parts .append #"{type:text,text=#{(part/text || "")}}")
+      elif ((part is Map) && (part/type == "image_url"))
+        (parts .append #"{type:image_url,url=[image data omitted]}")
+      else
+        (parts .append #"{type=#{(part/type || "unknown")}}")
+      )
+    ))
+    #"{role=#{msg/role}, content=[#{(parts .join ", ")}]}"
+  else
+    (msg .to_json)
+  )
+)
+
+(fn anthropic_message_log_text [msg]
+  (var content (msg/content || []))
+  (if (content is Array)
+    (var parts [])
+    (content .each (fn [block]
+      (if ((block is Map) && (block/type == "text"))
+        (parts .append #"{type:text,text=#{(block/text || "")}}")
+      elif ((block is Map) && (block/type == "image"))
+        (parts .append #"{type:image,source=[image data omitted]}")
+      elif ((block is Map) && (block/type == "tool_result"))
+        (parts .append #"{type:tool_result,tool_use_id=#{(block/tool_use_id || "")}}")
+      elif ((block is Map) && (block/type == "tool_use"))
+        (parts .append #"{type:tool_use,name=#{(block/name || "")}}")
+      else
+        (parts .append #"{type=#{(block/type || "unknown")}}")
+      )
+    ))
+    #"{role=#{msg/role}, content=[#{(parts .join ", ")}]}"
+  else
+    (msg .to_json)
+  )
+)
+
 (fn log_openai_messages [messages history]
   (log .info #"Built OpenAI request messages=#{messages/.size} (#{history/.size} history + system + user)")
   (var msg_idx 0)
   (messages .each (fn [msg]
     (log .info #"--- Message #{msg_idx} [#{msg/role}] ---")
-    (log .info (msg/content || ""))
+    (log .info (openai_message_log_text msg))
     (msg_idx += 1)
   ))
   (log .info "--- End of messages ---")
@@ -39,13 +203,13 @@
   (var msg_idx 0)
   (request/messages .each (fn [msg]
     (log .info #"--- Message #{msg_idx} [#{msg/role}] ---")
-    (log .info msg/.to_json)
+    (log .info (anthropic_message_log_text msg))
     (msg_idx += 1)
   ))
   (log .info "--- End of messages ---")
 )
 
-(fn $ns/build_openai_request [history user_text tools_spec]
+(fn $ns/build_openai_request [history user_text tools_spec image_attachments = []]
   (var messages [])
   (messages .append {^role "system" ^content SYSTEM_PROMPT})
 
@@ -63,7 +227,7 @@
     (messages .append msg)
   ))
 
-  (messages .append {^role "user" ^content user_text})
+  (messages .append {^role "user" ^content (build_openai_user_content user_text image_attachments)})
   (log_openai_messages messages history)
   {^messages messages ^tools tools_spec}
 )
@@ -89,7 +253,7 @@
    ^content (entry/content || "")}
 )
 
-(fn build_anthropic_messages [history user_text]
+(fn build_anthropic_messages [history user_text image_attachments]
   (var messages [])
   (var pending_tool_results [])
 
@@ -133,20 +297,23 @@
     (pending_tool_results .each (fn [block]
       (final_blocks .append block)
     ))
-    (if_not user_text/.empty
-      (final_blocks .append {^type "text" ^text user_text})
+    ((build_anthropic_user_blocks user_text image_attachments) .each (fn [block]
+      (final_blocks .append block)
+    ))
+    (if (final_blocks/.size > 0)
+      (messages .append {^role "user" ^content final_blocks})
     )
-    (messages .append {^role "user" ^content final_blocks})
   else
-    (if_not user_text/.empty
-      (messages .append {^role "user" ^content [{^type "text" ^text user_text}]})
+    (var final_blocks (build_anthropic_user_blocks user_text image_attachments))
+    (if (final_blocks/.size > 0)
+      (messages .append {^role "user" ^content final_blocks})
     )
   )
 
   messages
 )
 
-(fn $ns/build_anthropic_request [history user_text tools_spec]
+(fn $ns/build_anthropic_request [history user_text tools_spec image_attachments = []]
   (var tools [])
   (tools_spec .each (fn [tool_spec]
     (tools .append (anthropic_tool_from_openai tool_spec))
@@ -154,7 +321,7 @@
 
   (var request {
     ^system SYSTEM_PROMPT
-    ^messages (build_anthropic_messages history user_text)
+    ^messages (build_anthropic_messages history user_text image_attachments)
     ^tools tools
   })
   (log_anthropic_request request history)
@@ -205,15 +372,19 @@
 (fn provider_has_credentials []
   (if (LLM_PROVIDER == "anthropic")
     (return (not (ANTHROPIC_API_KEY/.empty && ANTHROPIC_AUTH_TOKEN/.empty)))
+  elif (LLM_PROVIDER == "openai")
+    (return (not OPENAI_API_KEY/.empty))
   )
-  (not OPENAI_API_KEY/.empty)
+  false
 )
 
 (fn mock_mode_response []
   (if (LLM_PROVIDER == "anthropic")
     (return {^content "I received your message. (Running in mock mode - set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN to enable LLM)" ^tool_calls []})
+  elif (LLM_PROVIDER == "openai")
+    (return {^content "I received your message. (Running in mock mode - set OPENAI_API_KEY to enable LLM)" ^tool_calls []})
   )
-  {^content "I received your message. (Running in mock mode - set OPENAI_API_KEY to enable LLM)" ^tool_calls []}
+  {^content #"Unsupported LLM provider: #{LLM_PROVIDER}" ^tool_calls []}
 )
 
 (fn error_message_from_response [response]
@@ -224,8 +395,8 @@
   )
 )
 
-(fn call_openai [history user_text tools_spec]
-  (var request (build_openai_request history user_text tools_spec))
+(fn call_openai [history user_text tools_spec image_attachments]
+  (var request (build_openai_request history user_text tools_spec image_attachments))
   (log .info #"Calling LLM provider=openai model=#{OPENAI_MODEL} messages=#{request/messages/.size} tools=#{request/tools/.size} timeout_ms=#{OPENAI_TIMEOUT_MS}")
   (var client_opts {^api_key OPENAI_API_KEY ^model OPENAI_MODEL ^timeout_ms OPENAI_TIMEOUT_MS})
   (if_not OPENAI_BASE_URL/.empty
@@ -236,8 +407,8 @@
   {^response response ^normalized (normalize_openai_response response)}
 )
 
-(fn call_anthropic [history user_text tools_spec]
-  (var request (build_anthropic_request history user_text tools_spec))
+(fn call_anthropic [history user_text tools_spec image_attachments]
+  (var request (build_anthropic_request history user_text tools_spec image_attachments))
   (log .info #"Calling LLM provider=anthropic model=#{ANTHROPIC_MODEL} messages=#{request/messages/.size} tools=#{request/tools/.size} timeout_ms=#{ANTHROPIC_TIMEOUT_MS}")
   (var client_opts {^model ANTHROPIC_MODEL ^timeout_ms ANTHROPIC_TIMEOUT_MS})
   (if_not ANTHROPIC_API_KEY/.empty
@@ -254,8 +425,19 @@
   {^response response ^normalized (normalize_anthropic_response response)}
 )
 
-(fn $ns/call_llm [history user_text tools_spec]
+(fn $ns/call_llm [history user_text tools_spec image_attachments = []]
+  (var images (ensure_array image_attachments))
+  (var image_error (image_attachment_error images))
+  (if_not (blank_string? image_error)
+    (log .warn #"Image input rejected: #{image_error}")
+    (return {^content image_error ^tool_calls []})
+  )
+
   (if_not (provider_has_credentials)
+    (if (images/.size > 0)
+      (log .warn #"LLM image call rejected in mock mode (provider=#{LLM_PROVIDER})")
+      (return {^content #"Image inputs require configured #{(if (LLM_PROVIDER == "anthropic") "Anthropic" elif (LLM_PROVIDER == "openai") "OpenAI" else "LLM")} credentials." ^tool_calls []})
+    )
     (log .info #"LLM call skipped (mock mode - provider=#{LLM_PROVIDER})")
     (return (mock_mode_response))
   )
@@ -264,9 +446,9 @@
     (try
       (var start_ms gene/now/.call/.to_i)
       (var call_result (if (LLM_PROVIDER == "anthropic")
-        (call_anthropic history user_text tools_spec)
+        (call_anthropic history user_text tools_spec images)
       else
-        (call_openai history user_text tools_spec)
+        (call_openai history user_text tools_spec images)
       ))
       (log .debug "LLM chat returned")
       (var duration (gene/now/.call/.to_i - start_ms))

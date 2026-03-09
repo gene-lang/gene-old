@@ -1,6 +1,6 @@
 #!/usr/bin/env gene run
 
-(import build_anthropic_request normalize_anthropic_response from "llm_provider")
+(import build_openai_request build_anthropic_request normalize_anthropic_response provider_supports_images? validate_image_inputs from "llm_provider")
 
 (var tools_spec [
   {^type "function"
@@ -17,6 +17,36 @@
    }}
 ])
 
+(var image_path "/tmp/geneclaw-test-image.png")
+(gene/io/write image_path "fake-image-data")
+(var image_attachment {
+  ^document_id "doc-image-1"
+  ^filename "screen.png"
+  ^mime_type "image/png"
+  ^local_path image_path
+  ^byte_size 15
+  ^status "staged"
+})
+
+(assert (((provider_supports_images? "openai") .to_s) == "true"))
+(assert (((provider_supports_images? "anthropic") .to_s) == "true"))
+(assert (((provider_supports_images? "bogus") .to_s) == "false"))
+(var invalid_provider_check (validate_image_inputs [image_attachment] "bogus"))
+(var invalid_provider_json (gene/json/stringify invalid_provider_check))
+(assert (invalid_provider_json .include? "\"ok\":false"))
+(assert (invalid_provider_json .include? "does not support image inputs"))
+
+(var openai_request (build_openai_request [] "What is in this image?" tools_spec [image_attachment]))
+(var openai_request_json (gene/json/stringify openai_request))
+(assert (openai_request/messages/.size == 2))
+(assert (openai_request/messages/1/role == "user"))
+(assert (openai_request/messages/1/content/.size == 2))
+(assert (openai_request/messages/1/content/0/type == "text"))
+(assert (openai_request/messages/1/content/0/text == "What is in this image?"))
+(assert (openai_request/messages/1/content/1/type == "image_url"))
+(assert (openai_request_json .include? "\"type\":\"image_url\""))
+(assert (openai_request_json .include? "\"data:image/png;base64,"))
+
 (var history [
   {^role "assistant"
    ^content ""
@@ -32,7 +62,8 @@
    ^content "{\"files\":[]}"}
 ])
 
-(var request (build_anthropic_request history "Continue based on the tool results above." tools_spec))
+(var request (build_anthropic_request history "Continue based on the tool results above." tools_spec [image_attachment]))
+(var anthropic_request_json (gene/json/stringify request))
 
 (assert (request/system == "You are GeneClaw, a capable AI agent. You can use tools to complete tasks. After receiving a tool result, provide a natural response. For general conversation, respond normally without tool calls."))
 (assert (request/tools/.size == 1))
@@ -46,11 +77,14 @@
 (assert (request/messages/0/content/0/name == "list_files"))
 (assert (request/messages/0/content/0/input/path == "/tmp"))
 (assert (request/messages/1/role == "user"))
-(assert (request/messages/1/content/.size == 2))
+(assert (request/messages/1/content/.size == 3))
 (assert (request/messages/1/content/0/type == "tool_result"))
 (assert (request/messages/1/content/0/tool_use_id == "call_1"))
 (assert (request/messages/1/content/1/type == "text"))
 (assert (request/messages/1/content/1/text == "Continue based on the tool results above."))
+(assert (anthropic_request_json .include? "\"type\":\"image\""))
+(assert (anthropic_request_json .include? "\"media_type\":\"image/png\""))
+(assert (anthropic_request_json .include? "\"type\":\"tool_result\""))
 
 (var normalized (normalize_anthropic_response {
   ^content [

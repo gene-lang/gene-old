@@ -871,6 +871,7 @@ proc init_openai_classes*() =
     let documents_ns = new_namespace("documents")
     documents_ns["extract_pdf".to_key()] = vm_ai_documents_extract_pdf.to_value()
     documents_ns["extract_image".to_key()] = vm_ai_documents_extract_image.to_value()
+    documents_ns["file_to_base64".to_key()] = vm_ai_documents_file_to_base64.to_value()
     documents_ns["chunk".to_key()] = vm_ai_documents_chunk.to_value()
     documents_ns["extract_and_chunk".to_key()] = vm_ai_documents_extract_and_chunk.to_value()
     documents_ns["save_upload".to_key()] = vm_ai_documents_save_upload.to_value()

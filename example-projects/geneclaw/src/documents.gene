@@ -41,18 +41,54 @@
   (attachment/download_url || attachment/url_private_download || attachment/url_private || "")
 )
 
-(fn supported_document? [filename mime_type]
+(fn normalized_mime_type [mime_type]
+  (((mime_type || "") .to_s) .to_lower)
+)
+
+(fn is_image_attachment [filename mime_type]
   (var ext (filename_extension filename))
-  (var normalized_mime (((mime_type || "") .to_s) .to_lower))
+  (var normalized_mime (normalized_mime_type mime_type))
+  (if ((normalized_mime == "image/png") ||
+       (normalized_mime == "image/jpeg") ||
+       (normalized_mime == "image/jpg") ||
+       (normalized_mime == "image/gif") ||
+       (normalized_mime == "image/webp") ||
+       (ext == "png") ||
+       (ext == "jpg") ||
+       (ext == "jpeg") ||
+       (ext == "gif") ||
+       (ext == "webp"))
+    true
+  else
+    false
+  )
+)
+
+(fn $ns/image_attachment? [filename mime_type]
+  (is_image_attachment filename mime_type)
+)
+
+(fn is_text_document [filename mime_type]
+  (var ext (filename_extension filename))
+  (var normalized_mime (normalized_mime_type mime_type))
   (if ((normalized_mime .starts_with "text/") ||
        (ext == "txt") ||
        (ext == "md") ||
        (ext == "pdf") ||
-       (normalized_mime == "application/pdf") ||
-       (normalized_mime .starts_with "image/") ||
-       (ext == "png") ||
-       (ext == "jpg") ||
-       (ext == "jpeg"))
+       (normalized_mime == "application/pdf"))
+    true
+  else
+    false
+  )
+)
+
+(fn $ns/text_document? [filename mime_type]
+  (is_text_document filename mime_type)
+)
+
+(fn supported_document? [filename mime_type]
+  (if ((is_text_document filename mime_type) ||
+       (is_image_attachment filename mime_type))
     true
   else
     false
@@ -61,13 +97,11 @@
 
 (fn extract_document_text [path filename mime_type]
   (var ext (filename_extension filename))
-  (var normalized_mime (((mime_type || "") .to_s) .to_lower))
+  (var normalized_mime (normalized_mime_type mime_type))
   (if ((normalized_mime .starts_with "text/") || (ext == "txt") || (ext == "md"))
     (gene/io/read path)
   elif ((normalized_mime == "application/pdf") || (ext == "pdf"))
     ((genex/ai/documents/extract_pdf path) .join "\n\n")
-  elif ((normalized_mime .starts_with "image/") || (ext == "png") || (ext == "jpg") || (ext == "jpeg"))
-    (genex/ai/documents/extract_image path)
   else
     (throw #"Unsupported document type: #{filename}")
   )
@@ -130,11 +164,18 @@
   (var resolved (hydrate_attachment attachment))
   (var filename (sanitize_filename (resolved/filename || resolved/title || #"#{document_id}.bin")))
   (var mime_type ((resolved/mime_type || "") .to_s))
+  (var image_input (is_image_attachment filename mime_type))
   (var declared_size (resolved/size || 0))
   (var local_dir #"#{DOCUMENT_ROOT}/inbox/#{sanitize_component workspace_id}/#{sanitize_component (envelope/channel_id || "general")}/#{sanitize_component (envelope/thread_id || "root")}/#{document_id}")
   (var local_path #"#{local_dir}/#{filename}")
   (var source_ref (resolved/file_id || ""))
-  (var meta {^attachment resolved ^channel_id (envelope/channel_id || "") ^thread_id (envelope/thread_id || "") ^user_id (envelope/user_id || "")})
+  (var meta {
+    ^attachment resolved
+    ^channel_id (envelope/channel_id || "")
+    ^thread_id (envelope/thread_id || "")
+    ^user_id (envelope/user_id || "")
+    ^media_class (if image_input "image" else "document")
+  })
   (var record {
     ^document_id document_id
     ^workspace_id workspace_id
@@ -190,14 +231,18 @@
     (record/sha256 = (transfer/sha256 || ""))
     (record/local_path = (transfer/path || local_path))
 
-    (var text (extract_document_text record/local_path filename mime_type))
-    (if (blank_string? text)
-      (record/status = "failed")
-      (record/error = "No extractable text found")
+    (if image_input
+      (record/status = "staged")
     else
-      (record/extracted_text = text)
-      (record/status = "extracted")
-      (chunks = (chunk_document_text text filename))
+      (var text (extract_document_text record/local_path filename mime_type))
+      (if (blank_string? text)
+        (record/status = "failed")
+        (record/error = "No extractable text found")
+      else
+        (record/extracted_text = text)
+        (record/status = "extracted")
+        (chunks = (chunk_document_text text filename))
+      )
     )
   catch *
     (record/status = "failed")
@@ -211,24 +256,29 @@
 (fn $ns/ingest_attachments [session_id envelope]
   (var attachments (if (envelope/attachments is Array) envelope/attachments else []))
   (if (attachments/.size == 0)
-    (return {^documents [] ^usable_count 0 ^notices [] ^context ""})
+    (return {^documents [] ^image_attachments [] ^usable_count 0 ^notices [] ^context ""})
   )
 
   (var documents [])
+  (var image_attachments [])
   (var notices [])
   (var usable_count 0)
 
   (for attachment in attachments
     (var record (build_document_record session_id envelope attachment))
     (documents .append record)
-    (if (record/status == "extracted")
+    (if ((record/status == "extracted") || (record/status == "staged"))
       (usable_count += 1)
+      (if (record/status == "staged")
+        (image_attachments .append record)
+      )
     else
       (notices .append #"#{record/filename}: #{record/error}")
     )
   )
 
   {^documents documents
+   ^image_attachments image_attachments
    ^usable_count usable_count
    ^notices notices
    ^context (build_document_context_text documents)}
@@ -274,7 +324,7 @@
   (if (notices/.size == 0)
     ""
   else
-    #"I received document uploads, but some could not be read:\n- #{(notices .join "\n- ")}"
+    #"I received file uploads, but some could not be prepared:\n- #{(notices .join "\n- ")}"
   )
 )
 
@@ -284,8 +334,13 @@
   elif (blank_string? response)
     (build_document_notice_response notices)
   else
-    #"#{response}\n\nDocument notices:\n- #{(notices .join "\n- ")}"
+    #"#{response}\n\nAttachment notices:\n- #{(notices .join "\n- ")}"
   )
+)
+
+(fn image_attachment_count [ingest]
+  (var images (if (ingest/image_attachments is Array) ingest/image_attachments else []))
+  images/.size
 )
 
 (fn $ns/build_prompt_text [user_text ingest]
@@ -293,11 +348,14 @@
   (var text ((user_text || "") .to_s))
   (var context (ingest/context || ""))
   (var notices (if (ingest/notices is Array) ingest/notices else []))
+  (var image_count (image_attachment_count ingest))
 
   (if (blank_string? text)
     (if (blank_string? context)
       (if (notices/.size > 0)
-        (parts .append "The user uploaded one or more documents, but GeneClaw could not read all of them. Explain what happened clearly.")
+        (parts .append "The user uploaded one or more files, but GeneClaw could not prepare all of them. Explain what happened clearly.")
+      elif (image_count > 0)
+        (parts .append "The user uploaded one or more images without additional text. Review the attached image inputs and respond helpfully.")
       )
     else
       (parts .append "The user uploaded one or more documents without additional text. Review the attached document context and respond helpfully.")
@@ -306,20 +364,24 @@
     (parts .append text)
   )
 
+  (if (image_count > 0)
+    (parts .append #"The current request includes #{image_count} image attachment(s). Analyze the attached images directly.")
+  )
   (if_not (blank_string? context)
     (parts .append context)
   )
   (if (notices/.size > 0)
-    (parts .append #"Document ingestion notices:\n- #{(notices .join "\n- ")}")
+    (parts .append #"Attachment preparation notices:\n- #{(notices .join "\n- ")}")
   )
 
   (parts .join "\n\n")
 )
 
-(fn successful_document_names [documents]
+(fn successful_attachment_names [documents]
   (var names [])
   (for doc in documents
-    (if_not (blank_string? doc/filename)
+    (if (((doc/status == "extracted") || (doc/status == "staged") || (doc/status == "uploaded")) &&
+         ((blank_string? doc/filename) == false))
       (names .append doc/filename)
     )
   )
@@ -329,7 +391,7 @@
 (fn $ns/build_memory_user_text [user_text ingest]
   (var text ((user_text || "") .to_s))
   (var documents (if (ingest/documents is Array) ingest/documents else []))
-  (var names (successful_document_names documents))
+  (var names (successful_attachment_names documents))
   (var parts [])
 
   (if_not (blank_string? text)
@@ -337,9 +399,9 @@
   )
 
   (if (names/.size > 0)
-    (parts .append #"[Attached documents: #{(names .join ", ")}]")
+    (parts .append #"[Attached files: #{(names .join ", ")}]")
   elif (documents/.size > 0)
-    (parts .append "[Uploaded documents]")
+    (parts .append "[Uploaded files]")
   )
 
   (if (parts/.size == 0)

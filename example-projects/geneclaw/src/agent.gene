@@ -28,7 +28,7 @@
 
 # Keep the LLM/tool loop in a helper. Re-entering the larger run_agent frame
 # after repeated LLM calls was corrupting subsequent history loads.
-(fn execute_agent_steps [run_id workspace_id user_id channel_id thread_id session_id history initial_text tools_spec]
+(fn execute_agent_steps [run_id workspace_id user_id channel_id thread_id session_id history initial_text tools_spec image_attachments]
   (var step 0)
   (var tool_call_count 0)
   (var final_response "")
@@ -44,7 +44,7 @@
     (log .info #"#{run_id} step #{step}/#{MAX_STEPS}")
 
     # Build provider request and call the selected LLM provider
-    (var result (call_llm history text tools_spec))
+    (var result (call_llm history text tools_spec image_attachments))
     (var content result/content)
     (var tool_calls result/tool_calls)
 
@@ -156,16 +156,21 @@
 
   (var ingest (ingest_attachments session_id input))
   (if (attachment_count > 0)
-    (log .info #"#{run_id} ingested #{attachment_count} attachment(s), usable=#{ingest/usable_count}")
+    (log .info #"#{run_id} ingested #{attachment_count} attachment(s), usable=#{ingest/usable_count}, images=#{(if (ingest/image_attachments is Array) ingest/image_attachments/.size else 0)}")
   )
   (var prompt_text (build_prompt_text text ingest))
   (var memory_text (build_memory_user_text text ingest))
 
   # Record user message
-  (memory_append workspace_id session_id "user" memory_text {^user_id user_id ^attachments attachment_count ^usable_documents (ingest/usable_count || 0)})
+  (memory_append workspace_id session_id "user" memory_text {
+    ^user_id user_id
+    ^attachments attachment_count
+    ^usable_attachments (ingest/usable_count || 0)
+    ^image_attachments (if (ingest/image_attachments is Array) ingest/image_attachments/.size else 0)
+  })
 
   (var tools_spec (build_tools_spec))
-  (var phase (execute_agent_steps run_id workspace_id user_id channel_id thread_id session_id history prompt_text tools_spec))
+  (var phase (execute_agent_steps run_id workspace_id user_id channel_id thread_id session_id history prompt_text tools_spec (ingest/image_attachments || [])))
   (var final_response (append_document_notices phase/response (ingest/notices || [])))
   (var step phase/steps)
   (var tool_call_count phase/tool_calls)

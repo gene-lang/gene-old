@@ -3,6 +3,7 @@ import osproc
 import strutils
 import streams
 import tables
+import base64
 
 import ../../gene/types
 
@@ -314,6 +315,14 @@ proc extract_image_text(path: string, config: Value): string =
 
   return output
 
+proc encode_file_base64(path: string): string =
+  if not fileExists(path):
+    raise new_exception(types.Exception, "file_to_base64 file not found: " & path)
+  try:
+    return base64.encode(readFile(path))
+  except IOError as e:
+    raise new_exception(types.Exception, "file_to_base64 failed: " & e.msg)
+
 proc chunk_text_value(text: string, config: Value): Value {.gcsafe.} =
   let strategy = parse_strategy(normalize_strategy(map_get(config, "strategy")))
   let size = map_get_int(config, "size", 500)
@@ -485,6 +494,15 @@ proc vm_ai_documents_extract_image*(vm: ptr VirtualMachine, args: ptr UncheckedA
 
   let text = extract_image_text(path, config)
   return text.to_value()
+
+proc vm_ai_documents_file_to_base64*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  if get_positional_count(arg_count, has_keyword_args) < 1:
+    raise new_exception(types.Exception, "file_to_base64 requires a file path")
+
+  let path_val = get_positional_arg(args, 0, has_keyword_args)
+  let path = to_string_value(path_val, "file_to_base64 path")
+  let encoded = encode_file_base64(path)
+  return encoded.to_value()
 
 proc vm_ai_documents_chunk*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
   if get_positional_count(arg_count, has_keyword_args) < 1:
