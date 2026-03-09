@@ -1,4 +1,4 @@
-import os, times, strutils, strformat, tables, locks
+import os, times, strutils, strformat, tables, locks, terminal
 
 import ./types
 import ./parser
@@ -196,6 +196,30 @@ proc format_log_line*(level: LogLevel, logger_name: string, message: string, tim
 proc format_log_line*(level: LogLevel, logger_name: string, message: string): string {.gcsafe.} =
   format_log_line(level, logger_name, message, now())
 
+proc log_color_enabled(): bool =
+  if existsEnv("NO_COLOR"):
+    return false
+  let term_name = getEnv("TERM", "")
+  if term_name.len == 0 or term_name.toLowerAscii() == "dumb":
+    return false
+  try:
+    isatty(stdout)
+  except CatchableError:
+    false
+
+proc log_color_prefix(level: LogLevel): string =
+  case level
+  of LlError: "\e[31m"
+  of LlWarn: "\e[33m"
+  of LlInfo: "\e[32m"
+  of LlDebug: "\e[36m"
+  of LlTrace: "\e[90m"
+
+proc colorize_log_line(level: LogLevel, line: string): string =
+  if line.len == 0 or not log_color_enabled():
+    return line
+  log_color_prefix(level) & line & "\e[0m"
+
 proc log_message*(level: LogLevel, logger_name: string, message: string) {.gcsafe.} =
   # log_enabled() internally acquires config_lock, so it's thread-safe
   {.cast(gcsafe).}:
@@ -207,6 +231,6 @@ proc log_message*(level: LogLevel, logger_name: string, message: string) {.gcsaf
   try:
     {.cast(gcsafe).}:
       last_log_line = line
-    echo line
+    echo colorize_log_line(level, line)
   finally:
     release(log_lock)
