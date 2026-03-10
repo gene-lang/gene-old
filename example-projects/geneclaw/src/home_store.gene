@@ -1,17 +1,7 @@
 # GeneClaw home bootstrap and serialized storage helpers
 
-(fn blank_string? [value]
-  (var text (if value (value .to_s) else ""))
-  ((text .length) == 0)
-)
-
-(fn ensure_map [value]
-  (if (value is Map) value else {})
-)
-
-(fn ensure_array [value]
-  (if (value is Array) value else [])
-)
+(import blank_string? ensure_map build_bootstrap_config_tree from "config_helpers")
+(import CONFIG_SCHEMA CONFIG_BOOTSTRAP_SEPARATE from "config_schema")
 
 ($ns/DEFAULT_GENECLAW_HOME = "/Users/gcao/gene-workspace/gene-old/example-projects/geneclaw/home")
 ($ns/GENECLAW_HOME = ($env .get "GENECLAW_HOME" DEFAULT_GENECLAW_HOME))
@@ -26,42 +16,6 @@
 
 (fn default_system_prompt []
   "You are GeneClaw, a capable AI agent. You can use tools to complete tasks. After receiving a tool result, provide a natural response. For general conversation, respond normally without tool calls."
-)
-
-(fn $ns/default_home_config []
-  {
-    ^llm {
-      ^provider "{ENV:GENECLAW_LLM_PROVIDER:openai}"
-      ^thinking_level "{ENV:GENECLAW_THINKING_LEVEL:standard}"
-      ^context_size "{ENV:GENECLAW_CONTEXT_SIZE:0}"
-      ^max_steps "{ENV:GENECLAW_MAX_STEPS:16}"
-      ^max_tool_calls "{ENV:GENECLAW_MAX_TOOL_CALLS:8}"
-      ^openai {
-        ^model "{ENV:OPENAI_MODEL:gpt-5-mini}"
-        ^base_url "{ENV:OPENAI_BASE_URL:}"
-        ^timeout_ms "{ENV:OPENAI_TIMEOUT_MS:60000}"
-      }
-      ^anthropic {
-        ^model "{ENV:ANTHROPIC_MODEL:claude-sonnet-4-6}"
-        ^base_url "{ENV:ANTHROPIC_BASE_URL:}"
-        ^timeout_ms "{ENV:ANTHROPIC_TIMEOUT_MS:60000}"
-      }
-    }
-    ^documents {
-      ^max_upload_bytes "{ENV:GENECLAW_DOCUMENT_MAX_UPLOAD_BYTES:10485760}"
-      ^max_inline_chars "{ENV:GENECLAW_DOCUMENT_MAX_INLINE_CHARS:4000}"
-      ^max_image_count "{ENV:GENECLAW_IMAGE_MAX_COUNT:4}"
-    }
-    ^scheduler {
-      ^tick_ms "{ENV:GENECLAW_SCHEDULER_TICK_MS:30000}"
-    }
-    ^hotswap {
-      ^pause_timeout_ms "{ENV:GENECLAW_PAUSE_TIMEOUT_MS:120000}"
-      ^pause_check_interval_ms "{ENV:GENECLAW_PAUSE_CHECK_INTERVAL_MS:5000}"
-      ^upgrade_health_attempts "{ENV:GENECLAW_UPGRADE_HEALTH_ATTEMPTS:15}"
-      ^upgrade_health_interval_ms "{ENV:GENECLAW_UPGRADE_HEALTH_INTERVAL_MS:2000}"
-    }
-  }
 )
 
 (fn $ns/default_workspace_state []
@@ -88,8 +42,8 @@
 )
 
 (fn write_default_home_config []
-  (gene/serdes/write_tree HOME_CONFIG_PATH (default_home_config)
-    ^separate [/* /llm/* /llm/openai/* /llm/anthropic/* /documents/* /scheduler/* /hotswap/*]
+  (gene/serdes/write_tree HOME_CONFIG_PATH (build_bootstrap_config_tree CONFIG_SCHEMA)
+    ^separate CONFIG_BOOTSTRAP_SEPARATE
   )
 )
 
@@ -201,5 +155,5 @@
 )
 
 (fn $ns/load_home_config_raw []
-  (ensure_map (read_tree_or_default HOME_CONFIG_PATH (default_home_config)))
+  (ensure_map (read_tree_or_default HOME_CONFIG_PATH (build_bootstrap_config_tree CONFIG_SCHEMA)))
 )

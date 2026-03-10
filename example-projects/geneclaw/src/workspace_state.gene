@@ -1,23 +1,11 @@
 # GeneClaw serialized workspace state
 
 (import ensure_home_bootstrap HOME_WORKSPACE_PATH SESSIONS_PATH read_tree_or_default tree_exists? interpolate_value from "home_store")
+(import blank_string? ensure_map ensure_array from "config_helpers")
 
 (var log (new genex/logging/Logger $ns))
 (var SESSION_CACHE {})
 (var SYSTEM_PROMPT_CACHE nil)
-
-(fn blank_string? [value]
-  (var text (if value (value .to_s) else ""))
-  ((text .length) == 0)
-)
-
-(fn ensure_map [value]
-  (if (value is Map) value else {})
-)
-
-(fn ensure_array [value]
-  (if (value is Array) value else [])
-)
 
 (fn session_storage_id [session_id]
   (var result ((session_id || "") .to_s))

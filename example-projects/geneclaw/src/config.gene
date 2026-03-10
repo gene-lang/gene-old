@@ -2,68 +2,16 @@
 # Non-sensitive config is loaded from GENECLAW_HOME/config.
 
 (import GENECLAW_HOME HOME_CONFIG_PATH HOME_WORKSPACE_PATH FILES_ROOT DOCUMENT_ROOT ARTIFACT_ROOT DB_PATH ensure_home_bootstrap load_home_config_raw interpolate_value from "home_store")
+(import CONFIG_SCHEMA from "config_schema")
+(import blank_string? ensure_map lookup_path set_path_value resolve_config_from_schema build_public_config_from_schema secret_configured:helper_secret_configured redact_secret:helper_redact_secret render_public_config_value:helper_render_public_config_value from "config_helpers")
 
 (var $ns/log (new genex/logging/Logger $ns))
-
-(fn blank_string? [value]
-  (var text (if value (value .to_s) else ""))
-  ((text .length) == 0)
-)
-
-(fn ensure_map [value]
-  (if (value is Map) value else {})
-)
-
-(fn get_path_value [root path default]
-  (var current root)
-  (var found true)
-
-  (for part in ((path || "") .split "/")
-    (var key (part .trim))
-    (if_not key/.empty
-      (if ((current is Map) && (current .contains key))
-        (current = (current .get key))
-      else
-        (found = false)
-        (break)
-      )
-    )
-  )
-
-  (if found current else default)
-)
-
-(fn config_string [root path default]
-  (var value (get_path_value root path default))
-  (if value
-    (value .to_s)
-  else
-    default
-  )
-)
-
-(fn config_int [root path default]
-  (var value (get_path_value root path default))
-  (if (value is Int)
-    value
-  else
-    (try
-      (var text ((if value (value .to_s) else (default .to_s)) .trim))
-      (if text/.empty
-        default
-      else
-        (text .to_i)
-      )
-    catch *
-      default
-    )
-  )
-)
 
 (ensure_home_bootstrap)
 
 (var RAW_HOME_CONFIG (load_home_config_raw))
 (var HOME_CONFIG (ensure_map (interpolate_value RAW_HOME_CONFIG)))
+(var EFFECTIVE_CONFIG (resolve_config_from_schema CONFIG_SCHEMA HOME_CONFIG ^env $env))
 (var HOME_ROOT GENECLAW_HOME)
 (var CONFIG_ROOT HOME_CONFIG_PATH)
 (var WORKSPACE_STATE_ROOT HOME_WORKSPACE_PATH)
@@ -80,164 +28,75 @@
 ($ns/ARTIFACT_ROOT = HOME_ARTIFACT_ROOT)
 ($ns/DB_PATH = HOME_DB_PATH)
 
-($ns/PORT = (($env .get "PORT" "4090") .to_i))
+($ns/PORT = EFFECTIVE_CONFIG/port)
 
-($ns/LLM_PROVIDER = ((config_string HOME_CONFIG "llm/provider" "openai") .to_lower))
-($ns/THINKING_LEVEL = (config_string HOME_CONFIG "llm/thinking_level" "standard"))
-($ns/CONTEXT_SIZE = (config_int HOME_CONFIG "llm/context_size" 0))
-($ns/MAX_STEPS = (config_int HOME_CONFIG "llm/max_steps" 16))
-($ns/MAX_TOOL_CALLS = (config_int HOME_CONFIG "llm/max_tool_calls" 8))
+($ns/LLM_PROVIDER = EFFECTIVE_CONFIG/llm/provider)
+($ns/THINKING_LEVEL = EFFECTIVE_CONFIG/llm/thinking_level)
+($ns/CONTEXT_SIZE = EFFECTIVE_CONFIG/llm/context_size)
+($ns/MAX_STEPS = EFFECTIVE_CONFIG/llm/max_steps)
+($ns/MAX_TOOL_CALLS = EFFECTIVE_CONFIG/llm/max_tool_calls)
 
-($ns/OPENAI_API_KEY = ($env .get "OPENAI_API_KEY" ""))
-($ns/OPENAI_MODEL = (config_string HOME_CONFIG "llm/openai/model" "gpt-5-mini"))
-($ns/OPENAI_BASE_URL = (config_string HOME_CONFIG "llm/openai/base_url" ""))
-($ns/OPENAI_TIMEOUT_MS = (config_int HOME_CONFIG "llm/openai/timeout_ms" 60000))
+($ns/OPENAI_API_KEY = EFFECTIVE_CONFIG/llm/openai/api_key)
+($ns/OPENAI_MODEL = EFFECTIVE_CONFIG/llm/openai/model)
+($ns/OPENAI_BASE_URL = EFFECTIVE_CONFIG/llm/openai/base_url)
+($ns/OPENAI_TIMEOUT_MS = EFFECTIVE_CONFIG/llm/openai/timeout_ms)
 
-($ns/ANTHROPIC_API_KEY = ($env .get "ANTHROPIC_API_KEY" ""))
-($ns/ANTHROPIC_AUTH_TOKEN = ($env .get "ANTHROPIC_AUTH_TOKEN" ($env .get "ANTHROPIC_OAUTH_TOKEN" "")))
-($ns/ANTHROPIC_MODEL = (config_string HOME_CONFIG "llm/anthropic/model" "claude-sonnet-4-6"))
-($ns/ANTHROPIC_BASE_URL = (config_string HOME_CONFIG "llm/anthropic/base_url" ""))
-($ns/ANTHROPIC_TIMEOUT_MS = (config_int HOME_CONFIG "llm/anthropic/timeout_ms" 60000))
+($ns/ANTHROPIC_API_KEY = EFFECTIVE_CONFIG/llm/anthropic/api_key)
+($ns/ANTHROPIC_AUTH_TOKEN = EFFECTIVE_CONFIG/llm/anthropic/auth_token)
+($ns/ANTHROPIC_MODEL = EFFECTIVE_CONFIG/llm/anthropic/model)
+($ns/ANTHROPIC_BASE_URL = EFFECTIVE_CONFIG/llm/anthropic/base_url)
+($ns/ANTHROPIC_TIMEOUT_MS = EFFECTIVE_CONFIG/llm/anthropic/timeout_ms)
 
-($ns/SLACK_SIGNING_SECRET = ($env .get "SLACK_SIGNING_SECRET" ""))
-($ns/SLACK_BOT_TOKEN = ($env .get "SLACK_BOT_TOKEN" ""))
-($ns/SLACK_APP_TOKEN = ($env .get "SLACK_APP_TOKEN" ""))
-($ns/BRAVE_API_KEY = ($env .get "BRAVE_API_KEY" ""))
-($ns/SLACK_AGENTX_TOKEN = ($env .get "SLACK_AGENTX_TOKEN" ""))
+($ns/SLACK_SIGNING_SECRET = EFFECTIVE_CONFIG/slack/signing_secret)
+($ns/SLACK_BOT_TOKEN = EFFECTIVE_CONFIG/slack/bot_token)
+($ns/SLACK_APP_TOKEN = EFFECTIVE_CONFIG/slack/app_token)
+($ns/BRAVE_API_KEY = EFFECTIVE_CONFIG/search/brave_api_key)
+($ns/SLACK_AGENTX_TOKEN = EFFECTIVE_CONFIG/slack/agentx_token)
 
-($ns/DOCUMENT_MAX_UPLOAD_BYTES = (config_int HOME_CONFIG "documents/max_upload_bytes" 10485760))
-($ns/DOCUMENT_MAX_INLINE_CHARS = (config_int HOME_CONFIG "documents/max_inline_chars" 4000))
-($ns/IMAGE_MAX_COUNT = (config_int HOME_CONFIG "documents/max_image_count" 4))
+($ns/DOCUMENT_MAX_UPLOAD_BYTES = EFFECTIVE_CONFIG/documents/max_upload_bytes)
+($ns/DOCUMENT_MAX_INLINE_CHARS = EFFECTIVE_CONFIG/documents/max_inline_chars)
+($ns/IMAGE_MAX_COUNT = EFFECTIVE_CONFIG/documents/max_image_count)
 
-($ns/SCHEDULER_TICK_MS = (config_int HOME_CONFIG "scheduler/tick_ms" 30000))
+($ns/SCHEDULER_TICK_MS = EFFECTIVE_CONFIG/scheduler/tick_ms)
 
-($ns/PAUSE_TIMEOUT_MS = (config_int HOME_CONFIG "hotswap/pause_timeout_ms" 120000))
-($ns/PAUSE_CHECK_INTERVAL_MS = (config_int HOME_CONFIG "hotswap/pause_check_interval_ms" 5000))
-($ns/UPGRADE_HEALTH_ATTEMPTS = (config_int HOME_CONFIG "hotswap/upgrade_health_attempts" 15))
-($ns/UPGRADE_HEALTH_INTERVAL_MS = (config_int HOME_CONFIG "hotswap/upgrade_health_interval_ms" 2000))
+($ns/PAUSE_TIMEOUT_MS = EFFECTIVE_CONFIG/hotswap/pause_timeout_ms)
+($ns/PAUSE_CHECK_INTERVAL_MS = EFFECTIVE_CONFIG/hotswap/pause_check_interval_ms)
+($ns/UPGRADE_HEALTH_ATTEMPTS = EFFECTIVE_CONFIG/hotswap/upgrade_health_attempts)
+($ns/UPGRADE_HEALTH_INTERVAL_MS = EFFECTIVE_CONFIG/hotswap/upgrade_health_interval_ms)
 
-($ns/HIDDEN_SECRET = "hidden")
+($ns/CONFIG = EFFECTIVE_CONFIG)
 
 (fn $ns/secret_configured [value]
-  (if value
-    (if ((value .to_s) .empty)
-      false
-    else
-      true
-    )
-  else
-    false
-  )
+  (helper_secret_configured value)
 )
 
 (fn $ns/redact_secret [value]
-  HIDDEN_SECRET
+  (helper_redact_secret value)
 )
 
 (fn $ns/render_public_config_value [value]
-  (if (value is String)
-    (gene/json/stringify value)
-  else
-    (value .to_s)
-  )
+  (helper_render_public_config_value value)
+)
+
+(fn build_runtime_public_config []
+  (var public_config (build_public_config_from_schema CONFIG_SCHEMA EFFECTIVE_CONFIG))
+  (set_path_value public_config "db_path" DB_PATH)
+  (set_path_value public_config "home/root" GENECLAW_HOME)
+  (set_path_value public_config "home/config_root" HOME_CONFIG_PATH)
+  (set_path_value public_config "home/workspace_root" HOME_WORKSPACE_PATH)
+  (set_path_value public_config "workspace/state_root" HOME_WORKSPACE_PATH)
+  (set_path_value public_config "workspace/root" WORKSPACE_ROOT)
+  (set_path_value public_config "workspace/document_root" DOCUMENT_ROOT)
+  (set_path_value public_config "workspace/artifact_root" ARTIFACT_ROOT)
+  public_config
 )
 
 (fn $ns/get_public_config []
-  {
-    ^port PORT
-    ^db_path DB_PATH
-    ^home {
-      ^root GENECLAW_HOME
-      ^config_root HOME_CONFIG_PATH
-      ^workspace_root HOME_WORKSPACE_PATH
-    }
-    ^llm {
-      ^provider LLM_PROVIDER
-      ^thinking_level THINKING_LEVEL
-      ^context_size CONTEXT_SIZE
-      ^max_steps MAX_STEPS
-      ^max_tool_calls MAX_TOOL_CALLS
-      ^openai {
-        ^api_key (redact_secret OPENAI_API_KEY)
-        ^api_key_configured (secret_configured OPENAI_API_KEY)
-        ^model OPENAI_MODEL
-        ^base_url OPENAI_BASE_URL
-        ^timeout_ms OPENAI_TIMEOUT_MS
-      }
-      ^anthropic {
-        ^api_key (redact_secret ANTHROPIC_API_KEY)
-        ^api_key_configured (secret_configured ANTHROPIC_API_KEY)
-        ^auth_token (redact_secret ANTHROPIC_AUTH_TOKEN)
-        ^auth_token_configured (secret_configured ANTHROPIC_AUTH_TOKEN)
-        ^model ANTHROPIC_MODEL
-        ^base_url ANTHROPIC_BASE_URL
-        ^timeout_ms ANTHROPIC_TIMEOUT_MS
-      }
-    }
-    ^slack {
-      ^signing_secret (redact_secret SLACK_SIGNING_SECRET)
-      ^signing_secret_configured (secret_configured SLACK_SIGNING_SECRET)
-      ^bot_token (redact_secret SLACK_BOT_TOKEN)
-      ^bot_token_configured (secret_configured SLACK_BOT_TOKEN)
-      ^app_token (redact_secret SLACK_APP_TOKEN)
-      ^app_token_configured (secret_configured SLACK_APP_TOKEN)
-      ^agentx_token (redact_secret SLACK_AGENTX_TOKEN)
-      ^agentx_token_configured (secret_configured SLACK_AGENTX_TOKEN)
-    }
-    ^search {
-      ^brave_api_key (redact_secret BRAVE_API_KEY)
-      ^brave_api_key_configured (secret_configured BRAVE_API_KEY)
-    }
-    ^workspace {
-      ^state_root HOME_WORKSPACE_PATH
-      ^root WORKSPACE_ROOT
-      ^document_root DOCUMENT_ROOT
-      ^artifact_root ARTIFACT_ROOT
-    }
-    ^documents {
-      ^max_upload_bytes DOCUMENT_MAX_UPLOAD_BYTES
-      ^max_inline_chars DOCUMENT_MAX_INLINE_CHARS
-      ^max_image_count IMAGE_MAX_COUNT
-    }
-    ^scheduler {
-      ^tick_ms SCHEDULER_TICK_MS
-    }
-    ^hotswap {
-      ^pause_timeout_ms PAUSE_TIMEOUT_MS
-      ^pause_check_interval_ms PAUSE_CHECK_INTERVAL_MS
-      ^upgrade_health_attempts UPGRADE_HEALTH_ATTEMPTS
-      ^upgrade_health_interval_ms UPGRADE_HEALTH_INTERVAL_MS
-    }
-  }
+  (build_runtime_public_config)
 )
 
 (fn $ns/get_public_config_at_path [path]
-  (var current (get_public_config))
-  (var found true)
-  (var normalized_parts [])
-
-  (for part in ((path || "") .split "/")
-    (var key (part .trim))
-    (if_not key/.empty
-      (normalized_parts .add key)
-    )
-  )
-
-  (for key in normalized_parts
-    (if (current is Map)
-      (if (current .contains key)
-        (current = (current .get key))
-      else
-        (found = false)
-        (break)
-      )
-    else
-      (found = false)
-      (break)
-    )
-  )
-
-  {^found found ^value current}
+  (lookup_path (get_public_config) path)
 )
 
 (fn $ns/get_public_config_gene []
@@ -253,41 +112,12 @@
   )
 )
 
-(log .info #"PORT=#{PORT} DB_PATH=#{DB_PATH}")
-(log .info #"GENECLAW_HOME=#{GENECLAW_HOME}")
-(log .info #"HOME_CONFIG_PATH=#{HOME_CONFIG_PATH} HOME_WORKSPACE_PATH=#{HOME_WORKSPACE_PATH}")
-(log .info #"WORKSPACE_ROOT=#{WORKSPACE_ROOT} DOCUMENT_ROOT=#{DOCUMENT_ROOT} ARTIFACT_ROOT=#{ARTIFACT_ROOT}")
-(log .info #"LLM_PROVIDER=#{LLM_PROVIDER} THINKING_LEVEL=#{THINKING_LEVEL} CONTEXT_SIZE=#{CONTEXT_SIZE}")
-(log .info #"MAX_STEPS=#{MAX_STEPS} MAX_TOOL_CALLS=#{MAX_TOOL_CALLS} SCHEDULER_TICK_MS=#{SCHEDULER_TICK_MS}")
-(log .info #"OPENAI_MODEL=#{OPENAI_MODEL} OPENAI_TIMEOUT_MS=#{OPENAI_TIMEOUT_MS}")
-(log .info #"ANTHROPIC_MODEL=#{ANTHROPIC_MODEL} ANTHROPIC_TIMEOUT_MS=#{ANTHROPIC_TIMEOUT_MS}")
-(log .info #"DOCUMENT_MAX_UPLOAD_BYTES=#{DOCUMENT_MAX_UPLOAD_BYTES} DOCUMENT_MAX_INLINE_CHARS=#{DOCUMENT_MAX_INLINE_CHARS} IMAGE_MAX_COUNT=#{IMAGE_MAX_COUNT}")
-(log .info #"PAUSE_TIMEOUT_MS=#{PAUSE_TIMEOUT_MS} PAUSE_CHECK_INTERVAL_MS=#{PAUSE_CHECK_INTERVAL_MS}")
-(log .info #"UPGRADE_HEALTH_ATTEMPTS=#{UPGRADE_HEALTH_ATTEMPTS} UPGRADE_HEALTH_INTERVAL_MS=#{UPGRADE_HEALTH_INTERVAL_MS}")
-(if (blank_string? OPENAI_BASE_URL)
-  (log .info "OPENAI_BASE_URL not set; using client default")
-else
-  (log .info #"OPENAI_BASE_URL=#{OPENAI_BASE_URL}")
-)
-(if (blank_string? ANTHROPIC_BASE_URL)
-  (log .info "ANTHROPIC_BASE_URL not set; using client default")
-else
-  (log .info #"ANTHROPIC_BASE_URL=#{ANTHROPIC_BASE_URL}")
-)
-(if (blank_string? OPENAI_API_KEY)
-  (log .warn "OPENAI_API_KEY not set - will run in mock mode")
-else
-  (log .info "OPENAI_API_KEY is set")
-)
-(if (blank_string? ANTHROPIC_AUTH_TOKEN)
-  (if (blank_string? ANTHROPIC_API_KEY)
-    (log .warn "Anthropic credentials not set - Anthropic provider will run in mock mode")
-  else
-    (log .info "ANTHROPIC_API_KEY is set")
-  )
-else
-  (log .info "ANTHROPIC_AUTH_TOKEN is set")
-)
+(log .info #"HOME root=#{GENECLAW_HOME} config=#{HOME_CONFIG_PATH} workspace=#{HOME_WORKSPACE_PATH} db=#{DB_PATH}")
+(log .info #"LLM provider=#{LLM_PROVIDER} thinking=#{THINKING_LEVEL} context=#{CONTEXT_SIZE} steps=#{MAX_STEPS} tool_calls=#{MAX_TOOL_CALLS}")
+(log .info #"OpenAI model=#{OPENAI_MODEL} timeout_ms=#{OPENAI_TIMEOUT_MS} configured=#{(secret_configured OPENAI_API_KEY)}")
+(log .info #"Anthropic model=#{ANTHROPIC_MODEL} timeout_ms=#{ANTHROPIC_TIMEOUT_MS} configured=#{((secret_configured ANTHROPIC_API_KEY) || (secret_configured ANTHROPIC_AUTH_TOKEN))}")
+(log .info #"Documents upload_bytes=#{DOCUMENT_MAX_UPLOAD_BYTES} inline_chars=#{DOCUMENT_MAX_INLINE_CHARS} image_max=#{IMAGE_MAX_COUNT}")
+(log .info #"Scheduler tick_ms=#{SCHEDULER_TICK_MS} hotswap pause_timeout_ms=#{PAUSE_TIMEOUT_MS} pause_check_interval_ms=#{PAUSE_CHECK_INTERVAL_MS}")
 (if (blank_string? SLACK_APP_TOKEN)
   (if (blank_string? SLACK_BOT_TOKEN)
     (log .debug "Slack integration not configured")

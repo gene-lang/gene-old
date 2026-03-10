@@ -1,0 +1,63 @@
+# Canonical runtime config schema for GeneClaw
+
+(import cfg_str cfg_int env_int secret from "config_helpers")
+
+(var $ns/CONFIG_BOOTSTRAP_SEPARATE [
+  "/*"
+  "/llm/*"
+])
+
+(var $ns/CONFIG_SCHEMA {
+  ^port (env_int "PORT" 4090)
+
+  ^llm {
+    ^provider (cfg_str "openai" ^bootstrap_env "GENECLAW_LLM_PROVIDER" ^normalize "lower")
+    ^thinking_level (cfg_str "standard" ^bootstrap_env "GENECLAW_THINKING_LEVEL")
+    ^context_size (cfg_int 0 ^bootstrap_env "GENECLAW_CONTEXT_SIZE")
+    ^max_steps (cfg_int 16 ^bootstrap_env "GENECLAW_MAX_STEPS")
+    ^max_tool_calls (cfg_int 8 ^bootstrap_env "GENECLAW_MAX_TOOL_CALLS")
+
+    ^openai {
+      ^model (cfg_str "gpt-5-mini" ^bootstrap_env "OPENAI_MODEL")
+      ^base_url (cfg_str "" ^bootstrap_env "OPENAI_BASE_URL")
+      ^timeout_ms (cfg_int 60000 ^bootstrap_env "OPENAI_TIMEOUT_MS")
+      ^api_key (secret "OPENAI_API_KEY")
+    }
+
+    ^anthropic {
+      ^model (cfg_str "claude-sonnet-4-6" ^bootstrap_env "ANTHROPIC_MODEL")
+      ^base_url (cfg_str "" ^bootstrap_env "ANTHROPIC_BASE_URL")
+      ^timeout_ms (cfg_int 60000 ^bootstrap_env "ANTHROPIC_TIMEOUT_MS")
+      ^api_key (secret "ANTHROPIC_API_KEY")
+      ^auth_token (secret "ANTHROPIC_AUTH_TOKEN" ^fallback_env "ANTHROPIC_OAUTH_TOKEN")
+    }
+  }
+
+  ^slack {
+    ^signing_secret (secret "SLACK_SIGNING_SECRET")
+    ^bot_token (secret "SLACK_BOT_TOKEN")
+    ^app_token (secret "SLACK_APP_TOKEN")
+    ^agentx_token (secret "SLACK_AGENTX_TOKEN")
+  }
+
+  ^search {
+    ^brave_api_key (secret "BRAVE_API_KEY")
+  }
+
+  ^documents {
+    ^max_upload_bytes (cfg_int 10485760 ^bootstrap_env "GENECLAW_DOCUMENT_MAX_UPLOAD_BYTES")
+    ^max_inline_chars (cfg_int 4000 ^bootstrap_env "GENECLAW_DOCUMENT_MAX_INLINE_CHARS")
+    ^max_image_count (cfg_int 4 ^bootstrap_env "GENECLAW_IMAGE_MAX_COUNT")
+  }
+
+  ^scheduler {
+    ^tick_ms (cfg_int 30000 ^bootstrap_env "GENECLAW_SCHEDULER_TICK_MS")
+  }
+
+  ^hotswap {
+    ^pause_timeout_ms (cfg_int 120000 ^bootstrap_env "GENECLAW_PAUSE_TIMEOUT_MS")
+    ^pause_check_interval_ms (cfg_int 5000 ^bootstrap_env "GENECLAW_PAUSE_CHECK_INTERVAL_MS")
+    ^upgrade_health_attempts (cfg_int 15 ^bootstrap_env "GENECLAW_UPGRADE_HEALTH_ATTEMPTS")
+    ^upgrade_health_interval_ms (cfg_int 2000 ^bootstrap_env "GENECLAW_UPGRADE_HEALTH_INTERVAL_MS")
+  }
+})

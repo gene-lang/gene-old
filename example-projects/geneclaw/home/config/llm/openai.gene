@@ -1,0 +1,1 @@
+{^model "{ENV:OPENAI_MODEL:gpt-5-mini}" ^base_url "{ENV:OPENAI_BASE_URL:}" ^timeout_ms "{ENV:OPENAI_TIMEOUT_MS:60000}"}

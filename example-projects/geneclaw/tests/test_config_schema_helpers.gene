@@ -1,0 +1,57 @@
+#!/usr/bin/env gene run
+
+(import CONFIG_SCHEMA CONFIG_BOOTSTRAP_SEPARATE from "config_schema")
+(import build_bootstrap_config_tree resolve_config_from_schema build_public_config_from_schema from "config_helpers")
+
+(var raw_config {
+  ^llm {
+    ^provider "Anthropic"
+    ^max_steps "9"
+    ^openai {
+      ^model "gpt-5.1-mini"
+    }
+  }
+  ^documents {
+    ^max_inline_chars "2222"
+  }
+})
+
+(var env_map {
+  ^PORT "5150"
+  ^OPENAI_API_KEY "openai-secret"
+  ^ANTHROPIC_OAUTH_TOKEN "oauth-secret"
+})
+
+(var bootstrap_tree (build_bootstrap_config_tree CONFIG_SCHEMA))
+(var resolved (resolve_config_from_schema CONFIG_SCHEMA raw_config ^env env_map))
+(var public_config (build_public_config_from_schema CONFIG_SCHEMA resolved))
+
+(assert (bootstrap_tree/llm/provider == "{ENV:GENECLAW_LLM_PROVIDER:openai}"))
+(assert (bootstrap_tree/llm/openai/model == "{ENV:OPENAI_MODEL:gpt-5-mini}"))
+(assert ((bootstrap_tree .contains "slack") == false))
+(assert ((bootstrap_tree .contains "search") == false))
+
+(assert (CONFIG_BOOTSTRAP_SEPARATE .contains "/*"))
+(assert (CONFIG_BOOTSTRAP_SEPARATE .contains "/llm/*"))
+(assert ((CONFIG_BOOTSTRAP_SEPARATE .contains "/llm/openai/*") == false))
+(assert ((CONFIG_BOOTSTRAP_SEPARATE .contains "/llm/anthropic/*") == false))
+(assert ((CONFIG_BOOTSTRAP_SEPARATE .contains "/documents/*") == false))
+(assert ((CONFIG_BOOTSTRAP_SEPARATE .contains "/scheduler/*") == false))
+(assert ((CONFIG_BOOTSTRAP_SEPARATE .contains "/hotswap/*") == false))
+
+(assert (resolved/port == 5150))
+(assert (resolved/llm/provider == "anthropic"))
+(assert (resolved/llm/max_steps == 9))
+(assert (resolved/documents/max_inline_chars == 2222))
+(assert (resolved/llm/openai/model == "gpt-5.1-mini"))
+(assert (resolved/llm/openai/api_key == "openai-secret"))
+(assert (resolved/llm/anthropic/auth_token == "oauth-secret"))
+
+(assert (public_config/port == 5150))
+(assert (public_config/llm/provider == "anthropic"))
+(assert (public_config/llm/openai/api_key == "hidden"))
+(assert (public_config/llm/openai/api_key_configured == true))
+(assert (public_config/llm/anthropic/auth_token == "hidden"))
+(assert (public_config/llm/anthropic/auth_token_configured == true))
+
+(println "ok")

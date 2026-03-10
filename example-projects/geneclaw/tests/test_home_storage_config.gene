@@ -1,6 +1,6 @@
 #!/usr/bin/env gene run
 
-(import GENECLAW_HOME HOME_WORKSPACE_PATH WORKSPACE_ROOT DOCUMENT_ROOT ARTIFACT_ROOT DB_PATH LLM_PROVIDER OPENAI_MODEL MAX_STEPS DOCUMENT_MAX_INLINE_CHARS get_public_config get_public_config_at_path from "config")
+(import GENECLAW_HOME HOME_WORKSPACE_PATH WORKSPACE_ROOT DOCUMENT_ROOT ARTIFACT_ROOT DB_PATH LLM_PROVIDER OPENAI_MODEL ANTHROPIC_AUTH_TOKEN MAX_STEPS DOCUMENT_MAX_INLINE_CHARS get_public_config get_public_config_at_path from "config")
 (import get_system_prompt from "workspace_state")
 
 (var expected_home ($env .get "GENECLAW_HOME" ""))
@@ -17,6 +17,7 @@
 
 (assert (LLM_PROVIDER == "anthropic"))
 (assert (OPENAI_MODEL == "gpt-5.1-mini"))
+(assert (ANTHROPIC_AUTH_TOKEN == "oauth-home-token"))
 (assert (MAX_STEPS == 9))
 (assert (DOCUMENT_MAX_INLINE_CHARS == 2222))
 
