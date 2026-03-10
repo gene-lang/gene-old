@@ -58,3 +58,5 @@ nimble.paths
 .nimble_sandbox/
 
 .env
+
+workspace/
