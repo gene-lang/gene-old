@@ -84,7 +84,7 @@
     (var sql "SELECT ")
     (if /select
       (sql .append (/select .join ",") " ")
-    else
+     else
       (sql .append "* ")
     )
     (sql .append "FROM " /table " ")
@@ -128,7 +128,7 @@
     (var data (/orm .query query id))
     (if ((data .size) == 0)
       (throw #"Not found: #{id}")
-    else
+     else
       (/from_row self data/0)
     )
   )
@@ -182,7 +182,7 @@
   (method save _
     (if not /id
       /.insert
-    else
+     else
       /.update
     )
   )
@@ -256,7 +256,7 @@
       (var middleware (/middlewares ./ middleware_index))
       (var handler    (.construct_handler (middleware_index + 1)))
       (middleware handler)
-    else
+     else
       /handler
     )
   )
@@ -677,7 +677,7 @@
   (println "create_router: Mapping 4...")
   (r .map "/todos" TodosController `delete {^DELETE true})
   (println "create_router: Mapping 5...")
-  (r .map          "/todos" TodosController)
+  (r .map "/todos" TodosController)
   (println "create_router: All mappings added")
   r
 )
