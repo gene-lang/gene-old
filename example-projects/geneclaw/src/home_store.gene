@@ -1,4 +1,4 @@
-# GeneClaw home bootstrap and serialized storage helpers
+# GeneClaw home bootstrap and storage helpers
 
 (import blank_string? ensure_map build_bootstrap_config_tree from "config_helpers")
 (import CONFIG_SCHEMA CONFIG_BOOTSTRAP_SEPARATE from "config_schema")
@@ -6,33 +6,38 @@
 ($ns/DEFAULT_GENECLAW_HOME = "/Users/gcao/gene-workspace/gene-old/example-projects/geneclaw/home")
 ($ns/GENECLAW_HOME = ($env .get "GENECLAW_HOME" DEFAULT_GENECLAW_HOME))
 ($ns/HOME_CONFIG_PATH = #"#{GENECLAW_HOME}/config")
-($ns/HOME_WORKSPACE_PATH = #"#{GENECLAW_HOME}/workspace")
-($ns/FILES_ROOT = #"#{GENECLAW_HOME}/files")
-($ns/DOCUMENT_ROOT = #"#{GENECLAW_HOME}/documents")
-($ns/ARTIFACT_ROOT = #"#{GENECLAW_HOME}/artifacts")
-($ns/SESSIONS_PATH = #"#{HOME_WORKSPACE_PATH}/sessions")
-($ns/RUNS_PATH = #"#{HOME_WORKSPACE_PATH}/runs")
-($ns/AUDIT_PATH = #"#{HOME_WORKSPACE_PATH}/audit")
-($ns/SCHEDULER_PATH = #"#{HOME_WORKSPACE_PATH}/scheduler")
+($ns/HOME_STATE_PATH = #"#{GENECLAW_HOME}/state")
+($ns/HOME_WORKSPACE_PATH = HOME_STATE_PATH)
+($ns/STATE_SYSTEM_PROMPT_PATH = #"#{HOME_STATE_PATH}/system_prompt")
+($ns/SESSIONS_PATH = #"#{GENECLAW_HOME}/sessions")
+($ns/SCHEDULER_PATH = #"#{GENECLAW_HOME}/scheduler")
 ($ns/JOBS_PATH = #"#{SCHEDULER_PATH}/jobs")
-($ns/WORKSPACE_DOCUMENTS_PATH = #"#{HOME_WORKSPACE_PATH}/documents")
+($ns/RUNS_PATH = #"#{SCHEDULER_PATH}/runs")
+($ns/ASSETS_ROOT = #"#{GENECLAW_HOME}/assets")
+($ns/DOCUMENT_ROOT = #"#{ASSETS_ROOT}/uploaded")
+($ns/ARTIFACT_ROOT = #"#{ASSETS_ROOT}/generated")
+($ns/LOGS_PATH = #"#{GENECLAW_HOME}/logs")
+($ns/ARCHIVE_PATH = #"#{GENECLAW_HOME}/archive")
+($ns/TMP_PATH = #"#{GENECLAW_HOME}/tmp")
+($ns/FILES_ROOT = TMP_PATH)
 ($ns/BOOTSTRAPPED = false)
-($ns/WORKSPACE_TREE = nil)
-($ns/DIRTY_PATHS = {})
 
-(fn default_system_prompt []
+(fn $ns/default_system_prompt []
   "You are GeneClaw, a capable AI agent. You can use tools to complete tasks. After receiving a tool result, provide a natural response. For general conversation, respond normally without tool calls."
 )
 
-(fn $ns/default_workspace_state []
-  {
-    ^system_prompt (default_system_prompt)
-    ^sessions {}
-    ^runs {}
-    ^audit {}
-    ^scheduler {^jobs {}}
-    ^documents {}
-  }
+(fn $ns/file_exists? [path]
+  (var target ((path || "") .to_s))
+  (if (blank_string? target)
+    false
+  else
+    (try
+      (var probe (system/shell #"test -f '#{target}'"))
+      (probe/exit_code == 0)
+    catch *
+      false
+    )
+  )
 )
 
 (fn $ns/tree_exists? [path]
@@ -41,14 +46,21 @@
     false
   elif (Dir/exists base)
     true
+  elif (file_exists? base)
+    true
   else
-    (try
-      (var probe (system/shell #"test -f '#{base}.gene'"))
-      (probe/exit_code == 0)
-    catch *
-      false
-    )
+    (file_exists? #"#{base}.gene")
   )
+)
+
+(fn $ns/encode_storage_id [value fallback = "item"]
+  (var result ((value || "") .to_s))
+  (result = (result .replace_all "%" "%25"))
+  (result = (result .replace_all "/" "%2F"))
+  (result = (result .replace_all "\\" "%5C"))
+  (result = (result .replace_all ":" "%3A"))
+  (result = (result .replace_all " " "%20"))
+  (if (blank_string? result) fallback else result)
 )
 
 (fn write_default_home_config []
@@ -57,37 +69,15 @@
   )
 )
 
-(fn write_default_workspace_state []
-  (gene/serdes/write_tree HOME_WORKSPACE_PATH (default_workspace_state)
-    ^separate [
-      /*
-      /sessions/*
-      /sessions/*/memory/*
-      /runs/*
-      /audit/*
-      /audit/*/*
-      /scheduler/*
-      /scheduler/jobs/*
-      /documents/*
-      /documents/*/chunks/*
-    ]
+(fn ensure_state_root []
+  (system/shell #"mkdir -p '#{HOME_STATE_PATH}'")
+  (if_not (tree_exists? STATE_SYSTEM_PROMPT_PATH)
+    (gene/serdes/write_tree STATE_SYSTEM_PROMPT_PATH (default_system_prompt))
   )
 )
 
-(fn ensure_workspace_dirs []
-  (system/shell #"mkdir -p '#{SESSIONS_PATH}' '#{RUNS_PATH}' '#{AUDIT_PATH}' '#{JOBS_PATH}' '#{WORKSPACE_DOCUMENTS_PATH}'")
-)
-
-(fn ensure_workspace_root []
-  (if_not (tree_exists? HOME_WORKSPACE_PATH)
-    (write_default_workspace_state)
-    (ensure_workspace_dirs)
-    (return)
-  )
-  (if_not (tree_exists? #"#{HOME_WORKSPACE_PATH}/system_prompt")
-    (gene/serdes/write_tree #"#{HOME_WORKSPACE_PATH}/system_prompt" (default_system_prompt))
-  )
-  (ensure_workspace_dirs)
+(fn ensure_home_dirs []
+  (system/shell #"mkdir -p '#{GENECLAW_HOME}' '#{HOME_STATE_PATH}' '#{SESSIONS_PATH}' '#{JOBS_PATH}' '#{RUNS_PATH}' '#{DOCUMENT_ROOT}' '#{ARTIFACT_ROOT}' '#{LOGS_PATH}' '#{ARCHIVE_PATH}' '#{TMP_PATH}'")
 )
 
 (fn $ns/ensure_home_bootstrap []
@@ -95,12 +85,11 @@
     (return true)
   )
 
-  (system/shell #"mkdir -p '#{GENECLAW_HOME}' '#{FILES_ROOT}' '#{DOCUMENT_ROOT}' '#{ARTIFACT_ROOT}'")
-
+  (ensure_home_dirs)
   (if_not (tree_exists? HOME_CONFIG_PATH)
     (write_default_home_config)
   )
-  (ensure_workspace_root)
+  (ensure_state_root)
 
   (BOOTSTRAPPED = true)
   true
@@ -115,121 +104,157 @@
   )
 )
 
-(fn ensure_workspace_map_child [container key]
-  (var existing (if container (container .get key nil) else nil))
-  (if existing
-    existing
+(fn $ns/load_home_config_raw []
+  (ensure_map (read_tree_or_default HOME_CONFIG_PATH (build_bootstrap_config_tree CONFIG_SCHEMA)))
+)
+
+(fn $ns/load_system_prompt_value []
+  (read_tree_or_default STATE_SYSTEM_PROMPT_PATH (default_system_prompt))
+)
+
+(fn $ns/state_path [name]
+  #"#{HOME_STATE_PATH}/#{((name || "") .to_s)}"
+)
+
+(fn $ns/session_path [session_id]
+  #"#{SESSIONS_PATH}/#{(encode_storage_id session_id "session")}"
+)
+
+(fn $ns/job_path [job_id]
+  #"#{JOBS_PATH}/#{(encode_storage_id job_id "job")}"
+)
+
+(fn $ns/run_path [run_id]
+  #"#{RUNS_PATH}/#{(encode_storage_id run_id "run")}"
+)
+
+(fn $ns/log_path [name]
+  #"#{LOGS_PATH}/#{((name || "log") .to_s)}.gene"
+)
+
+(fn $ns/uploaded_session_assets_path [session_id]
+  #"#{DOCUMENT_ROOT}/#{(encode_storage_id session_id "session")}"
+)
+
+(fn $ns/generated_session_assets_path [session_id]
+  #"#{ARTIFACT_ROOT}/#{(encode_storage_id session_id "session")}"
+)
+
+(fn asset_kind_for_role [role]
+  (if (role == "outbound")
+    "generated"
   else
-    (container .set key {})
-    (container .get key {})
+    "uploaded"
   )
 )
 
-(fn ensure_workspace_scheduler_jobs [root]
-  (var scheduler (ensure_workspace_map_child root "scheduler"))
-  (ensure_workspace_map_child scheduler "jobs")
+(fn $ns/document_record_relative_path [session_id document_id role = "inbound"]
+  (var asset_kind (asset_kind_for_role role))
+  #"assets/#{asset_kind}/#{(encode_storage_id session_id "session")}/#{(encode_storage_id document_id "document")}"
 )
 
-(fn ensure_workspace_tree_shape [root]
-  (ensure_workspace_map_child root "sessions")
-  (ensure_workspace_map_child root "runs")
-  (ensure_workspace_map_child root "audit")
-  (ensure_workspace_scheduler_jobs root)
-  (ensure_workspace_map_child root "documents")
-  (if_not root/system_prompt
-    (root/system_prompt = (default_system_prompt))
-  )
-  root
+(fn $ns/document_record_path [session_id document_id role = "inbound"]
+  #"#{GENECLAW_HOME}/#{(document_record_relative_path session_id document_id role)}"
 )
 
-(fn load_workspace_tree []
-  (gene/serdes/read_tree HOME_WORKSPACE_PATH
-    ^lazy [/sessions /runs /audit /documents /scheduler /scheduler/jobs]
-  )
-)
-
-(fn $ns/ensure_workspace_tree_loaded []
+(fn $ns/list_dir_paths [path]
   (ensure_home_bootstrap)
-  (if (WORKSPACE_TREE == nil)
-    (WORKSPACE_TREE = (ensure_workspace_tree_shape (load_workspace_tree)))
+  (if_not (Dir/exists path)
+    (return [])
   )
-  WORKSPACE_TREE
+  (try
+    (Dir/list path)
+  catch *
+    []
+  )
 )
 
-(fn $ns/workspace_tree []
-  (ensure_workspace_tree_loaded)
+(fn $ns/path_key [path]
+  (var text ((path || "") .to_s))
+  (var parts (text .split "/"))
+  (var base text)
+  (if (parts/.size > 0)
+    (var last_index (parts/.size - 1))
+    (base = (parts .get last_index))
+  )
+  (if (base .ends_with ".gene")
+    (var base_len base/.length)
+    (base .substr 0 (base_len - 6))
+  else
+    base
+  )
 )
 
-(fn $ns/workspace_sessions []
-  (ensure_workspace_map_child (workspace_tree) "sessions")
-)
-
-(fn $ns/workspace_runs []
-  (ensure_workspace_map_child (workspace_tree) "runs")
-)
-
-(fn $ns/workspace_audit []
-  (ensure_workspace_map_child (workspace_tree) "audit")
-)
-
-(fn $ns/workspace_scheduler []
-  (ensure_workspace_map_child (workspace_tree) "scheduler")
-)
-
-(fn $ns/workspace_jobs []
-  (ensure_workspace_scheduler_jobs (workspace_tree))
-)
-
-(fn $ns/workspace_documents []
-  (ensure_workspace_map_child (workspace_tree) "documents")
-)
-
-(fn dirty_key [relative_path]
-  ((relative_path || "") .to_s)
-)
-
-(fn $ns/mark_workspace_dirty [relative_path]
-  (DIRTY_PATHS .set (dirty_key relative_path) true)
-  relative_path
-)
-
-(fn $ns/clear_workspace_dirty [relative_path]
-  (DIRTY_PATHS .set (dirty_key relative_path) false)
-  relative_path
-)
-
-(fn $ns/list_workspace_dirty_paths []
-  (var paths [])
-  (DIRTY_PATHS .each (fn [path dirty]
-    (if dirty
-      (paths .append path)
-    )
+(fn ensure_parent_dir [path]
+  (var text ((path || "") .to_s))
+  (var parts (text .split "/"))
+  (var parent (if (parts/.size > 1)
+    ((parts .slice 0 (parts/.size - 1)) .join "/")
+  else
+    ""
   ))
-  paths
+  (if_not (blank_string? parent)
+    (system/shell #"mkdir -p '#{parent}'")
+  )
 )
 
-(fn $ns/write_workspace_tree_subpath [relative_path value]
+(fn $ns/write_record_tree [path value]
   (ensure_home_bootstrap)
-  (var path #"#{HOME_WORKSPACE_PATH}/#{((relative_path || "") .to_s)}")
+  (ensure_parent_dir path)
   (gene/serdes/write_tree path value)
-  (clear_workspace_dirty relative_path)
   value
 )
 
-(fn $ns/write_session_tree_subpath [relative_path value]
+(fn $ns/write_session_record [session_id value]
   (ensure_home_bootstrap)
-  (var path #"#{HOME_WORKSPACE_PATH}/#{((relative_path || "") .to_s)}")
+  (var path (session_path session_id))
+  (ensure_parent_dir path)
   (gene/serdes/write_tree path value ^separate [/* /memory/*])
-  (clear_workspace_dirty relative_path)
   value
 )
 
-(fn $ns/write_document_tree_subpath [relative_path value]
+(fn $ns/write_document_record [session_id document_id role value]
   (ensure_home_bootstrap)
-  (var path #"#{HOME_WORKSPACE_PATH}/#{((relative_path || "") .to_s)}")
+  (var path (document_record_path session_id document_id role))
+  (ensure_parent_dir path)
   (gene/serdes/write_tree path value ^separate [/* /chunks/*])
-  (clear_workspace_dirty relative_path)
   value
+)
+
+(fn $ns/read_session_record [session_id]
+  (ensure_home_bootstrap)
+  (var path (session_path session_id))
+  (if_not (tree_exists? path)
+    (return nil)
+  )
+  (gene/serdes/read_tree path ^lazy [/memory])
+)
+
+(fn $ns/read_record [path]
+  (ensure_home_bootstrap)
+  (if (tree_exists? path)
+    (gene/serdes/read_tree path)
+  else
+    nil
+  )
+)
+
+(fn $ns/read_document_record [relative_path]
+  (ensure_home_bootstrap)
+  (var full_path #"#{GENECLAW_HOME}/#{((relative_path || "") .to_s)}")
+  (if_not (tree_exists? full_path)
+    (return nil)
+  )
+  (gene/serdes/read_tree full_path ^lazy [/chunks])
+)
+
+(fn $ns/append_log_entry [name value]
+  (ensure_home_bootstrap)
+  (var path (log_path name))
+  (ensure_parent_dir path)
+  (var existing (if (file_exists? path) (gene/io/read path) else ""))
+  (gene/io/write path #"#{existing}#{(gene/serdes/serialize value)}\n")
+  path
 )
 
 (fn interpolate_env_string [value]
@@ -293,8 +318,4 @@
   else
     value
   )
-)
-
-(fn $ns/load_home_config_raw []
-  (ensure_map (read_tree_or_default HOME_CONFIG_PATH (build_bootstrap_config_tree CONFIG_SCHEMA)))
 )

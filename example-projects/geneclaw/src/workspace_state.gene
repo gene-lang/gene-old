@@ -1,9 +1,10 @@
-# GeneClaw serialized workspace state
+# GeneClaw session and state storage
 
-(import ensure_workspace_tree_loaded workspace_sessions interpolate_value mark_workspace_dirty write_session_tree_subpath from "home_store")
+(import load_system_prompt_value interpolate_value read_session_record write_session_record from "home_store")
 (import blank_string? from "config_helpers")
 
 (var log (new genex/logging/Logger $ns))
+(var SESSION_CACHE {})
 
 (fn session_value [record key fallback]
   (if record
@@ -15,12 +16,32 @@
 
 (fn session_text [record key fallback = ""]
   (var value (session_value record key fallback))
-  (if (value == nil) fallback else value)
+  (if (value == nil)
+    fallback
+  elif (value is String)
+    value
+  else
+    (try
+      (value .to_s)
+    catch *
+      fallback
+    )
+  )
 )
 
 (fn session_number [record key fallback = 0]
   (var value (session_value record key fallback))
-  (if (value == nil) fallback else value)
+  (if (value == nil)
+    fallback
+  elif ((value is Int) || (value is Float))
+    value
+  else
+    (try
+      (value .to_i)
+    catch *
+      fallback
+    )
+  )
 )
 
 (fn session_collection [record key fallback]
@@ -28,19 +49,13 @@
   (if (value == nil) fallback else value)
 )
 
-(fn session_storage_id [session_id]
-  (var result ((session_id || "") .to_s))
-  (result = (result .replace_all "%" "%25"))
-  (result = (result .replace_all "/" "%2F"))
-  (result = (result .replace_all "\\" "%5C"))
-  (result = (result .replace_all ":" "%3A"))
-  (result = (result .replace_all " " "%20"))
-  (if (blank_string? result) "session" else result)
+(fn canonical_session_id [session_id]
+  ((session_id || "") .to_s)
 )
 
 (fn split_session_id [session_id workspace_id = nil]
-  (var session_text ((session_id || "") .to_s))
-  (var parts (session_text .split ":"))
+  (var session_text_value (canonical_session_id session_id))
+  (var parts (session_text_value .split ":"))
   (var resolved_workspace (if workspace_id (workspace_id .to_s) "default"))
   (var resolved_channel "general")
   (var resolved_thread "")
@@ -64,18 +79,10 @@
    ^thread_id resolved_thread}
 )
 
-(fn session_relative_path [session_id]
-  #"sessions/#{(session_storage_id session_id)}"
-)
-
-(fn session_map_key [session_id]
-  (var raw ((session_id || "") .to_s))
-  (if (blank_string? raw) "session" else raw)
-)
-
 (fn build_default_session [session_id workspace_id = nil]
-  (var parsed (split_session_id session_id workspace_id))
-  {^session_id (session_id || "")
+  (var resolved_session_id (canonical_session_id session_id))
+  (var parsed (split_session_id resolved_session_id workspace_id))
+  {^session_id resolved_session_id
    ^workspace_id parsed/workspace_id
    ^channel_id parsed/channel_id
    ^thread_id parsed/thread_id
@@ -100,6 +107,20 @@
   normalized
 )
 
+(fn normalize_document_ref [document_ref]
+  (var ref (if document_ref document_ref else {}))
+  {^document_id (session_text ref "document_id" "")
+   ^storage_path (session_text ref "storage_path" "")
+   ^local_path (session_text ref "local_path" "")
+   ^filename (session_text ref "filename" "")
+   ^mime_type (session_text ref "mime_type" "")
+   ^byte_size (session_number ref "byte_size" 0)
+   ^status (session_text ref "status" "")
+   ^error (session_text ref "error" "")
+   ^role (session_text ref "role" "inbound")
+   ^created_at_ms (session_number ref "created_at_ms" 0)}
+)
+
 (fn normalize_document_refs [refs]
   (var normalized [])
   (for ref in (if refs refs else [])
@@ -108,10 +129,67 @@
   normalized
 )
 
+(fn memory_entry_signature [entry]
+  (var normalized (normalize_memory_entry entry))
+  #"#{normalized/created_at_ms}|#{normalized/role}|#{normalized/content}"
+)
+
+(fn merge_memory_entries [current incoming]
+  (var current_entries (normalize_memory_entries current))
+  (var incoming_entries (normalize_memory_entries incoming))
+  (var merged [])
+  (var seen {})
+  (for entry in current_entries
+    (var signature (memory_entry_signature entry))
+    (if_not (seen .contains signature)
+      (seen .set signature true)
+      (merged .append entry)
+    )
+  )
+  (for entry in incoming_entries
+    (var signature (memory_entry_signature entry))
+    (if_not (seen .contains signature)
+      (seen .set signature true)
+      (merged .append entry)
+    )
+  )
+  merged
+)
+
+(fn merge_document_refs [refs document_ref]
+  (var merged [])
+  (var replaced false)
+  (for current in refs
+    (if (((current/document_id || "") == document_ref/document_id) &&
+         ((current/role || "") == document_ref/role))
+      (merged .append document_ref)
+      (replaced = true)
+    else
+      (merged .append current)
+    )
+  )
+  (if_not replaced
+    (merged .append document_ref)
+  )
+  merged
+)
+
+(fn merge_document_ref_collections [current incoming]
+  (var merged [])
+  (for ref in (normalize_document_refs current)
+    (merged = (merge_document_refs merged ref))
+  )
+  (for ref in (normalize_document_refs incoming)
+    (merged = (merge_document_refs merged ref))
+  )
+  merged
+)
+
 (fn normalize_session [session_id session workspace_id = nil]
   (var source (if session session else {}))
-  (var source_session_id (session_text source "session_id" ""))
-  (var resolved_session_id (if (blank_string? (source_session_id .to_s)) (session_id || "") else source_session_id))
+  (var raw_session_id (canonical_session_id session_id))
+  (var source_session_id (canonical_session_id (session_text source "session_id" "")))
+  (var resolved_session_id (if (blank_string? raw_session_id) source_session_id else raw_session_id))
   (var parsed (split_session_id resolved_session_id workspace_id))
   {
     ^session_id resolved_session_id
@@ -124,47 +202,70 @@
   }
 )
 
+(fn cached_session [session_id workspace_id = nil]
+  (if_not (SESSION_CACHE .contains session_id)
+    (return nil)
+  )
+  (var cached (normalize_session session_id (SESSION_CACHE .get session_id) workspace_id))
+  (SESSION_CACHE .set session_id cached)
+  cached
+)
+
+(fn persisted_session [session_id workspace_id = nil]
+  (var existing (read_session_record session_id))
+  (if_not existing
+    (return nil)
+  )
+  (normalize_session session_id existing workspace_id)
+)
+
+(fn merged_session_record [session_id current incoming]
+  (var current_session (normalize_session session_id current))
+  (var incoming_session (normalize_session session_id incoming))
+  {
+    ^session_id incoming_session/session_id
+    ^workspace_id (if (blank_string? incoming_session/workspace_id) current_session/workspace_id else incoming_session/workspace_id)
+    ^channel_id (if (blank_string? incoming_session/channel_id) current_session/channel_id else incoming_session/channel_id)
+    ^thread_id (if (blank_string? incoming_session/thread_id) current_session/thread_id else incoming_session/thread_id)
+    ^updated_at_ms (if (incoming_session/updated_at_ms >= current_session/updated_at_ms) incoming_session/updated_at_ms else current_session/updated_at_ms)
+    ^documents (merge_document_ref_collections current_session/documents incoming_session/documents)
+    ^memory (merge_memory_entries current_session/memory incoming_session/memory)
+  }
+)
+
 (fn load_session_raw [session_id workspace_id = nil]
-  (ensure_workspace_tree_loaded)
-  (var map_key (session_map_key session_id))
-  (var storage_id (session_storage_id session_id))
-  (var sessions (workspace_sessions))
-  (if (sessions .contains map_key)
-    (var existing (normalize_session session_id (sessions .get map_key) workspace_id))
-    (sessions .set map_key existing)
+  (var raw_session_id (canonical_session_id session_id))
+  (var existing (cached_session raw_session_id workspace_id))
+  (if existing
     (return existing)
   )
-  (if (sessions .contains storage_id)
-    (var existing (normalize_session session_id (sessions .get storage_id) workspace_id))
-    (sessions .set map_key existing)
+  (existing = (persisted_session raw_session_id workspace_id))
+  (if existing
+    (SESSION_CACHE .set raw_session_id existing)
     (return existing)
   )
 
-  (var fresh (build_default_session session_id workspace_id))
-  (sessions .set map_key fresh)
+  (var fresh (build_default_session raw_session_id workspace_id))
+  (SESSION_CACHE .set raw_session_id fresh)
   fresh
 )
 
 (fn save_session_raw [session_id session]
-  (ensure_workspace_tree_loaded)
-  (var map_key (session_map_key session_id))
-  (var sessions (workspace_sessions))
-  (var normalized (normalize_session session_id session))
-  (sessions .set map_key normalized)
-  (mark_workspace_dirty (session_relative_path session_id))
-  (write_session_tree_subpath (session_relative_path session_id) normalized)
+  (var raw_session_id (canonical_session_id session_id))
+  (var latest (if (SESSION_CACHE .contains raw_session_id)
+    (SESSION_CACHE .get raw_session_id)
+  else
+    (persisted_session raw_session_id)
+  ))
+  (var normalized (merged_session_record raw_session_id latest session))
+  (SESSION_CACHE .set raw_session_id normalized)
+  (write_session_record raw_session_id normalized)
   normalized
 )
 
-(fn load_system_prompt_raw []
-  (var workspace (ensure_workspace_tree_loaded))
-  (var prompt (workspace .get "system_prompt" ""))
-  (if prompt (prompt .to_s) else "")
-)
-
 (fn $ns/get_system_prompt []
-  (var prompt (load_system_prompt_raw))
-  (var resolved (interpolate_value prompt))
+  (var prompt (load_system_prompt_value))
+  (var resolved (interpolate_value (if prompt (prompt .to_s) else "")))
   (if (resolved is String)
     resolved
   else
@@ -226,45 +327,9 @@
   nil
 )
 
-(fn normalize_document_ref [document_ref]
-  (var ref (if document_ref document_ref else {}))
-  {^document_id (session_text ref "document_id" "")
-   ^storage_path (session_text ref "storage_path" "")
-   ^local_path (session_text ref "local_path" "")
-   ^filename (session_text ref "filename" "")
-   ^mime_type (session_text ref "mime_type" "")
-   ^byte_size (session_number ref "byte_size" 0)
-   ^status (session_text ref "status" "")
-   ^error (session_text ref "error" "")
-   ^role (session_text ref "role" "inbound")
-   ^created_at_ms (session_number ref "created_at_ms" 0)}
-)
-
-(fn merge_document_refs [refs document_ref]
-  (var merged [])
-  (var replaced false)
-  (for current in refs
-    (if (((current/document_id || "") == document_ref/document_id) &&
-         ((current/role || "") == document_ref/role))
-      (merged .append document_ref)
-      (replaced = true)
-    else
-      (merged .append current)
-    )
-  )
-  (if_not replaced
-    (merged .append document_ref)
-  )
-  merged
-)
-
 (fn $ns/session_document_refs [session_id]
   (var session (load_session_raw session_id))
-  (var refs [])
-  (for ref in (if session/documents session/documents else [])
-    (refs .append ref)
-  )
-  refs
+  (normalize_document_refs (if session/documents session/documents else []))
 )
 
 (fn $ns/session_add_document_ref [workspace_id session_id document_ref]

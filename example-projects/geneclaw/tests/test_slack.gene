@@ -1,0 +1,23 @@
+#!/usr/bin/env gene run
+
+(import build_post_message_payload from "slack")
+
+(var table_payload (build_post_message_payload
+  "C123"
+  "Summary\n\n| Name | Value |\n| ---- | ----- |\n| foo | bar |\n| baz | qux |"
+  "123.456"))
+
+(assert (table_payload/channel == "C123"))
+(assert (table_payload/thread_ts == "123.456"))
+(assert ((table_payload/text .include? "Summary") == true))
+(assert (table_payload/blocks/.size == 1))
+(assert (table_payload/attachments/.size == 1))
+(assert (table_payload/attachments/0/blocks/0/type == "table"))
+(assert ((table_payload/blocks/0/text .include? "_Table rendered below._") == true))
+
+(var plain_payload (build_post_message_payload "C999" "No table here" ""))
+(assert (plain_payload/channel == "C999"))
+(assert ((plain_payload .contains "thread_ts") == false))
+(assert ((plain_payload .contains "attachments") == false))
+
+(println "ok")

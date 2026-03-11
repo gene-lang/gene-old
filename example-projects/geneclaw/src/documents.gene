@@ -1,6 +1,7 @@
 # GeneClaw document ingestion and prompt shaping
 
 (import WORKSPACE_ROOT DOCUMENT_ROOT ARTIFACT_ROOT DOCUMENT_MAX_UPLOAD_BYTES DOCUMENT_MAX_INLINE_CHARS SLACK_BOT_TOKEN from "config")
+(import document_record_path from "home_store")
 (import document_save from "db")
 
 (var log (new genex/logging/Logger $ns))
@@ -31,7 +32,8 @@
 (fn filename_extension [filename]
   (var parts (((filename || "") .to_s) .split "."))
   (if (parts/.size > 1)
-    (((parts/(parts/.size - 1)) .to_s) .to_lower)
+    (var last_index (parts/.size - 1))
+    (((parts .get last_index) .to_s) .to_lower)
   else
     ""
   )
@@ -166,7 +168,7 @@
   (var mime_type ((resolved/mime_type || "") .to_s))
   (var image_input (is_image_attachment filename mime_type))
   (var declared_size (resolved/size || 0))
-  (var local_dir #"#{DOCUMENT_ROOT}/inbox/#{sanitize_component workspace_id}/#{sanitize_component (envelope/channel_id || "general")}/#{sanitize_component (envelope/thread_id || "root")}/#{document_id}")
+  (var local_dir (document_record_path session_id document_id "inbound"))
   (var local_path #"#{local_dir}/#{filename}")
   (var source_ref (resolved/file_id || ""))
   (var meta {
@@ -417,10 +419,24 @@
     (return nil)
   )
 
+  (var resolved_role (if role then role else "outbound"))
+  (var document_id (make_document_id))
   (var path_parts (real_path .split "/"))
-  (var filename (if (path_parts/.size > 0) (path_parts/(path_parts/.size - 1)) else "artifact.bin"))
+  (var filename "artifact.bin")
+  (if (path_parts/.size > 0)
+    (var last_index (path_parts/.size - 1))
+    (filename = ((path_parts .get last_index) .to_s))
+  )
+  (var record_dir (document_record_path session_id document_id resolved_role))
+  (var stored_path #"#{record_dir}/#{filename}")
+
+  (if (real_path != stored_path)
+    (system/shell #"mkdir -p '#{record_dir}'")
+    (system/shell #"cp '#{real_path}' '#{stored_path}'")
+  )
+
   (var record {
-    ^document_id (make_document_id)
+    ^document_id document_id
     ^workspace_id workspace_id
     ^session_id session_id
     ^source "generated"
@@ -429,14 +445,14 @@
     ^mime_type (upload_result/mime_type || "")
     ^byte_size (upload_result/byte_size || 0)
     ^sha256 ""
-    ^local_path real_path
+    ^local_path stored_path
     ^extracted_text ""
     ^status "uploaded"
     ^error ""
     ^meta (meta || {})
   })
 
-  (document_save record [] (role || "outbound"))
+  (document_save record [] resolved_role)
   record
 )
 

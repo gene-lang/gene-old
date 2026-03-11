@@ -1,8 +1,8 @@
 # GeneClaw durable runtime storage
 # Filesystem-backed records for runs, audit events, schedules, and documents.
 
-(import HOME_WORKSPACE_PATH ensure_workspace_tree_loaded workspace_runs workspace_audit workspace_jobs workspace_documents mark_workspace_dirty write_workspace_tree_subpath write_document_tree_subpath from "home_store")
-(import blank_string? ensure_array from "config_helpers")
+(import GENECLAW_HOME JOBS_PATH RUNS_PATH ensure_home_bootstrap job_path run_path append_log_entry list_dir_paths path_key read_record write_record_tree read_document_record write_document_record document_record_relative_path from "home_store")
+(import blank_string? ensure_array ensure_map from "config_helpers")
 (import session_add_document_ref session_document_refs from "workspace_state")
 
 (var log (new genex/logging/Logger $ns))
@@ -38,12 +38,32 @@
 
 (fn record_text [record key fallback = ""]
   (var value (record_value record key fallback))
-  (if (value == nil) fallback else value)
+  (if (value == nil)
+    fallback
+  elif (value is String)
+    value
+  else
+    (try
+      (value .to_s)
+    catch *
+      fallback
+    )
+  )
 )
 
 (fn record_number [record key fallback = 0]
   (var value (record_value record key fallback))
-  (if (value == nil) fallback else value)
+  (if (value == nil)
+    fallback
+  elif ((value is Int) || (value is Float))
+    value
+  else
+    (try
+      (value .to_i)
+    catch *
+      fallback
+    )
+  )
 )
 
 (fn record_collection [record key fallback]
@@ -62,17 +82,17 @@
     (var best i)
     (var j (i + 1))
     (while (j < items/.size)
-      (var candidate_value (record_int (items/j) key))
-      (var best_value (record_int (items/best) key))
+      (var candidate_value (record_int (items .get j) key))
+      (var best_value (record_int (items .get best) key))
       (if (if descending (candidate_value > best_value) else (candidate_value < best_value))
         (best = j)
       )
       (j += 1)
     )
     (if (best != i)
-      (var tmp items/i)
-      (items/i = items/best)
-      (items/best = tmp)
+      (var tmp (items .get i))
+      (items .set i (items .get best))
+      (items .set best tmp)
     )
     (i += 1)
   )
@@ -95,17 +115,14 @@
 )
 
 (fn save_run_record [run_id record]
-  (var runs (workspace_runs))
   (var normalized (normalize_run_record run_id record))
-  (runs .set run_id normalized)
-  (mark_workspace_dirty #"runs/#{run_id}")
-  (write_workspace_tree_subpath #"runs/#{run_id}" normalized)
+  (write_record_tree (run_path run_id) normalized)
 )
 
 (fn load_run_record [run_id]
-  (var runs (workspace_runs))
-  (if (runs .contains run_id)
-    (normalize_run_record run_id (runs .get run_id))
+  (var record (read_record (run_path run_id)))
+  (if record
+    (normalize_run_record run_id record)
   else
     nil
   )
@@ -136,30 +153,34 @@
 )
 
 (fn save_job_record [job_id job]
-  (var jobs (workspace_jobs))
   (var normalized (normalize_job job))
   (normalized/job_id = job_id)
-  (jobs .set job_id normalized)
-  (mark_workspace_dirty #"scheduler/jobs/#{job_id}")
-  (write_workspace_tree_subpath #"scheduler/jobs/#{job_id}" normalized)
+  (write_record_tree (job_path job_id) normalized)
 )
 
 (fn load_job_record [job_id]
-  (var jobs (workspace_jobs))
-  (if (jobs .contains job_id)
-    (normalize_job (jobs .get job_id))
+  (var record (read_record (job_path job_id)))
+  (if record
+    (normalize_job record)
   else
     nil
   )
 )
 
 (fn normalize_document_entry [record chunks role]
-  (var source (if record record else {}))
+  (var source (ensure_map (if record record else {})))
   (var now gene/now/.call/.to_i)
+  (var resolved_role (if role then role else (record_text source "role" "inbound")))
+  (var session_id (record_text source "session_id" ""))
+  (var document_id (record_text source "document_id" ""))
+  (var storage_path (record_text source "storage_path" ""))
+  (if (blank_string? storage_path)
+    (storage_path = (document_record_relative_path session_id document_id resolved_role))
+  )
   {
-    ^document_id (record_text source "document_id" "")
+    ^document_id document_id
     ^workspace_id (record_text source "workspace_id" "default")
-    ^session_id (record_text source "session_id" "")
+    ^session_id session_id
     ^source (record_text source "source" "")
     ^source_ref (record_text source "source_ref" "")
     ^filename (record_text source "filename" "")
@@ -167,48 +188,43 @@
     ^byte_size (record_number source "byte_size" 0)
     ^sha256 (record_text source "sha256" "")
     ^local_path (record_text source "local_path" "")
+    ^storage_path storage_path
     ^extracted_text (record_text source "extracted_text" "")
     ^status (record_text source "status" "failed")
     ^error (record_text source "error" "")
     ^meta (record_collection source "meta" {})
-    ^role (if role then role else (record_text source "role" "inbound"))
-    ^chunks (if chunks chunks else (record_collection source "chunks" []))
+    ^role resolved_role
+    ^chunks (ensure_array (if chunks chunks else (record_collection source "chunks" [])))
     ^created_at_ms (record_number source "created_at_ms" now)
   }
 )
 
-(fn save_document_entry [document_id entry]
-  (var documents (workspace_documents))
+(fn save_document_entry [entry]
   (var normalized (normalize_document_entry entry (record_collection entry "chunks" []) (record_text entry "role" "inbound")))
-  (documents .set document_id normalized)
-  (mark_workspace_dirty #"documents/#{document_id}")
-  (write_document_tree_subpath #"documents/#{document_id}" normalized)
+  (write_document_record normalized/session_id normalized/document_id normalized/role normalized)
 )
 
-(fn load_document_entry [document_id]
-  (var documents (workspace_documents))
-  (if_not (documents .contains document_id)
-    (return nil)
+(fn load_document_entry [relative_path]
+  (var record (read_document_record relative_path))
+  (if record
+    (normalize_document_entry record (record_collection record "chunks" []) (record_text record "role" "inbound"))
+  else
+    nil
   )
-
-  (var raw_entry (documents .get document_id))
-  (var chunks (record_collection raw_entry "chunks" []))
-  (var role (record_text raw_entry "role" "inbound"))
-  (normalize_document_entry raw_entry chunks role)
 )
 
 (fn document_ref_from_entry [entry]
-  (var document_id (record_text entry "document_id" ""))
-  {^document_id document_id
-   ^storage_path #"documents/#{document_id}"
-   ^local_path (record_text entry "local_path" "")
-   ^filename (record_text entry "filename" "")
-   ^mime_type (record_text entry "mime_type" "")
-   ^byte_size (record_number entry "byte_size" 0)
-   ^status (record_text entry "status" "")
-   ^error (record_text entry "error" "")
-   ^role (record_text entry "role" "inbound")
-   ^created_at_ms (record_number entry "created_at_ms" 0)}
+  (var normalized (normalize_document_entry entry (record_collection entry "chunks" []) (record_text entry "role" "inbound")))
+  {^document_id normalized/document_id
+   ^storage_path normalized/storage_path
+   ^local_path normalized/local_path
+   ^filename normalized/filename
+   ^mime_type normalized/mime_type
+   ^byte_size normalized/byte_size
+   ^status normalized/status
+   ^error normalized/error
+   ^role normalized/role
+   ^created_at_ms normalized/created_at_ms}
 )
 
 (fn document_summary_from_entry [entry role = nil]
@@ -221,6 +237,7 @@
    ^source (record_text entry "source" "")
    ^source_ref (record_text entry "source_ref" "")
    ^local_path (record_text entry "local_path" "")
+   ^storage_path (record_text entry "storage_path" "")
    ^created_at_ms (record_number entry "created_at_ms" 0)
    ^role (if role then role else (record_text entry "role" "inbound"))}
 )
@@ -235,6 +252,7 @@
    ^source ""
    ^source_ref ""
    ^local_path (record_text document_ref "local_path" "")
+   ^storage_path (record_text document_ref "storage_path" "")
    ^created_at_ms (record_number document_ref "created_at_ms" 0)
    ^role (record_text document_ref "role" "inbound")}
 )
@@ -244,20 +262,32 @@
   #"audit-#{timestamp_ms}-#{AUDIT_COUNTER}"
 )
 
+(fn load_jobs []
+  (var result [])
+  (for path in (list_dir_paths JOBS_PATH)
+    (var job_id (path_key path))
+    (if_not (blank_string? job_id)
+      (var record (load_job_record job_id))
+      (if record
+        (result .append record)
+      )
+    )
+  )
+  result
+)
+
 (fn $ns/init_db []
-  (ensure_workspace_tree_loaded)
-  (log .info #"Workspace storage initialized at #{HOME_WORKSPACE_PATH}")
+  (ensure_home_bootstrap)
+  (log .info #"Home storage initialized at #{GENECLAW_HOME}")
 )
 
 # --- Audit operations ---
 
 (fn $ns/audit_log [run_id workspace_id tool_name status args_json result_json duration_ms]
-  (ensure_workspace_tree_loaded)
+  (ensure_home_bootstrap)
   (var now gene/now/.call/.to_i)
   (var day_key (today_audit_key))
   (var event_id (next_audit_event_id now))
-  (var audit_days (workspace_audit))
-  (var day_audit (if (audit_days .contains day_key) (audit_days .get day_key) else {}))
   (var event {
     ^event_id event_id
     ^run_id run_id
@@ -269,13 +299,8 @@
     ^duration_ms duration_ms
     ^created_at_ms now
   })
-  (if_not (audit_days .contains day_key)
-    (audit_days .set day_key day_audit)
-  )
-  (day_audit .set event_id event)
   (log .debug #"audit_log run=#{run_id} tool=#{tool_name} status=#{status} duration=#{duration_ms}ms")
-  (mark_workspace_dirty #"audit/#{day_key}/#{event_id}")
-  (write_workspace_tree_subpath #"audit/#{day_key}/#{event_id}" event)
+  (append_log_entry #"audit-#{day_key}" event)
 )
 
 # --- Run tracking ---
@@ -314,7 +339,7 @@
   (var normalized (normalize_document_entry record (ensure_array chunks) role))
   (var chunk_count (if normalized/chunks normalized/chunks/.size else 0))
   (log .info #"document_save id=#{normalized/document_id} session=#{normalized/session_id} status=#{normalized/status} chunks=#{chunk_count}")
-  (save_document_entry normalized/document_id normalized)
+  (save_document_entry normalized)
   (if ((blank_string? normalized/session_id) == false)
     (session_add_document_ref normalized/workspace_id normalized/session_id (document_ref_from_entry normalized))
   )
@@ -328,10 +353,10 @@
   )
   (var result [])
   (for ref in refs
-    (var doc_id (ref/document_id || ""))
+    (var storage_path (record_text ref "storage_path" ""))
     (var entry nil)
-    (if_not (blank_string? doc_id)
-      (entry = (load_document_entry doc_id))
+    (if_not (blank_string? storage_path)
+      (entry = (load_document_entry storage_path))
     )
     (if entry
       (result .append (document_summary_from_entry entry (ref/role || entry/role || "inbound")))
@@ -376,9 +401,8 @@
 )
 
 (fn $ns/job_list_all [workspace_id]
-  (var jobs (workspace_jobs))
   (var result [])
-  (jobs .each (fn [_job_id job]
+  (for job in (load_jobs)
     (var normalized (normalize_job job))
     (if (normalized/workspace_id == workspace_id)
       (result .append {
@@ -394,14 +418,13 @@
         ^created_at_ms normalized/created_at_ms
       })
     )
-  ))
+  )
   (sort_records_by_key result "created_at_ms" true)
 )
 
 (fn $ns/job_list_due [now_ms]
-  (var jobs (workspace_jobs))
   (var result [])
-  (jobs .each (fn [_job_id job]
+  (for job in (load_jobs)
     (var normalized (normalize_job job))
     (if ((normalized/state == "active") && (normalized/next_run_ms <= now_ms))
       (result .append {
@@ -417,7 +440,7 @@
         ^next_run_ms normalized/next_run_ms
       })
     )
-  ))
+  )
   (sort_records_by_key result "next_run_ms")
 )
 

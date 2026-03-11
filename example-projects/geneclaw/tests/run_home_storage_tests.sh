@@ -14,7 +14,7 @@ trap cleanup EXIT
 
 mkdir -p \
   "$HOME_DIR/config/llm" \
-  "$HOME_DIR/workspace/sessions"
+  "$HOME_DIR/state"
 
 cat > "$HOME_DIR/config/llm/provider.gene" <<'EOF'
 "{ENV:GENECLAW_TEST_PROVIDER:openai}"
@@ -31,7 +31,7 @@ EOF
 cat > "$HOME_DIR/config/documents.gene" <<'EOF'
 {^max_upload_bytes "{ENV:GENECLAW_DOCUMENT_MAX_UPLOAD_BYTES:10485760}" ^max_inline_chars "{ENV:GENECLAW_TEST_INLINE:2222}" ^max_image_count "{ENV:GENECLAW_IMAGE_MAX_COUNT:4}"}
 EOF
-cat > "$HOME_DIR/workspace/system_prompt.gene" <<'EOF'
+cat > "$HOME_DIR/state/system_prompt.gene" <<'EOF'
 "Prompt {ENV:GENECLAW_TEST_PROVIDER:openai} / {ENV:GENECLAW_TEST_MODEL:gpt-5-mini} / {ENV:GENECLAW_TEST_PROVIDER:openai}"
 EOF
 

@@ -15,7 +15,7 @@
         (return {^error "Missing path"})
       )
       # Strict path traversal check
-      (if (path .contains "..")
+      (if (path .include? "..")
         (return {^error "Path traversal not allowed"})
       )
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env gene run
 
-(import HOME_WORKSPACE_PATH tree_exists? from "home_store")
+(import SESSIONS_PATH JOBS_PATH RUNS_PATH tree_exists? document_record_path from "home_store")
 (import build_session_id from "agent")
-(import session_document_refs from "workspace_state")
+(import load_session save_session session_append_memory session_document_refs memory_append memory_recent from "workspace_state")
 (import run_create run_complete audit_log job_create job_get job_list_all job_list_due job_mark_running job_mark_failed job_update_state job_update_next_run job_mark_completed document_save document_list_for_session from "db")
 
 (var runtime_session_id (build_session_id "ws-home" "C-runtime" "thread-runtime"))
@@ -46,14 +46,58 @@
 (var saved_doc (document_save doc_record doc_chunks "inbound"))
 
 (assert (saved_doc/document_id == "doc-home-1"))
-(assert (tree_exists? #"#{HOME_WORKSPACE_PATH}/runs/run-home-1"))
-(assert (tree_exists? #"#{HOME_WORKSPACE_PATH}/scheduler/jobs/job-home-1"))
-(assert (tree_exists? #"#{HOME_WORKSPACE_PATH}/documents/doc-home-1"))
+(assert (tree_exists? #"#{SESSIONS_PATH}/ws-home%3AC-runtime%3Athread-runtime"))
+(assert (tree_exists? #"#{RUNS_PATH}/run-home-1"))
+(assert (tree_exists? #"#{JOBS_PATH}/job-home-1"))
+(assert (tree_exists? (document_record_path runtime_session_id "doc-home-1" "inbound")))
 
 (var listed_docs (document_list_for_session runtime_session_id))
 (var session_refs (session_document_refs runtime_session_id))
 (assert (listed_docs/.size == 1))
 (assert (listed_docs/0/document_id == "doc-home-1"))
 (assert (session_refs/.size == 1))
+
+(var stale_session (load_session runtime_session_id))
+(session_append_memory "ws-home" stale_session "user" "document follow-up" {^source "runtime-write"})
+
+(var second_doc_record {
+  ^document_id "doc-home-2"
+  ^workspace_id "ws-home"
+  ^session_id runtime_session_id
+  ^source "test"
+  ^source_ref "source-2"
+  ^filename "note-2.txt"
+  ^mime_type "text/plain"
+  ^byte_size 5
+  ^sha256 "def456"
+  ^local_path "/tmp/note-2.txt"
+  ^extracted_text "world"
+  ^status "extracted"
+  ^error ""
+  ^meta {^kind "test"}
+})
+(var second_doc_chunks [{^chunk_index 0 ^text "world" ^meta {}}])
+(var second_saved_doc (document_save second_doc_record second_doc_chunks "inbound"))
+(assert (second_saved_doc/document_id == "doc-home-2"))
+(assert (tree_exists? (document_record_path runtime_session_id "doc-home-2" "inbound")))
+
+(session_append_memory "ws-home" stale_session "assistant" "stored follow-up" {^source "runtime-write"})
+(save_session runtime_session_id stale_session)
+
+(var merged_session (load_session runtime_session_id))
+(var merged_refs (session_document_refs runtime_session_id))
+(assert (merged_refs/.size == 2))
+(assert (merged_session/documents/.size == 2))
+(assert (merged_session/memory/.size == 2))
+
+(var stale_memory_session (load_session runtime_session_id))
+(memory_append "ws-home" runtime_session_id "user" "fresh-memory" {^source "runtime-write"})
+(session_append_memory "ws-home" stale_memory_session "assistant" "stale-memory" {^source "runtime-write"})
+(save_session runtime_session_id stale_memory_session)
+
+(var merged_memory (memory_recent runtime_session_id 10))
+(assert (merged_memory/.size == 4))
+(assert (merged_memory/2/content == "fresh-memory"))
+(assert (merged_memory/3/content == "stale-memory"))
 
 (println "ok")

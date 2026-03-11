@@ -1,6 +1,6 @@
 #!/usr/bin/env gene run
 
-(import HOME_WORKSPACE_PATH tree_exists? from "home_store")
+(import SESSIONS_PATH JOBS_PATH RUNS_PATH LOGS_PATH tree_exists? document_record_path document_record_relative_path from "home_store")
 (import build_session_id from "agent")
 (import load_session session_document_refs memory_append memory_recent from "workspace_state")
 (import job_get job_list_all job_list_due document_list_for_session from "db")
@@ -21,23 +21,28 @@
 (assert (listed_jobs/.size == 1))
 (assert (due_jobs/.size == 0))
 
-(assert (listed_docs/.size == 1))
-(assert (listed_docs/0/filename == "note.txt"))
+(assert (listed_docs/.size == 2))
 (assert (listed_docs/0/role == "inbound"))
-(assert (session_refs/.size == 1))
-(assert (session_refs/0/storage_path == "documents/doc-home-1"))
-(assert (session/documents/.size == 1))
+(assert (session_refs/.size == 2))
+(assert (session_refs/0/storage_path == (document_record_relative_path runtime_session_id "doc-home-1" "inbound")))
+(assert (session/session_id == runtime_session_id))
+(assert (session/documents/.size == 2))
+(assert (session/memory/.size == 4))
 
 (memory_append "ws-home" history_session_id "user" "after-restart" {^source "runtime-read"})
+(var history_session (load_session history_session_id))
 (var recent_after_append (memory_recent history_session_id 10))
+(assert (history_session/session_id == history_session_id))
 (assert (recent_after_append/.size == 4))
 (assert (recent_after_append/3/content == "after-restart"))
 
-(assert (tree_exists? #"#{HOME_WORKSPACE_PATH}/runs/run-home-1"))
-(assert (tree_exists? #"#{HOME_WORKSPACE_PATH}/scheduler/jobs/job-home-1"))
-(assert (tree_exists? #"#{HOME_WORKSPACE_PATH}/documents/doc-home-1"))
+(assert (tree_exists? #"#{SESSIONS_PATH}/ws-home%3AC-home%3A1741553030.123456"))
+(assert (tree_exists? #"#{RUNS_PATH}/run-home-1"))
+(assert (tree_exists? #"#{JOBS_PATH}/job-home-1"))
+(assert (tree_exists? (document_record_path runtime_session_id "doc-home-1" "inbound")))
+(assert (tree_exists? (document_record_path runtime_session_id "doc-home-2" "inbound")))
 
-(var audit_check (system/shell #"find '#{HOME_WORKSPACE_PATH}/audit' -name 'audit-*.gene' | grep -q 'audit-'"))
+(var audit_check (system/shell #"find '#{LOGS_PATH}' -name 'audit-*.gene' | grep -q 'audit-'"))
 (assert (audit_check/exit_code == 0))
 
 (println "ok")

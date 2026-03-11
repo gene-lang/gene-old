@@ -19,7 +19,7 @@
         (return {^error "Missing pattern"})
       )
       # Block path traversal
-      (if (path .contains "..")
+      (if (path .include? "..")
         (return {^error "Path traversal not allowed"})
       )
 

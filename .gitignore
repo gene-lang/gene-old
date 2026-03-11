@@ -59,4 +59,5 @@ nimble.paths
 
 .env
 
-workspace/
+example-projects/geneclaw/home/
+!example-projects/geneclaw/home/config
