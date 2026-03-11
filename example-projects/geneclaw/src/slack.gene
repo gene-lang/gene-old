@@ -1,0 +1,166 @@
+# GeneClaw Slack helpers
+
+(fn blank_string? [value]
+  (var text (if value (value .to_s) else ""))
+  ((text .length) == 0)
+)
+
+(fn split_table_row [line]
+  (var normalized (((line || "") .to_s) .trim))
+  (normalized = (normalized .replace_all #/^\|/ ""))
+  (normalized = (normalized .replace_all #/\|$/ ""))
+  (var cells [])
+  (for part in (normalized .split "|")
+    (cells .append (part .trim))
+  )
+  cells
+)
+
+(fn separator_cell? [cell]
+  (var text ((cell || "") .to_s))
+  (var cleaned (text .replace_all #/[\s:\-]/ ""))
+  ((cleaned .length == 0) && ((text .contains "-") || (text .contains ":")))
+)
+
+(fn table_separator_line? [line]
+  (var text (((line || "") .to_s) .trim))
+  (if_not (text .contains "|")
+    (return false)
+  )
+
+  (var cells (split_table_row text))
+  (if (cells/.size == 0)
+    (return false)
+  )
+
+  (for cell in cells
+    (if_not (separator_cell? cell)
+      (return false)
+    )
+  )
+
+  true
+)
+
+(fn build_table_render_plan [text]
+  (var source (((text || "") .to_s) .replace "\r\n" "\n"))
+  (var lines (source .split "\n"))
+  (var in_code false)
+  (var table_start -1)
+  (var table_end -1)
+  (var i 0)
+
+  (while (i < lines/.size)
+    (var line_text ((lines/i || "") .to_s))
+    (var trimmed (line_text .trim))
+
+    (if (trimmed .starts_with "```")
+      (in_code = (! in_code))
+    elif ((in_code == false) && (i < (lines/.size - 1)) && (trimmed .contains "|"))
+      (var next_index (i + 1))
+      (var next_trimmed (((lines/next_index || "") .to_s) .trim))
+      (if (table_separator_line? next_trimmed)
+        (table_start = i)
+        (table_end = next_index)
+        (var row_index (i + 2))
+        (while (row_index < lines/.size)
+          (var row_trimmed (((lines/row_index || "") .to_s) .trim))
+          (if (blank_string? row_trimmed)
+            (break)
+          )
+          (if (row_trimmed .starts_with "```")
+            (break)
+          )
+          (if_not (row_trimmed .contains "|")
+            (break)
+          )
+          (table_end = row_index)
+          (row_index += 1)
+        )
+        (break)
+      )
+    )
+
+    (i += 1)
+  )
+
+  (if (table_start < 0)
+    (return {^body_text source ^attachments []})
+  )
+
+  (var before_lines [])
+  (var after_lines [])
+  (var rows [])
+  (i = 0)
+
+  (while (i < lines/.size)
+    (if (i < table_start)
+      (before_lines .append lines/i)
+    elif (i > table_end)
+      (after_lines .append lines/i)
+    )
+
+    (if ((i == table_start) || ((i > table_start) && (i <= table_end) && (i != (table_start + 1))))
+      (var row [])
+      (for cell in (split_table_row lines/i)
+        (row .append {^type "raw_text" ^text cell})
+      )
+      (if (row/.size > 0)
+        (rows .append row)
+      )
+    )
+
+    (i += 1)
+  )
+
+  (var parts [])
+  (var before_text ((before_lines .join "\n") .trim))
+  (var after_text ((after_lines .join "\n") .trim))
+
+  (if ((blank_string? before_text) == false)
+    (parts .append before_text)
+  )
+  (if ((blank_string? after_text) == false)
+    (parts .append after_text)
+  )
+
+  (var body_text (parts .join "\n\n"))
+  (if (blank_string? body_text)
+    (body_text = "_Table rendered below._")
+  else
+    (body_text = #"#{body_text}\n\n_Table rendered below._")
+  )
+
+  {
+    ^body_text body_text
+    ^attachments [{
+      ^blocks [{
+        ^type "table"
+        ^rows rows
+      }]
+    }]
+  }
+)
+
+(fn $ns/build_post_message_payload [channel text thread_ts = ""]
+  (var text_value ((text || "") .to_s))
+  (var thread_value ((thread_ts || "") .to_s))
+  (var render_plan (build_table_render_plan text_value))
+  (var payload {
+    ^channel ((channel || "") .to_s)
+    ^text text_value
+  })
+  (if ((blank_string? render_plan/body_text) == false)
+    (payload .set "blocks" [{
+      ^type "markdown"
+      ^text render_plan/body_text
+    }])
+  )
+  (if (render_plan/attachments/.size > 0)
+    (payload .set "attachments" render_plan/attachments)
+  )
+  (if ((thread_value .length) > 0)
+    (payload .set "thread_ts" thread_value)
+  )
+  payload
+)

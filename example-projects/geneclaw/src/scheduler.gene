@@ -6,6 +6,7 @@
 (import compute_cron_next from "cron")
 (import run_agent from "agent")
 (import is_paused check_pause_timeout from "hotswap_state")
+(import build_post_message_payload from "slack")
 (import genex/http/http_post)
 
 (var log (new genex/logging/Logger $ns))
@@ -23,13 +24,7 @@
 
     # Report to Slack channel/thread if configured
     (if (SLACK_BOT_TOKEN && job/channel_id)
-      (var reply {
-        ^channel job/channel_id
-        ^text #"[Scheduled: #{job_id}] #{result/response}"
-      })
-      (if (job/thread_ts && ((job/thread_ts .to_s) != ""))
-        (reply .set "thread_ts" job/thread_ts)
-      )
+      (var reply (build_post_message_payload job/channel_id #"[Scheduled: #{job_id}] #{result/response}" (job/thread_ts || "")))
       (try
         (await (http_post "https://slack.com/api/chat.postMessage"
           reply/.to_json

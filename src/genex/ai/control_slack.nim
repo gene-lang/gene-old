@@ -319,12 +319,133 @@ type
     bot_token*: string
     base_url*: string
 
+proc is_blank(value: string): bool =
+  value.strip().len == 0
+
+proc split_table_row(line: string): seq[string] =
+  let normalized = line.strip().strip(chars = {'|'})
+  if normalized.len == 0:
+    return @[]
+  for cell in normalized.split('|'):
+    result.add(cell.strip())
+
+proc is_separator_cell(cell: string): bool =
+  let cleaned = cell.multiReplace(
+    (" ", ""),
+    ("\t", ""),
+    (":", ""),
+    ("-", "")
+  )
+  cleaned.len == 0 and (cell.contains('-') or cell.contains(':'))
+
+proc is_table_separator_line(line: string): bool =
+  let text = line.strip()
+  if not text.contains('|'):
+    return false
+  let cells = split_table_row(text)
+  if cells.len == 0:
+    return false
+  for cell in cells:
+    if not is_separator_cell(cell):
+      return false
+  true
+
+proc build_table_render_plan(text: string): tuple[body_text: string, attachments: JsonNode] =
+  let source = text.replace("\r\n", "\n")
+  let lines = source.splitLines()
+  var table_start = -1
+  var table_end = -1
+  var in_code = false
+
+  var i = 0
+  while i < lines.len:
+    let trimmed = lines[i].strip()
+    if trimmed.startsWith("```"):
+      in_code = not in_code
+    elif not in_code and trimmed.contains('|') and i + 1 < lines.len and is_table_separator_line(lines[i + 1]):
+      table_start = i
+      table_end = i + 1
+      var row_index = i + 2
+      while row_index < lines.len:
+        let row_trimmed = lines[row_index].strip()
+        if is_blank(row_trimmed) or row_trimmed.startsWith("```") or not row_trimmed.contains('|'):
+          break
+        table_end = row_index
+        inc row_index
+      break
+    inc i
+
+  if table_start < 0:
+    return (source, newJArray())
+
+  var before_lines: seq[string] = @[]
+  var after_lines: seq[string] = @[]
+  var rows = newJArray()
+
+  for idx, line in lines:
+    if idx < table_start:
+      before_lines.add(line)
+    elif idx > table_end:
+      after_lines.add(line)
+
+    if idx == table_start or (idx > table_start and idx <= table_end and idx != table_start + 1):
+      var row = newJArray()
+      for cell in split_table_row(line):
+        row.add(%*{"type": "raw_text", "text": cell})
+      if row.len > 0:
+        rows.add(row)
+  var parts: seq[string] = @[]
+  let before_text = before_lines.join("\n").strip()
+  let after_text = after_lines.join("\n").strip()
+  if before_text.len > 0:
+    parts.add(before_text)
+  if after_text.len > 0:
+    parts.add(after_text)
+
+  var body_text = parts.join("\n\n")
+  if body_text.len == 0:
+    body_text = "_Table rendered below._"
+  else:
+    body_text.add("\n\n_Table rendered below._")
+
+  var table_block = newJObject()
+  table_block["type"] = %"table"
+  table_block["rows"] = rows
+
+  var attachment_blocks = newJArray()
+  attachment_blocks.add(table_block)
+
+  var attachment = newJObject()
+  attachment["blocks"] = attachment_blocks
+
+  var attachments = newJArray()
+  attachments.add(attachment)
+  (body_text, attachments)
+
 
 proc new_slack_client*(bot_token = ""; base_url = "https://slack.com"): SlackClient =
   let token =
     if bot_token.len > 0: bot_token
     else: getEnv("SLACK_BOT_TOKEN")
   SlackClient(bot_token: token, base_url: base_url)
+
+proc slack_message_payload*(target: SlackReplyTarget; text: string): JsonNode =
+  let render_plan = build_table_render_plan(text)
+  result = %*{
+    "channel": target.channel,
+    "text": text
+  }
+  if render_plan.body_text.len > 0:
+    result["blocks"] = %*[
+      {
+        "type": "markdown",
+        "text": render_plan.body_text
+      }
+    ]
+  if render_plan.attachments.kind == JArray and render_plan.attachments.len > 0:
+    result["attachments"] = render_plan.attachments
+  if target.thread_ts.len > 0:
+    result["thread_ts"] = %target.thread_ts
 
 proc reply_target_from_envelope*(envelope: CommandEnvelope): SlackReplyTarget =
   SlackReplyTarget(
@@ -576,12 +697,7 @@ proc slack_reply*(client: SlackClient; target: SlackReplyTarget; text: string): 
   if text.len == 0:
     return SlackReplyResult(ok: false, error: "empty message")
 
-  let payload = %*{
-    "channel": target.channel,
-    "text": text
-  }
-  if target.thread_ts.len > 0:
-    payload["thread_ts"] = %target.thread_ts
+  let payload = slack_message_payload(target, text)
 
   let url = client.base_url & "/api/chat.postMessage"
   var http = newHttpClient()

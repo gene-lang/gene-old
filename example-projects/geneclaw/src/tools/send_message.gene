@@ -1,6 +1,8 @@
 # GeneClaw tool: send_message
 
 (import SLACK_AGENTX_TOKEN from "config")
+(import build_post_message_payload from "slack")
+(import genex/http/http_post)
 
 (fn $ns/register_send_message_tool [register_tool log]
   (register_tool "send_message"
@@ -29,21 +31,14 @@
 
       (log .debug #"send_message: channel=#{channel}")
       (try
-        # Build JSON payload
-        (var payload {^channel channel ^text text})
-        (if thread_ts
-          (if_not thread_ts/.empty
-            (payload .set "thread_ts" thread_ts)
-          )
-        )
-        (var json_payload payload/.to_json)
-
-        (var result (system/shell #"curl -s -X POST -H 'Content-Type: application/json; charset=utf-8' -H 'Authorization: Bearer #{SLACK_AGENTX_TOKEN}' -d '#{json_payload}' https://slack.com/api/chat.postMessage"))
-        (if (result/exit_code != 0)
-          (return {^error #"curl failed: #{result/output}"})
-        )
-
-        (var resp (gene/json/parse result/output))
+        (var payload (build_post_message_payload channel text thread_ts))
+        (var result (await (http_post "https://slack.com/api/chat.postMessage"
+          payload/.to_json
+          {
+            ^Content-Type "application/json; charset=utf-8"
+            ^Authorization #"Bearer #{SLACK_AGENTX_TOKEN}"
+          })))
+        (var resp (gene/json/parse result))
         (if resp/ok
           (do
             (log .info #"send_message success: channel=#{channel}")

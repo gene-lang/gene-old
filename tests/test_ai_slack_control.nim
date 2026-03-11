@@ -170,6 +170,33 @@ suite "Slack control adapter":
     check target.channel == "C-chan"
     check target.thread_ts == "1700000000.000"
 
+  test "slack reply payload uses markdown blocks":
+    let payload = slack_message_payload(
+      SlackReplyTarget(channel: "C1", thread_ts: "1700000000.000"),
+      "**hello** `world`"
+    )
+    check payload["channel"].getStr() == "C1"
+    check payload["text"].getStr() == "**hello** `world`"
+    check payload["thread_ts"].getStr() == "1700000000.000"
+    check payload["blocks"].kind == JArray
+    check payload["blocks"][0]["type"].getStr() == "markdown"
+    check payload["blocks"][0]["text"].getStr() == "**hello** `world`"
+
+  test "slack reply payload converts a markdown table into a table attachment":
+    let payload = slack_message_payload(
+      SlackReplyTarget(channel: "C1"),
+      "Summary\n\n| Name | Value |\n| --- | ---: |\n| apples | 10 |\n| pears | 7 |"
+    )
+    check payload["blocks"][0]["type"].getStr() == "markdown"
+    check payload["blocks"][0]["text"].getStr() == "Summary\n\n_Table rendered below._"
+    check payload["attachments"].kind == JArray
+    check payload["attachments"].len == 1
+    check payload["attachments"][0]["blocks"][0]["type"].getStr() == "table"
+    check payload["attachments"][0]["blocks"][0]["rows"].kind == JArray
+    check payload["attachments"][0]["blocks"][0]["rows"].len == 3
+    check payload["attachments"][0]["blocks"][0]["rows"][0][0]["text"].getStr() == "Name"
+    check payload["attachments"][0]["blocks"][0]["rows"][1][1]["text"].getStr() == "10"
+
   test "slack reply rejects invalid inputs":
     # nil client
     let r0 = slack_reply(nil, SlackReplyTarget(channel: "C1"), "hello")
