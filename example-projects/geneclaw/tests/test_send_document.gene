@@ -20,8 +20,12 @@
 
 (var result (invoke_tool "run-1" "ws" "u1" "C1" "T1" "ws:C1:T1" "send_document" {}))
 
-(assert ((result/ok == true) == true))
+(assert ((result/ok == false) == true))
 (assert ((result/result/ok == false) == true))
 (assert (((result/result/error || "") .include? "Missing path") == true))
+
+(var missing_result (invoke_tool "run-2" "ws" "u1" "C1" "T1" "ws:C1:T1" "send_document" {^path "missing.png"}))
+(assert ((missing_result/ok == false) == true))
+(assert (((missing_result/error || "") .include? "Managed file not found") == true))
 
 (println "ok")

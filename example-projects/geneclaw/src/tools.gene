@@ -1,7 +1,7 @@
 # GeneClaw Tool Registry
 # Registry/orchestration; individual tools live in src/tools/*.gene
 
-(import WORKSPACE_ROOT DOCUMENT_ROOT ARTIFACT_ROOT from "config")
+(import CONFIG WORKSPACE_ROOT DOCUMENT_ROOT ARTIFACT_ROOT from "config")
 (import audit_log from "db")
 
 (import register_get_time_tool from "tools/get_time")
@@ -27,6 +27,33 @@
 
 # Tool registry: name -> {^description ^params ^handler}
 (var TOOLS {})
+
+(fn blank_string? [value]
+  (var text (if value (value .to_s) else ""))
+  ((text .length) == 0)
+)
+
+(fn tool_result_success? [result]
+  (if (result is Map)
+    (if (result .contains "ok")
+      (result/ok != false)
+    elif ((result .contains "error") && ((blank_string? (result .get "error" "")) == false))
+      false
+    else
+      true
+    )
+  else
+    true
+  )
+)
+
+(fn tool_result_error [result fallback = "Tool returned an error"]
+  (if ((result is Map) && ((blank_string? (result .get "error" "")) == false))
+    ((result .get "error" fallback) .to_s)
+  else
+    fallback
+  )
+)
 
 (fn $ns/register_tool [name description params handler]
   (TOOLS .set name {
@@ -68,10 +95,18 @@
   (try
     (var result (tool/handler tool_args))
     (var duration (gene/now/.call/.to_i - start_ms))
-    (log .info #"Tool #{tool_name} succeeded in #{duration}ms")
-    (log .debug #"Tool #{tool_name} result=#{result/.to_json}")
-    (audit_log run_id workspace_id tool_name "success" tool_args result duration)
-    {^ok true ^result result}
+    (if (tool_result_success? result)
+      (log .info #"Tool #{tool_name} succeeded in #{duration}ms")
+      (log .debug #"Tool #{tool_name} result=#{result/.to_json}")
+      (audit_log run_id workspace_id tool_name "success" tool_args result duration)
+      {^ok true ^result result}
+    else
+      (var error_msg (tool_result_error result))
+      (log .warn #"Tool #{tool_name} returned failure in #{duration}ms: #{error_msg}")
+      (log .debug #"Tool #{tool_name} result=#{result/.to_json}")
+      (audit_log run_id workspace_id tool_name "failed" tool_args result duration)
+      {^ok false ^error error_msg ^result result}
+    )
   catch *
     (var duration (gene/now/.call/.to_i - start_ms))
     (log .error #"Tool #{tool_name} failed after #{duration}ms: #{$ex/message}")
@@ -121,7 +156,7 @@
   (register_read_file_tool register_tool log WORKSPACE_ROOT)
   (register_write_file_tool register_tool log WORKSPACE_ROOT)
   (register_http_get_tool register_tool log)
-  (register_browser_playwright_tool register_tool log WORKSPACE_ROOT)
+  (register_browser_playwright_tool register_tool log WORKSPACE_ROOT ARTIFACT_ROOT)
   (register_schedule_tool register_tool log)
   (register_self_upgrade_tool register_tool log)
   (register_web_search_tool register_tool log)

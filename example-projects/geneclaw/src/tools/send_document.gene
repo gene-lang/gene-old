@@ -1,11 +1,25 @@
 # GeneClaw tool: send_document
 
-(import WORKSPACE_ROOT ARTIFACT_ROOT SLACK_BOT_TOKEN from "config")
+(import CONFIG WORKSPACE_ROOT ARTIFACT_ROOT from "config")
 (import select_send_document_path record_outbound_document from "documents")
 
 (fn blank_string? [value]
   (var text (if value (value .to_s) else ""))
   ((text .length) == 0)
+)
+
+(fn file_exists? [path]
+  (var target ((path || "") .to_s))
+  (if (blank_string? target)
+    false
+  else
+    (try
+      (var result (system/shell #"test -f '#{target}'"))
+      (result/exit_code == 0)
+    catch *
+      false
+    )
+  )
 )
 
 (fn $ns/register_send_document_tool [register_tool log]
@@ -36,16 +50,19 @@
       (if (blank_string? channel_id)
         (return {^ok false ^error "Missing channel_id"})
       )
-      (if_not SLACK_BOT_TOKEN
-        (return {^ok false ^error "SLACK_BOT_TOKEN not configured"})
+      (if_not CONFIG/slack/bot_token
+        (return {^ok false ^error "CONFIG/slack/bot_token not configured"})
       )
 
       (var resolved_path (select_send_document_path path))
+      (if_not (file_exists? resolved_path)
+        (return {^ok false ^error #"Managed file not found: #{path}"})
+      )
 
       (try
         (log .info #"send_document: path=#{resolved_path} channel=#{channel_id}")
         (var upload (genex/ai/slack_upload_file
-          SLACK_BOT_TOKEN
+          CONFIG/slack/bot_token
           resolved_path
           {
             ^allowed_roots [WORKSPACE_ROOT ARTIFACT_ROOT]
