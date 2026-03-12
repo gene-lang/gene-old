@@ -142,6 +142,20 @@ suite "Static type checking":
         0)
   """
 
+  test_vm """
+    (var x: (String | Nil) "hi")
+    (ifel (x != nil)
+      (x ++ "!")
+      "missing")
+  """, "hi!".to_value()
+
+  test_strict_type_error """
+    (var x: (String | Nil) nil)
+    (ifel (x != nil)
+      "ok"
+      (x ++ "!"))
+  """
+
   test "Strict type checking: catch binding variable is scoped":
     let checker = tc.new_type_checker(strict = true, module_filename = "test_code")
     let code = cleanup("""

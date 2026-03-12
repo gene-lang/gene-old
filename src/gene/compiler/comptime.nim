@@ -4,7 +4,7 @@
 import tables, os, strutils
 
 import ../types
-from "../compiler/if" import normalize_if
+from "../compiler/if" import normalize_if, normalize_ifel
 
 proc c_fmod(x, y: cdouble): cdouble {.importc: "fmod", header: "<math.h>".}
 
@@ -257,7 +257,10 @@ proc eval_comptime_var(gene: ptr Gene, env: var ComptimeEnv): ComptimeResult =
     result.value = NIL
 
 proc eval_comptime_if(gene: ptr Gene, env: var ComptimeEnv): ComptimeResult =
-  normalize_if(gene)
+  if gene.`type`.kind == VkSymbol and gene.`type`.str == "ifel":
+    normalize_ifel(gene)
+  else:
+    normalize_if(gene)
   let cond_val = gene.props.get_or_default("cond".to_key(), NIL)
   let cond_res = eval_comptime_expr(cond_val, env)
   merge_emitted(result.emitted, cond_res.emitted)
@@ -355,7 +358,7 @@ proc eval_comptime_expr(expr: Value, env: var ComptimeEnv): ComptimeResult =
     if gene.children.len >= 1 and gene.children[0].kind == VkSymbol:
       let op = gene.children[0].str
       if op in ["+", "-", "*", "/", "%", "**", "./", "<", "<=", ">", ">=", "==", "!=", "&&", "||", "++", "=", "+=", "-=", "%="]:
-        if gene.`type`.kind != VkSymbol or gene.`type`.str notin ["var", "if", "fn", "do", "loop", "while", "for", "ns", "class", "try", "throw", "import", "export", "interface", "comptime", "type", "object", "$", ".", "->", "@"]:
+        if gene.`type`.kind != VkSymbol or gene.`type`.str notin ["var", "if", "ifel", "fn", "do", "loop", "while", "for", "ns", "class", "try", "throw", "import", "export", "interface", "comptime", "type", "object", "$", ".", "->", "@"]:
           let args = @[gene.`type`] & gene.children[1..^1]
           result = eval_comptime_operator(op, args, env)
           return
@@ -376,7 +379,7 @@ proc eval_comptime_expr(expr: Value, env: var ComptimeEnv): ComptimeResult =
           last = r
         result.value = last.value
         return
-      of "if":
+      of "if", "ifel":
         result = eval_comptime_if(gene, env)
         return
       of "not":

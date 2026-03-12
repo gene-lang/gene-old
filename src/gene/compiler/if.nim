@@ -122,6 +122,33 @@ proc normalize_if*(self: ptr Gene) =
 
     self.children.reset  # Clear our gene_children as it's not needed any more
 
+proc normalize_ifel*(self: ptr Gene) =
+  ## Normalize (ifel cond then_expr [else_expr]) into the same props format as if.
+  ## Unlike `if`, this form accepts exactly one or two branch expressions.
+  if self.props.has_key("cond".to_key()):
+    return
+  if self.type != "ifel".to_symbol_value():
+    return
+
+  case self.children.len
+  of 0:
+    not_allowed("ifel: missing condition")
+  of 1:
+    not_allowed("ifel: missing body after condition")
+  of 2, 3:
+    discard
+  else:
+    not_allowed("ifel: expected condition, then expression, and optional else expression")
+
+  self.props["cond".to_key()] = self.children[0]
+  self.props["then".to_key()] = new_stream_value(@[self.children[1]])
+  if self.children.len == 3:
+    self.props["else".to_key()] = new_stream_value(@[self.children[2]])
+  else:
+    self.props["else".to_key()] = new_stream_value(@[NIL])
+
+  self.children.reset
+
 proc normalize_if_not*(self: ptr Gene) =
   ## Normalize (if_not cond body...) into the same props format as if,
   ## wrapping the condition with (not ...).

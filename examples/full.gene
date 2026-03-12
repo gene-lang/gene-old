@@ -64,6 +64,9 @@
   (println "i < 20")
 )
 
+# ifel: fixed-arity conditional
+(println "ifel result =" (ifel (i > 10) "big" "small"))
+
 # do returns last expression
 (var do_result (do
   (var a 5)
