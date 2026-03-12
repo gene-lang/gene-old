@@ -1,16 +1,11 @@
 # Shared config schema helpers for GeneClaw
 
-# DEPRECATED: use value/.empty? instead
-(fn $ns/blank_string? [value]
-  value/.empty?
-)
-
 (fn $ns/ensure_map [value]
-  (if (value is Map) value else {})
+  (ifel (value is Map) value {})
 )
 
 (fn $ns/ensure_array [value]
-  (if (value is Array) value else [])
+  (ifel (value is Array) value [])
 )
 
 (fn leaf_descriptor [kind value_type default ^bootstrap_env = nil ^env = nil ^fallback_env = nil ^normalize = nil ^public = true]
@@ -67,15 +62,7 @@
 )
 
 (fn leaf_descriptor? [value]
-  ((value is Map) && (value/_config_leaf == true))
-)
-
-(fn descriptor_public? [value]
-  (if (value/public == false) false else true)
-)
-
-(fn default_text [value]
-  (if (value == nil) "" else (value .to_s))
+  ((value is Map) && value/_config_leaf)
 )
 
 (fn $ns/split_path [path]
@@ -136,7 +123,7 @@
         (if_not ((current .contains key) && ((current .get key) is Map))
           (current .set key {})
         )
-        (current = (current .get key))
+        (current = current/<key>)
       )
     )
     (index += 1)
@@ -150,12 +137,7 @@
     value
   else
     (try
-      (var text ((if (value == nil) (default_text default) else (value .to_s)) .trim))
-      (if text/.empty?
-        default
-      else
-        (text .to_i)
-      )
+      (ifel value value/.to_i default)
     catch *
       default
     )
@@ -163,18 +145,14 @@
 )
 
 (fn coerce_string_value [value default]
-  (if value
-    (value .to_s)
-  else
-    default
-  )
+  (ifel value value/.to_s default)
 )
 
 (fn resolve_leaf_value [desc raw_value env]
   (var source_value raw_value)
 
   (if (desc/kind == "env")
-    (source_value = (env .get desc/env desc/default))
+    (source_value = (env/<desc/env> || desc/default))
   else
     (if (desc/kind == "secret")
       (source_value = (env .get desc/env (env .get (desc/fallback_env || "") desc/default)))
@@ -188,7 +166,7 @@
   )
 
   (if ((desc/normalize == "lower") && (source_value is String))
-    (source_value = (source_value .to_lower))
+    (source_value = source_value/.to_lower)
   )
 
   source_value
@@ -200,23 +178,11 @@
 
   (schema .each (fn [key node]
     (if (leaf_descriptor? node)
-      (do
-        (var raw_value (if (current_group .contains key)
-          (current_group .get key)
-        else
-          nil
-        ))
-        (result .set key (resolve_leaf_value node raw_value env))
-      )
+      (var raw_value current_group/<key>)
+      (result .set key (resolve_leaf_value node raw_value env))
     else
-      (do
-        (var child_group (if (current_group .contains key)
-          (current_group .get key)
-        else
-          {}
-        ))
-        (result .set key (resolve_schema_group (ensure_map node) (ensure_map child_group) env))
-      )
+      (var child_group (current_group/<key> || {}))
+      (result .set key (resolve_schema_group (ensure_map node) (ensure_map child_group) env))
     )
   ))
 
@@ -230,7 +196,7 @@
 (fn bootstrap_leaf_value [desc]
   (if desc/bootstrap_env
     # Store placeholder text inline so bootstrap config remains editable as plain Gene values.
-    #"{ENV:#{desc/bootstrap_env}:#{(default_text desc/default)}}"
+    #"{ENV:#{desc/bootstrap_env}:#{desc/default}}"
   else
     desc/default
   )
@@ -278,21 +244,15 @@
         (has_cfg = true)
       )
     else
-      (do
-        (var child_path (if current_path/.empty?
-          #"/#{key}"
-        else
-          #"#{current_path}/#{key}"
-        ))
-        (if (collect_bootstrap_separate_paths (ensure_map node) child_path paths)
-          (has_cfg = true)
-        )
+      (var child_path (ifel current_path/.empty?  #"/#{key}" #"#{current_path}/#{key}"))
+      (if (collect_bootstrap_separate_paths (ensure_map node) child_path paths)
+        (has_cfg = true)
       )
     )
   ))
 
   (if has_cfg
-    (paths .append (if current_path/.empty? "/*" else #"#{current_path}/*"))
+    (paths .append (ifel current_path/.empty? "/*" #"#{current_path}/*"))
   )
 
   has_cfg
@@ -307,15 +267,7 @@
 ($ns/HIDDEN_SECRET = "hidden")
 
 (fn $ns/secret_configured [value]
-  (if (value == nil)
-    false
-  else
-    (if ((value .to_s) .empty?)
-      false
-    else
-      true
-    )
-  )
+  value/.not_empty?
 )
 
 (fn $ns/redact_secret [_value]
@@ -328,32 +280,18 @@
 
   (schema .each (fn [key node]
     (if (leaf_descriptor? node)
-      (if (descriptor_public? node)
-        (do
-          (var value (if (current_group .contains key)
-            (current_group .get key)
-          else
-            node/default
-          ))
-          (if (node/kind == "secret")
-            (do
-              (result .set key (redact_secret value))
-              (result .set #"#{key}_configured" (secret_configured value))
-            )
-          else
-            (result .set key value)
-          )
+      (if node/public
+        (var value (current_group/<key> || node/default))
+        (if (node/kind == "secret")
+          (result .set key (redact_secret value))
+          (result .set #"#{key}_configured" (secret_configured value))
+        else
+          (result .set key value)
         )
       )
     else
-      (do
-        (var child_group (if (current_group .contains key)
-          (current_group .get key)
-        else
-          {}
-        ))
-        (result .set key (build_public_group (ensure_map node) (ensure_map child_group)))
-      )
+      (var child_group (current_group/<key> || {}))
+      (result .set key (build_public_group (ensure_map node) (ensure_map child_group)))
     )
   ))
 
@@ -368,6 +306,6 @@
   (if (value is String)
     (gene/json/stringify value)
   else
-    (value .to_s)
+    value/.to_s
   )
 )

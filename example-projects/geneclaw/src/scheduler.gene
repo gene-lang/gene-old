@@ -40,15 +40,16 @@
 
     # Advance schedule
     (var now gene/now/.call/.to_i)
-    (if (job/schedule_type == "once")
+    (case job/schedule_type
+    when "once"
       (job_update_state job_id "completed")
       (log .info #"One-shot job #{job_id} completed")
-    elif (job/schedule_type == "interval")
+    when "interval"
       (var next (now + job/interval_ms))
       (job_mark_completed job_id)
       (job_update_next_run job_id next)
       (log .info #"Interval job #{job_id} next run at #{next}")
-    elif (job/schedule_type == "cron")
+    when "cron"
       (var next (compute_cron_next job/cron_expr now))
       (if next
         (job_mark_completed job_id)
@@ -79,7 +80,7 @@
   (try
     (var now gene/now/.call/.to_i)
     (var due_jobs (job_list_due now))
-    (if (due_jobs/.size > 0)
+    (if due_jobs/.not_empty?
       (log .info #"Scheduler tick: #{due_jobs/.size} job(s) due")
       (due_jobs .each (fn [job]
         (job_mark_running job/job_id)

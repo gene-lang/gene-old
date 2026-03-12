@@ -420,6 +420,17 @@ proc init_collection_classes*(object_class: Class) =
     (array_data(arr).len == 0).to_value()
 
   array_class.def_native_method("empty", vm_array_empty)
+  array_class.def_native_method("empty?", vm_array_empty)
+
+  proc vm_array_not_empty(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("Array.not_empty? requires self")
+    let arr = get_positional_arg(args, 0, has_keyword_args)
+    if arr.kind != VkArray:
+      not_allowed("not_empty? must be called on an array")
+    (array_data(arr).len != 0).to_value()
+
+  array_class.def_native_method("not_empty?", vm_array_not_empty)
 
   proc vm_array_contains(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 2:
@@ -1136,6 +1147,17 @@ proc init_collection_classes*(object_class: Class) =
     (map_data(map_val).len == 0).to_value()
 
   map_class.def_native_method("empty", vm_map_empty)
+  map_class.def_native_method("empty?", vm_map_empty)
+
+  proc vm_map_not_empty(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("Map.not_empty? requires self")
+    let map_val = get_positional_arg(args, 0, has_keyword_args)
+    if map_val.kind != VkMap:
+      not_allowed("not_empty? must be called on a map")
+    (map_data(map_val).len != 0).to_value()
+
+  map_class.def_native_method("not_empty?", vm_map_not_empty)
 
   proc vm_map_clear(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 1:

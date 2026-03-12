@@ -18,8 +18,8 @@
 )
 
 (fn $ns/build_session_id [workspace_id channel_id thread_id = ""]
-  (var thread_part (if thread_id then (thread_id .to_s) else ""))
-  (if ((thread_part .length) > 0)
+  (var thread_part thread_id/.to_s)
+  (if thread_part/.not_empty?
     #"#{workspace_id}:#{channel_id}:#{thread_part}"
   else
     #"#{workspace_id}:#{channel_id}"
@@ -200,7 +200,7 @@
       (save_session session_id session)
     )
     (run_complete run_id "failed" $ex/message)
-    (throw $ex/message)
+    (throw $ex)
   )
 )
 

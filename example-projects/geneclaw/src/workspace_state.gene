@@ -264,7 +264,7 @@
 )
 
 (fn $ns/get_system_prompt []
-  (var prompt (load_system_prompt_value))
+  (var prompt load_system_prompt_value/.call)
   (var resolved (interpolate_value (if prompt (prompt .to_s) else "")))
   (if (resolved is String)
     resolved
@@ -308,7 +308,7 @@
     ^created_at_ms now
   })
   (session/memory = entries)
-  (session/workspace_id = (if workspace_id then workspace_id else (session/workspace_id || "default")))
+  (session/workspace_id = (workspace_id || session/workspace_id || "default"))
   (session/updated_at_ms = now)
   session
 )

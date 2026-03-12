@@ -21,9 +21,10 @@
 ($ns/TMP_PATH = #"#{GENECLAW_HOME}/tmp")
 ($ns/FILES_ROOT = TMP_PATH)
 ($ns/BOOTSTRAPPED = false)
+($ns/DEFAULT_SYSTEM_PROMPT = "You are GeneClaw, a capable AI agent. You can use tools to complete tasks. After receiving a tool result, provide a natural response. For general conversation, respond normally without tool calls.")
 
 (fn $ns/default_system_prompt []
-  "You are GeneClaw, a capable AI agent. You can use tools to complete tasks. After receiving a tool result, provide a natural response. For general conversation, respond normally without tool calls."
+  DEFAULT_SYSTEM_PROMPT
 )
 
 (fn $ns/file_exists? [path]
@@ -72,7 +73,7 @@
 (fn ensure_state_root []
   (system/shell #"mkdir -p '#{HOME_STATE_PATH}'")
   (if_not (tree_exists? STATE_SYSTEM_PROMPT_PATH)
-    (gene/serdes/write_tree STATE_SYSTEM_PROMPT_PATH (default_system_prompt))
+    (gene/serdes/write_tree STATE_SYSTEM_PROMPT_PATH DEFAULT_SYSTEM_PROMPT)
   )
 )
 
@@ -109,7 +110,15 @@
 )
 
 (fn $ns/load_system_prompt_value []
-  (read_tree_or_default STATE_SYSTEM_PROMPT_PATH (default_system_prompt))
+  (var prompt (read_tree_or_default STATE_SYSTEM_PROMPT_PATH DEFAULT_SYSTEM_PROMPT))
+  (if (prompt is String)
+    prompt
+  else
+    (do
+      (gene/serdes/write_tree STATE_SYSTEM_PROMPT_PATH DEFAULT_SYSTEM_PROMPT)
+      DEFAULT_SYSTEM_PROMPT
+    )
+  )
 )
 
 (fn $ns/state_path [name]
@@ -287,14 +296,15 @@
       (break)
     )
 
-    (var default_text (if (close_idx > 0) (after_name .substr 0 (close_idx - 1)) else ""))
+    (var default_text (ifel (close_idx > 0) (after_name .substr 0 (close_idx - 1)) ""))
     (var after_name_length (after_name .length))
-    (result = #"#{result}#{(($env .get env_name default_text) .to_s)}")
-    (remaining = (if ((close_idx + 1) < after_name_length)
-      (after_name .substr (close_idx + 1))
-    else
-      ""
-    ))
+    (result = #"#{result}#($env .get env_name default_text)")
+    (remaining =
+      (if ((close_idx + 1) < after_name_length)
+        (after_name .substr (close_idx + 1))
+      else
+        ""
+      ))
   )
 
   result

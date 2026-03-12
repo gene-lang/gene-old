@@ -102,6 +102,16 @@ proc init_string_class*(object_class: Class) =
   string_class.def_native_method("empty", string_empty)
   string_class.def_native_method("empty?", string_empty)
 
+  proc string_not_empty(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("String.not_empty? requires self")
+    let self_arg = get_positional_arg(args, 0, has_keyword_args)
+    if self_arg.kind != VkString:
+      not_allowed("not_empty? must be called on a string")
+    (self_arg.str.len != 0).to_value()
+
+  string_class.def_native_method("not_empty?", string_not_empty)
+
   proc string_to_i(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
     if get_positional_count(arg_count, has_keyword_args) < 1:
       not_allowed("String.to_i requires self argument")

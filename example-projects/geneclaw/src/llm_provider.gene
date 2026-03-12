@@ -2,51 +2,35 @@
 # Translates the internal agent format to provider-specific request/response shapes.
 
 (import CONFIG from "config")
+(import ensure_array ensure_map from "config_helpers")
 (import get_system_prompt from "workspace_state")
 
 (var log (new genex/logging/Logger $ns))
 
-(fn ensure_array [value]
-  (if (value is Array) value else [])
-)
-
-(fn ensure_map [value]
-  (if (value is Map) value else {})
-)
-
 (fn parse_tool_arguments [args_json]
   (var parsed (try (gene/json/parse (args_json || "{}")) catch * nil))
-  (if (parsed is Map) parsed else {})
+  (ifel (parsed is Map) parsed {})
 )
 
-
-
 (fn supported_image_mime? [mime_type]
-  (var normalized (((mime_type || "") .to_s) .to_lower))
-  (if ((normalized == "image/png") ||
-       (normalized == "image/jpeg") ||
-       (normalized == "image/jpg") ||
-       (normalized == "image/gif") ||
-       (normalized == "image/webp"))
-    true
-  else
-    false
-  )
+  ([
+    "image/png"
+    "image/jpeg"
+    "image/jpg"
+    "image/gif"
+    "image/webp"
+  ] .contains mime_type/.to_s/.to_lower)
 )
 
 (fn $ns/provider_supports_images? [provider = nil]
-  (var selected (((provider || CONFIG/llm/provider) .to_s) .to_lower))
-  (if ((selected == "openai") || (selected == "anthropic"))
-    true
-  else
-    false
-  )
+  (var p (provider || CONFIG/llm/provider))
+  (["openai" "anthropic"] .contains p/.to_s/.to_lower)
 )
 
 (fn image_attachment_error [image_attachments provider = nil]
   (var images (ensure_array image_attachments))
   (var selected_provider (((provider || CONFIG/llm/provider) .to_s) .to_lower))
-  (if (images/.size == 0)
+  (if images/.empty?
     (return "")
   )
 
@@ -111,7 +95,7 @@
 
 (fn build_openai_user_content [user_text image_attachments]
   (var images (ensure_array image_attachments))
-  (if (images/.size == 0)
+  (if images/.empty?
     (return user_text)
   )
 
@@ -205,7 +189,7 @@
 
 (fn $ns/build_openai_request [history user_text tools_spec image_attachments = []]
   (var messages [])
-  (messages .append {^role "system" ^content (get_system_prompt)})
+  (messages .append {^role "system" ^content get_system_prompt/.call})
 
   (history .each (fn [entry]
     (var msg {^role entry/role ^content (entry/content || "")})
@@ -279,14 +263,14 @@
           ))
         )
 
-        (if (blocks/.size > 0)
+        (if blocks/.not_empty?
           (messages .append {^role entry/role ^content blocks})
         )
       )
     )
   ))
 
-  (if (pending_tool_results/.size > 0)
+  (if pending_tool_results/.not_empty?
     (var final_blocks [])
     (pending_tool_results .each (fn [block]
       (final_blocks .append block)
@@ -294,12 +278,12 @@
     ((build_anthropic_user_blocks user_text image_attachments) .each (fn [block]
       (final_blocks .append block)
     ))
-    (if (final_blocks/.size > 0)
+    (if final_blocks/.not_empty?
       (messages .append {^role "user" ^content final_blocks})
     )
   else
     (var final_blocks (build_anthropic_user_blocks user_text image_attachments))
-    (if (final_blocks/.size > 0)
+    (if final_blocks/.not_empty?
       (messages .append {^role "user" ^content final_blocks})
     )
   )
@@ -314,7 +298,7 @@
   ))
 
   (var request {
-    ^system (get_system_prompt)
+    ^system get_system_prompt/.call
     ^messages (build_anthropic_messages history user_text image_attachments)
     ^tools tools
   })
@@ -324,10 +308,10 @@
 
 (fn $ns/normalize_openai_response [response]
   (var choices (try (response .get "choices" []) catch * []))
-  (if (choices/.size > 0)
+  (if choices/.not_empty?
     (var first_choice choices/0)
     (var msg first_choice/message)
-    (var content ((msg .get "content" "") .to_s))
+    (var content msg/content/.to_s)
     (var tool_calls (msg .get "tool_calls" []))
     (if_not tool_calls (tool_calls = []))
     (return {^content content ^tool_calls tool_calls})
@@ -343,9 +327,8 @@
   (blocks .each (fn [block]
     (var block_type (block/type || ""))
     (if (block_type == "text")
-      (var text (block/text || ""))
-      (if text/.not_empty?
-        (text_parts .append text)
+      (if block/text
+        (text_parts .append block/text/.to_s)
       )
     elif (block_type == "tool_use")
       (var input_map (ensure_map (block/input || {})))
@@ -365,11 +348,12 @@
 
 (fn provider_has_credentials []
   (if (CONFIG/llm/provider == "anthropic")
-    (return (CONFIG/llm/anthropic/api_key/.not_empty? || CONFIG/llm/anthropic/auth_token/.not_empty?))
+    (CONFIG/llm/anthropic/api_key/.not_empty? || CONFIG/llm/anthropic/auth_token/.not_empty?)
   elif (CONFIG/llm/provider == "openai")
-    (return CONFIG/llm/openai/api_key/.not_empty?)
+    CONFIG/llm/openai/api_key/.not_empty?
+  else
+    false
   )
-  false
 )
 
 (fn mock_mode_response []
@@ -382,11 +366,7 @@
 )
 
 (fn error_message_from_response [response]
-  (try
-    (response/message || "")
-  catch *
-    ""
-  )
+  response/message/.to_s
 )
 
 (fn call_openai [history user_text tools_spec image_attachments]

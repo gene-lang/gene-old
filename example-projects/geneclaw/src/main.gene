@@ -22,23 +22,13 @@
 )
 
 (fn gene_response [status body]
-  (genex/http/respond status body {^Content-Type "text/plain; charset=utf-8"})
+  (genex/http/respond status body/.to_s {^Content-Type "text/plain; charset=utf-8"})
 )
-
-(fn ensure_attachments [value]
-  (if (value is Array) value else [])
-)
-
-
 
 (fn normalize_slack_attachment [file]
   (var url_private (file/url_private || ""))
   (var url_private_download (file/url_private_download || ""))
-  (var download_url (if url_private_download/.empty?
-    url_private
-  else
-    url_private_download
-  ))
+  (var download_url (url_private_download || url_private))
   {
     ^source "slack"
     ^file_id (file/id || "")
@@ -61,7 +51,7 @@
       (attachments .append (normalize_slack_attachment file))
     )
   )
-  (if ((attachments/.size == 0) && event/file)
+  (if (attachments/.empty? && event/file)
     (attachments .append (normalize_slack_attachment event/file))
   )
   attachments
@@ -74,7 +64,7 @@
     ^channel_id (body/channel_id || "general")
     ^thread_id (body/thread_id || body/thread_ts || "")
     ^text (body/text || "")
-    ^attachments (ensure_attachments body/attachments)
+    ^attachments body/attachments
     ^metadata {^source "web"}
   }
 )
@@ -101,16 +91,7 @@
 )
 
 (fn get_header [req name default_val]
-  # (try
-    (var headers req/.headers)
-    (if headers
-      (headers .get name default_val)
-    else
-      default_val
-    )
-  # catch *
-  #   default_val
-  # )
+  (req/.headers/<name> || default_val)
 )
 
 # ============================================================
@@ -155,7 +136,7 @@
     )
     (log .debug #"Chat text: #{text}")
 
-    (if (text/.empty? && (attachments/.size == 0))
+    (if (text/.empty? && attachments/.empty?)
       (log .warn "Chat request missing text and attachments")
       (return (json_response 400 {^error "Missing text or attachments"}))
     )
@@ -178,7 +159,7 @@
 (fn handle_config [req]
   # REST endpoint: GET /api/config
   (log .trace "Config export request")
-  (var config_path ((req/.params .get "path" "") .trim))
+  (var config_path req/.params/path/.to_s/.trim)
   (if config_path/.empty?
     (gene_response 200 (get_public_config_gene))
   else
@@ -186,7 +167,7 @@
     (if path_result/found
       (gene_response 200 (render_public_config_value path_result/value))
     else
-      (gene_response 404 ({^error "Config path not found" ^path config_path} .to_s))
+      (gene_response 404 {^error "Config path not found" ^path config_path})
     )
   )
 )

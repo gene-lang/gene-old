@@ -16,7 +16,6 @@
       )
 
       (var cmd_args args/args)
-      (if cmd_args/.empty? then (cmd_args = ""))
       (var full_cmd #"cd #{workspace_root} && #{cmd} #{cmd_args}")
       (log .debug #"shell exec: #{full_cmd}")
       (var result (system/shell full_cmd))

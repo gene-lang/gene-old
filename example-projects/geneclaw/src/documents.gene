@@ -416,7 +416,7 @@
     (return nil)
   )
 
-  (var resolved_role (if role then role else "outbound"))
+  (var resolved_role (role || "outbound"))
   (var document_id (make_document_id))
   (var path_parts (real_path .split "/"))
   (var filename "artifact.bin")

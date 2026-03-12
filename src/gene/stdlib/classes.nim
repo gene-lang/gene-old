@@ -305,6 +305,13 @@ proc init_basic_classes*(): Class =
     TRUE
 
   nil_class.def_native_method("empty", nil_empty_method)
+  nil_class.def_native_method("empty?", nil_empty_method)
+
+  proc nil_not_empty_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
+                            arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    FALSE
+
+  nil_class.def_native_method("not_empty?", nil_not_empty_method)
 
   r = new_ref(VkClass)
   r.class = nil_class
@@ -316,6 +323,8 @@ proc init_basic_classes*(): Class =
   void_class.parent = object_class
   void_class.def_native_method("to_s", object_to_s_method)
   void_class.def_native_method("empty", nil_empty_method)
+  void_class.def_native_method("empty?", nil_empty_method)
+  void_class.def_native_method("not_empty?", nil_not_empty_method)
 
   r = new_ref(VkClass)
   r.class = void_class

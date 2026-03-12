@@ -33,14 +33,14 @@
 (fn $ns/pause [reason requested_by]
   (PAUSED = true)
   (PAUSED_AT = gene/now/.call/.to_i)
-  (PAUSE_REASON = (if reason then reason else "upgrade"))
-  (PAUSE_REQUESTED_BY = (if requested_by then requested_by else "system"))
+  (PAUSE_REASON = (reason || "upgrade"))
+  (PAUSE_REQUESTED_BY = (requested_by || "system"))
   (log .warn #"Entering PAUSED mode reason=#{PAUSE_REASON} requested_by=#{PAUSE_REQUESTED_BY}")
   (get_pause_status)
 )
 
 (fn $ns/resume [reason]
-  (var resume_reason (if reason then reason else "manual"))
+  (var resume_reason (reason || "manual"))
   (if PAUSED
     (log .warn #"Leaving PAUSED mode reason=#{resume_reason}")
   )

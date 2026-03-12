@@ -1,32 +1,30 @@
 # GeneClaw Slack helpers
 
-
-
 (fn split_table_row [line]
-  (var normalized (((line || "") .to_s) .trim))
+  (var normalized line/.to_s/.trim)
   (normalized = (normalized .replace_all #/^\|/ ""))
   (normalized = (normalized .replace_all #/\|$/ ""))
   (var cells [])
   (for part in (normalized .split "|")
-    (cells .append (part .trim))
+    (cells .append part/.trim)
   )
   cells
 )
 
 (fn separator_cell? [cell]
-  (var text ((cell || "") .to_s))
+  (var text cell/.to_s)
   (var cleaned (text .replace_all #/[\s:\-]/ ""))
   (((cleaned .length) == 0) && ((text .include? "-") || (text .include? ":")))
 )
 
 (fn table_separator_line? [line]
-  (var text (((line || "") .to_s) .trim))
+  (var text line/.to_s/.trim)
   (if_not (text .include? "|")
     (return false)
   )
 
   (var cells (split_table_row text))
-  (if (cells/.size == 0)
+  (if cells/.empty?
     (return false)
   )
 
@@ -40,7 +38,7 @@
 )
 
 (fn build_table_render_plan [text]
-  (var source (((text || "") .to_s) .replace "\r\n" "\n"))
+  (var source (text/.to_s .replace "\r\n" "\n"))
   (var lines (source .split "\n"))
   (var in_code false)
   (var table_start -1)
@@ -48,23 +46,23 @@
   (var i 0)
 
   (while (i < lines/.size)
-    (var line_item (lines .get i))
-    (var line_text ((line_item || "") .to_s))
-    (var trimmed (line_text .trim))
+    (var line_item lines/<i>)
+    (var line_text line/.to_s)
+    (var trimmed line_text/.trim)
 
     (if (trimmed .starts_with "```")
       (in_code = (! in_code))
     elif ((in_code == false) && (i < (lines/.size - 1)) && (trimmed .include? "|"))
       (var next_index (i + 1))
-      (var next_item (lines .get next_index))
-      (var next_trimmed (((next_item || "") .to_s) .trim))
+      (var next_item lines/<next_index>)
+      (var next_trimmed next_item/.to_s/.trim)
       (if (table_separator_line? next_trimmed)
         (table_start = i)
         (table_end = next_index)
         (var row_index (i + 2))
         (while (row_index < lines/.size)
-          (var row_item (lines .get row_index))
-          (var row_trimmed (((row_item || "") .to_s) .trim))
+          (var row_item lines/<row_index>)
+          (var row_trimmed row_item/.to_s/.trim)
           (if row_trimmed/.empty?
             (break)
           )
@@ -95,17 +93,17 @@
 
   (while (i < lines/.size)
     (if (i < table_start)
-      (before_lines .append (lines .get i))
+      (before_lines .append lines/<i>)
     elif (i > table_end)
-      (after_lines .append (lines .get i))
+      (after_lines .append lines/<i>)
     )
 
     (if ((i == table_start) || ((i > table_start) && (i <= table_end) && (i != (table_start + 1))))
       (var row [])
-      (for cell in (split_table_row (lines .get i))
+      (for cell in (split_table_row lines/<i>)
         (row .append {^type "raw_text" ^text cell})
       )
-      (if (row/.size > 0)
+      (if row/.not_empty?
         (rows .append row)
       )
     )
@@ -143,11 +141,11 @@
 )
 
 (fn $ns/build_post_message_payload [channel text thread_ts = ""]
-  (var text_value ((text || "") .to_s))
-  (var thread_value ((thread_ts || "") .to_s))
+  (var text_value text/.to_s)
+  (var thread_value thread_ts/.to_s)
   (var render_plan (build_table_render_plan text_value))
   (var payload {
-    ^channel ((channel || "") .to_s)
+    ^channel channel/.to_s
     ^text text_value
   })
   (if render_plan/body_text/.not_empty?
@@ -156,10 +154,10 @@
       ^text render_plan/body_text
     }])
   )
-  (if (render_plan/attachments/.size > 0)
+  (if render_plan/attachments/.not_empty?
     (payload .set "attachments" render_plan/attachments)
   )
-  (if ((thread_value .length) > 0)
+  (if thread_value/.not_empty?
     (payload .set "thread_ts" thread_value)
   )
   payload

@@ -101,10 +101,10 @@
 )
 
 (fn normalize_run_record [run_id record]
-  (var source (if record record else {}))
+  (var source (record || {}))
   (var source_run_id (record_text source "run_id" ""))
   {
-    ^run_id (if (source_run_id .to_s)/.empty? run_id else source_run_id)
+    ^run_id (if source_run_id/.to_s/.empty? run_id else source_run_id)
     ^workspace_id (record_text source "workspace_id" "")
     ^user_id (record_text source "user_id" "")
     ^state (record_text source "state" "queued")
@@ -170,7 +170,7 @@
 (fn normalize_document_entry [record chunks role]
   (var source (ensure_map (if record record else {})))
   (var now gene/now/.call/.to_i)
-  (var resolved_role (if role then role else (record_text source "role" "inbound")))
+  (var resolved_role (role || (record_text source "role" "inbound")))
   (var session_id (record_text source "session_id" ""))
   (var document_id (record_text source "document_id" ""))
   (var storage_path (record_text source "storage_path" ""))
@@ -239,7 +239,7 @@
    ^local_path (record_text entry "local_path" "")
    ^storage_path (record_text entry "storage_path" "")
    ^created_at_ms (record_number entry "created_at_ms" 0)
-   ^role (if role then role else (record_text entry "role" "inbound"))}
+   ^role (role || (record_text entry "role" "inbound"))}
 )
 
 (fn document_summary_from_ref [document_ref]
@@ -294,8 +294,8 @@
     ^workspace_id workspace_id
     ^tool_name tool_name
     ^status status
-    ^args_json (if args_json then args_json else {})
-    ^result_json (if result_json then result_json else {})
+    ^args_json (args_json || {})
+    ^result_json (result_json || {})
     ^duration_ms duration_ms
     ^created_at_ms now
   })
@@ -324,7 +324,7 @@
   (var run (if (load_run_record run_id) (load_run_record run_id) {^run_id run_id}))
   (run/state = state)
   (run/ended_at_ms = now)
-  (run/error = (if error then error else ""))
+  (run/error = error)
   (if error
     (log .warn #"run_complete run=#{run_id} state=#{state} error=#{error}")
   else

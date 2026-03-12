@@ -30,24 +30,14 @@
 
 (fn tool_result_success? [result]
   (if (result is Map)
-    (if (result .contains "ok")
-      (result/ok != false)
-    elif ((result .contains "error") && (result .get "error" "")/.not_empty?)
-      false
-    else
-      true
-    )
+    (result/ok || result/error/.empty?)
   else
     true
   )
 )
 
 (fn tool_result_error [result fallback = "Tool returned an error"]
-  (if ((result is Map) && (result .get "error" "")/.not_empty?)
-    ((result .get "error" fallback) .to_s)
-  else
-    fallback
-  )
+  (result/error || fallback)
 )
 
 (fn $ns/register_tool [name description params handler]
@@ -61,7 +51,7 @@
 
 (fn $ns/invoke_tool [run_id workspace_id user_id channel_id thread_id session_id tool_name args]
   (log .info #"invoke_tool run=#{run_id} tool=#{tool_name}")
-  (var tool_args (if (args is Map) args else {}))
+  (var tool_args (ifel (args is Map) args {}))
   (if (args is Map)
     (log .debug #"invoke_tool args=#{tool_args/.to_json}")
   else
@@ -79,7 +69,7 @@
     ^session_id session_id
   })
 
-  (var tool (TOOLS .get tool_name))
+  (var tool TOOLS/<tool_name>)
   (if_not tool
     (log .warn #"Unknown tool requested: #{tool_name}")
     (audit_log run_id workspace_id tool_name "not_found" tool_args nil 0)
@@ -108,14 +98,6 @@
     (audit_log run_id workspace_id tool_name "failed" tool_args {^error $ex/message} duration)
     {^ok false ^error #"Tool failed: #{$ex/message}"}
   )
-)
-
-(fn $ns/list_tools []
-  (var names [])
-  (TOOLS .each (fn [name _def]
-    (names .append name)
-  ))
-  names
 )
 
 # Build OpenAI-format tools array for native tool calling
