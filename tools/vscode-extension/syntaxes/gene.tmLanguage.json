@@ -200,7 +200,7 @@
       "patterns": [
         {
           "name": "keyword.control.gene",
-          "match": "\\b(if|else|elif|then|loop|for|while|break|continue|return|try|catch|throw|match|case|when)\\b"
+          "match": "\\b(if|ifel|else|elif|then|loop|for|while|repeat|break|continue|return|try|catch|throw|match|case|when)\\b"
         },
         {
           "name": "keyword.other.gene",

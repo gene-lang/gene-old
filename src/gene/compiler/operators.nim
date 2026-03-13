@@ -819,7 +819,7 @@ proc is_infix_rewrite_eligible(expr_type: Value): bool {.inline.} =
   if expr_type.kind != VkSymbol:
     return true
   expr_type.str notin [
-    "var", "if", "fn", "do", "loop", "while", "for", "ns", "class",
+    "var", "if", "ifel", "fn", "do", "loop", "while", "for", "ns", "class",
     "try", "throw", "import", "export", "$", "$vm", "$vmstmt", ".", "->", "@"
   ]
 
@@ -1221,6 +1221,9 @@ proc compile_gene(self: Compiler, input: Value) =
         return
       of "if":
         self.compile_if(gene)
+        return
+      of "ifel":
+        self.compile_ifel(gene)
         return
       of "if_not":
         self.compile_if_not(gene)

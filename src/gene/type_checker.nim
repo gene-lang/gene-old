@@ -1607,6 +1607,48 @@ proc subtract_narrowed_type(self: TypeChecker, original: TypeExpr, removed: Type
 
   return ro
 
+proc check_conditional_branches(self: TypeChecker, cond: Value,
+                                then_expr: Value, has_else: bool,
+                                else_expr: Value): TypeExpr =
+  discard self.check_expr(cond)
+  # Allow any truthy/falsy value in conditions (runtime to_bool handles coercion)
+
+  let guard = self.extract_type_guard(cond)
+  let has_guard = guard.found
+  let original_guard_type = if has_guard: self.lookup(guard.name) else: nil
+
+  self.push_scope()
+  if has_guard:
+    let narrowed =
+      if guard.negated and original_guard_type != nil:
+        self.subtract_narrowed_type(original_guard_type, guard.guarded_type)
+      else:
+        guard.guarded_type
+    self.define(guard.name, narrowed)
+  let then_type = self.check_expr(then_expr)
+  self.pop_scope()
+
+  if has_else:
+    self.push_scope()
+    if has_guard:
+      let narrowed_else =
+        if guard.negated:
+          guard.guarded_type
+        elif original_guard_type != nil:
+          self.subtract_narrowed_type(original_guard_type, guard.guarded_type)
+        else:
+          nil
+      if narrowed_else != nil:
+        self.define(guard.name, narrowed_else)
+    let else_type = self.check_expr(else_expr)
+    self.pop_scope()
+    try:
+      self.unify(then_type, else_type, "if")
+      return then_type
+    except CatchableError:
+      return TypeExpr(kind: TkUnion, members: @[then_type, else_type])
+  return then_type
+
 proc check_if(self: TypeChecker, gene: ptr Gene): TypeExpr =
   if gene.children.len < 2:
     return ANY_TYPE
@@ -1647,44 +1689,32 @@ proc check_if(self: TypeChecker, gene: ptr Gene): TypeExpr =
   let has_else = else_items.len > 0
   let else_expr = if has_else: branch_expr(else_items) else: NIL
 
-  discard self.check_expr(cond)
-  # Allow any truthy/falsy value in if conditions (runtime to_bool handles coercion)
+  self.check_conditional_branches(cond, then_expr, has_else, else_expr)
 
-  let guard = self.extract_type_guard(cond)
-  let has_guard = guard.found
-  let original_guard_type = if has_guard: self.lookup(guard.name) else: nil
+proc check_ifel(self: TypeChecker, gene: ptr Gene): TypeExpr =
+  case gene.children.len
+  of 0:
+    not_allowed("ifel: missing condition")
+  of 1:
+    not_allowed("ifel: missing body after condition")
+  of 2, 3:
+    discard
+  else:
+    not_allowed("ifel: expected condition, then expression, and optional else expression")
 
-  self.push_scope()
-  if has_guard:
-    let narrowed =
-      if guard.negated and original_guard_type != nil:
-        self.subtract_narrowed_type(original_guard_type, guard.guarded_type)
-      else:
-        guard.guarded_type
-    self.define(guard.name, narrowed)
-  let then_type = self.check_expr(then_expr)
-  self.pop_scope()
+  let cond = gene.children[0]
+  let then_expr = gene.children[1]
+  let has_else = gene.children.len == 3
+  let else_expr = if has_else: gene.children[2] else: NIL
 
-  if has_else:
-    self.push_scope()
-    if has_guard:
-      let narrowed_else =
-        if guard.negated:
-          guard.guarded_type
-        elif original_guard_type != nil:
-          self.subtract_narrowed_type(original_guard_type, guard.guarded_type)
-        else:
-          nil
-      if narrowed_else != nil:
-        self.define(guard.name, narrowed_else)
-    let else_type = self.check_expr(else_expr)
-    self.pop_scope()
-    try:
-      self.unify(then_type, else_type, "if")
-      return then_type
-    except CatchableError:
-      return TypeExpr(kind: TkUnion, members: @[then_type, else_type])
-  return then_type
+  self.check_conditional_branches(cond, then_expr, has_else, else_expr)
+
+proc is_infix_special_form(expr_type: Value): bool {.inline.} =
+  expr_type.kind == VkSymbol and expr_type.str in [
+    "var", "if", "ifel", "fn", "do", "loop", "while", "for", "ns", "class",
+    "try", "throw", "import", "export", "interface", "comptime", "type",
+    "object", "$", ".", "->", "@"
+  ]
 
 proc check_do(self: TypeChecker, gene: ptr Gene): TypeExpr =
   var last: TypeExpr = ANY_TYPE
@@ -2569,7 +2599,8 @@ proc check_expr(self: TypeChecker, v: Value): TypeExpr =
     if gene.`type`.kind == VkSymbol and gene.`type`.str == "@":
       return ANY_TYPE
     # Infix operators
-    if gene.children.len > 0 and gene.children[0].kind == VkSymbol:
+    if not is_infix_special_form(gene.`type`) and
+       gene.children.len > 0 and gene.children[0].kind == VkSymbol:
       let op = gene.children[0].str
       if op in ["=", "+", "-", "*", "/", "%", "++", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "+=", "-=", "*=", "/=", "%=", "?", "is"]:
         return self.check_infix(gene)
@@ -2609,6 +2640,8 @@ proc check_expr(self: TypeChecker, v: Value): TypeExpr =
         return self.check_export(gene)
       of "if":
         return self.check_if(gene)
+      of "ifel":
+        return self.check_ifel(gene)
       of "do":
         return self.check_do(gene)
       of "comptime":

@@ -100,6 +100,10 @@ proc compile_if(self: Compiler, gene: ptr Gene) =
 
   self.end_scope()
 
+proc compile_ifel(self: Compiler, gene: ptr Gene) =
+  normalize_ifel(gene)
+  self.compile_if(gene)
+
 proc compile_if_not(self: Compiler, gene: ptr Gene) =
   normalize_if_not(gene)
   # After normalization, if_not has the same cond/then/else props as if.

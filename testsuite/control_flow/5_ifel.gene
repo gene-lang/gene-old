@@ -1,0 +1,13 @@
+# ifel tests
+
+(println (ifel true "ifel true branch"))
+# Expected: ifel true branch
+
+(println (ifel false "unused" "ifel else branch"))
+# Expected: ifel else branch
+
+(println (ifel false "unused"))
+# Expected: nil
+
+(println "ifel tests completed")
+# Expected: ifel tests completed

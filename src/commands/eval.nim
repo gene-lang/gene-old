@@ -40,9 +40,9 @@ proc init*(manager: CommandManager) =
   manager.add_help("  --csv: print result as CSV")
   manager.add_help("  --gene: print result as gene expression")
   manager.add_help("  --line: evaluate as a single line")
-  manager.add_help("  --print-last: print the result of the last expression")
+  manager.add_help("  -p --print-last: print the result of the last expression")
 
-let short_no_val = {'d'}
+let short_no_val = {'d', 'p'}
 let long_no_val = @[
   "csv",
   "gene",
@@ -109,7 +109,7 @@ proc parse_options(args: seq[string]): Options =
         result.compile = true
       of "no-typecheck", "no-type-check":
         result.type_check = false
-      of "print-last":
+      of "p", "print-last":
         result.print_last = true
       of "native-code":
         result.native_code = true
