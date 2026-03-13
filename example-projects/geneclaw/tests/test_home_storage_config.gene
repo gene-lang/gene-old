@@ -42,6 +42,6 @@
 (assert (uploaded_root_result/found == true))
 (assert (uploaded_root_result/value == #"#{expected_home}/assets/uploaded"))
 (assert (db_path_result/found == false))
-(assert ((get_system_prompt) == "Prompt anthropic / gpt-5.1-mini / anthropic"))
+(assert (get_system_prompt/.call == "Prompt anthropic / gpt-5.1-mini / anthropic"))
 
 (println "ok")

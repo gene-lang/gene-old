@@ -1,7 +1,7 @@
 # GeneClaw Scheduler
 # Polls filesystem-backed job records for due work, dispatches them asynchronously, reports to Slack.
 
-(import SCHEDULER_TICK_MS SLACK_BOT_TOKEN from "config")
+(import CONFIG from "config")
 (import job_list_due job_mark_running job_mark_completed job_mark_failed job_update_next_run job_update_state from "db")
 (import compute_cron_next from "cron")
 (import run_agent from "agent")
@@ -23,14 +23,14 @@
     (var result (run_agent job/workspace_id job/user_id job/channel_id job/text (job/thread_ts || "")))
 
     # Report to Slack channel/thread if configured
-    (if (SLACK_BOT_TOKEN && job/channel_id)
+    (if (CONFIG/slack/bot_token && job/channel_id)
       (var reply (build_post_message_payload job/channel_id #"[Scheduled: #{job_id}] #{result/response}" (job/thread_ts || "")))
       (try
         (await (http_post "https://slack.com/api/chat.postMessage"
           reply/.to_json
           {
             ^Content-Type "application/json; charset=utf-8"
-            ^Authorization #"Bearer #{SLACK_BOT_TOKEN}"
+            ^Authorization #"Bearer #{CONFIG/slack/bot_token}"
           }))
         (log .info #"Slack report sent for job #{job_id}")
       catch *
@@ -40,15 +40,16 @@
 
     # Advance schedule
     (var now gene/now/.call/.to_i)
-    (if (job/schedule_type == "once")
+    (case job/schedule_type
+    when "once"
       (job_update_state job_id "completed")
       (log .info #"One-shot job #{job_id} completed")
-    elif (job/schedule_type == "interval")
+    when "interval"
       (var next (now + job/interval_ms))
       (job_mark_completed job_id)
       (job_update_next_run job_id next)
       (log .info #"Interval job #{job_id} next run at #{next}")
-    elif (job/schedule_type == "cron")
+    when "cron"
       (var next (compute_cron_next job/cron_expr now))
       (if next
         (job_mark_completed job_id)
@@ -79,7 +80,7 @@
   (try
     (var now gene/now/.call/.to_i)
     (var due_jobs (job_list_due now))
-    (if (due_jobs/.size > 0)
+    (if due_jobs/.not_empty?
       (log .info #"Scheduler tick: #{due_jobs/.size} job(s) due")
       (due_jobs .each (fn [job]
         (job_mark_running job/job_id)
@@ -96,9 +97,9 @@
 # Start — chain sleep_async callbacks inside run_forever
 # ------------------------------------------------------------------
 (fn $ns/start_scheduler []
-  (log .info #"Scheduler started (tick every #{SCHEDULER_TICK_MS}ms)")
+  (log .info #"Scheduler started (tick every #{CONFIG/scheduler/tick_ms}ms)")
   (fn tick_loop []
-    (var f (gene/sleep_async SCHEDULER_TICK_MS))
+    (var f (gene/sleep_async CONFIG/scheduler/tick_ms))
     (f .on_success (fn [_]
       (try
         (scheduler_tick)

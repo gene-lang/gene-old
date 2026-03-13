@@ -1,7 +1,7 @@
 # GeneClaw Tool Registry
 # Registry/orchestration; individual tools live in src/tools/*.gene
 
-(import WORKSPACE_ROOT DOCUMENT_ROOT ARTIFACT_ROOT from "config")
+(import CONFIG WORKSPACE_ROOT DOCUMENT_ROOT ARTIFACT_ROOT from "config")
 (import audit_log from "db")
 
 (import register_get_time_tool from "tools/get_time")
@@ -28,6 +28,18 @@
 # Tool registry: name -> {^description ^params ^handler}
 (var TOOLS {})
 
+(fn tool_result_success? [result]
+  (if (result is Map)
+    (result/ok || result/error/.empty?)
+  else
+    true
+  )
+)
+
+(fn tool_result_error [result fallback = "Tool returned an error"]
+  (result/error || fallback)
+)
+
 (fn $ns/register_tool [name description params handler]
   (TOOLS .set name {
     ^description description
@@ -39,7 +51,7 @@
 
 (fn $ns/invoke_tool [run_id workspace_id user_id channel_id thread_id session_id tool_name args]
   (log .info #"invoke_tool run=#{run_id} tool=#{tool_name}")
-  (var tool_args (if (args is Map) args else {}))
+  (var tool_args (ifel (args is Map) args {}))
   (if (args is Map)
     (log .debug #"invoke_tool args=#{tool_args/.to_json}")
   else
@@ -57,7 +69,7 @@
     ^session_id session_id
   })
 
-  (var tool (TOOLS .get tool_name))
+  (var tool TOOLS/<tool_name>)
   (if_not tool
     (log .warn #"Unknown tool requested: #{tool_name}")
     (audit_log run_id workspace_id tool_name "not_found" tool_args nil 0)
@@ -68,24 +80,24 @@
   (try
     (var result (tool/handler tool_args))
     (var duration (gene/now/.call/.to_i - start_ms))
-    (log .info #"Tool #{tool_name} succeeded in #{duration}ms")
-    (log .debug #"Tool #{tool_name} result=#{result/.to_json}")
-    (audit_log run_id workspace_id tool_name "success" tool_args result duration)
-    {^ok true ^result result}
+    (if (tool_result_success? result)
+      (log .info #"Tool #{tool_name} succeeded in #{duration}ms")
+      (log .debug #"Tool #{tool_name} result=#{result/.to_json}")
+      (audit_log run_id workspace_id tool_name "success" tool_args result duration)
+      {^ok true ^result result}
+    else
+      (var error_msg (tool_result_error result))
+      (log .warn #"Tool #{tool_name} returned failure in #{duration}ms: #{error_msg}")
+      (log .debug #"Tool #{tool_name} result=#{result/.to_json}")
+      (audit_log run_id workspace_id tool_name "failed" tool_args result duration)
+      {^ok false ^error error_msg ^result result}
+    )
   catch *
     (var duration (gene/now/.call/.to_i - start_ms))
     (log .error #"Tool #{tool_name} failed after #{duration}ms: #{$ex/message}")
     (audit_log run_id workspace_id tool_name "failed" tool_args {^error $ex/message} duration)
     {^ok false ^error #"Tool failed: #{$ex/message}"}
   )
-)
-
-(fn $ns/list_tools []
-  (var names [])
-  (TOOLS .each (fn [name _def]
-    (names .append name)
-  ))
-  names
 )
 
 # Build OpenAI-format tools array for native tool calling
@@ -121,7 +133,7 @@
   (register_read_file_tool register_tool log WORKSPACE_ROOT)
   (register_write_file_tool register_tool log WORKSPACE_ROOT)
   (register_http_get_tool register_tool log)
-  (register_browser_playwright_tool register_tool log WORKSPACE_ROOT)
+  (register_browser_playwright_tool register_tool log WORKSPACE_ROOT ARTIFACT_ROOT)
   (register_schedule_tool register_tool log)
   (register_self_upgrade_tool register_tool log)
   (register_web_search_tool register_tool log)

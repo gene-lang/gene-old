@@ -12,7 +12,7 @@
     (fn [args]
       (var path args/path)
       (var content args/content)
-      (if path/.empty
+      (if path/.empty?
         (return {^error "Missing path"})
       )
 

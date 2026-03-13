@@ -15,7 +15,7 @@
 (assert (history/1/content == "second"))
 (assert (history/2/role == "user"))
 (assert (history/2/content == "third"))
-(assert ((get_system_prompt) == "Prompt anthropic / gpt-5.1-mini / anthropic"))
+(assert (get_system_prompt/.call == "Prompt anthropic / gpt-5.1-mini / anthropic"))
 (assert (request/messages/0/content == "Prompt anthropic / gpt-5.1-mini / anthropic"))
 
 (println "ok")

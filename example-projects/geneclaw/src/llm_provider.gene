@@ -1,57 +1,36 @@
 # GeneClaw LLM provider adapters
 # Translates the internal agent format to provider-specific request/response shapes.
 
-(import LLM_PROVIDER OPENAI_API_KEY OPENAI_MODEL OPENAI_BASE_URL OPENAI_TIMEOUT_MS from "config")
-(import ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL ANTHROPIC_BASE_URL ANTHROPIC_TIMEOUT_MS from "config")
-(import DOCUMENT_MAX_UPLOAD_BYTES IMAGE_MAX_COUNT from "config")
+(import CONFIG from "config")
+(import ensure_array ensure_map from "config_helpers")
 (import get_system_prompt from "workspace_state")
 
 (var log (new genex/logging/Logger $ns))
 
-(fn ensure_array [value]
-  (if (value is Array) value else [])
-)
-
-(fn ensure_map [value]
-  (if (value is Map) value else {})
-)
-
 (fn parse_tool_arguments [args_json]
   (var parsed (try (gene/json/parse (args_json || "{}")) catch * nil))
-  (if (parsed is Map) parsed else {})
-)
-
-(fn blank_string? [value]
-  (var text (if value (value .to_s) else ""))
-  ((text .length) == 0)
+  (ifel (parsed is Map) parsed {})
 )
 
 (fn supported_image_mime? [mime_type]
-  (var normalized (((mime_type || "") .to_s) .to_lower))
-  (if ((normalized == "image/png") ||
-       (normalized == "image/jpeg") ||
-       (normalized == "image/jpg") ||
-       (normalized == "image/gif") ||
-       (normalized == "image/webp"))
-    true
-  else
-    false
-  )
+  ([
+    "image/png"
+    "image/jpeg"
+    "image/jpg"
+    "image/gif"
+    "image/webp"
+  ] .contains mime_type/.to_s/.to_lower)
 )
 
 (fn $ns/provider_supports_images? [provider = nil]
-  (var selected (((provider || LLM_PROVIDER) .to_s) .to_lower))
-  (if ((selected == "openai") || (selected == "anthropic"))
-    true
-  else
-    false
-  )
+  (var p (provider || CONFIG/llm/provider))
+  (["openai" "anthropic"] .contains p/.to_s/.to_lower)
 )
 
 (fn image_attachment_error [image_attachments provider = nil]
   (var images (ensure_array image_attachments))
-  (var selected_provider (((provider || LLM_PROVIDER) .to_s) .to_lower))
-  (if (images/.size == 0)
+  (var selected_provider (((provider || CONFIG/llm/provider) .to_s) .to_lower))
+  (if images/.empty?
     (return "")
   )
 
@@ -59,19 +38,19 @@
     (return #"The current model provider (#{selected_provider}) does not support image inputs.")
   )
 
-  (if (images/.size > IMAGE_MAX_COUNT)
-    (return #"This request includes #{images/.size} images, but the current limit is #{IMAGE_MAX_COUNT}.")
+  (if (images/.size > CONFIG/documents/max_image_count)
+    (return #"This request includes #{images/.size} images, but the current limit is #{CONFIG/documents/max_image_count}.")
   )
 
   (for image in images
-    (if (blank_string? image/local_path)
+    (if image/local_path/.empty?
       (return #"Image attachment #{(image/filename || image/document_id || "unknown")} is missing a local file path.")
     )
     (if_not (supported_image_mime? image/mime_type)
       (return #"Unsupported image type for #{(image/filename || image/document_id || "unknown")}: #{(image/mime_type || "unknown")}")
     )
-    (if (((image/byte_size || 0) > 0) && ((image/byte_size || 0) > DOCUMENT_MAX_UPLOAD_BYTES))
-      (return #"Image attachment #{(image/filename || image/document_id || "unknown")} exceeds #{DOCUMENT_MAX_UPLOAD_BYTES} bytes.")
+    (if (((image/byte_size || 0) > 0) && ((image/byte_size || 0) > CONFIG/documents/max_upload_bytes))
+      (return #"Image attachment #{(image/filename || image/document_id || "unknown")} exceeds #{CONFIG/documents/max_upload_bytes} bytes.")
     )
   )
 
@@ -80,7 +59,7 @@
 
 (fn $ns/validate_image_inputs [image_attachments provider = nil]
   (var error (image_attachment_error image_attachments provider))
-  (if (blank_string? error)
+  (if error/.empty?
     {^ok true ^error ""}
   else
     {^ok false ^error error}
@@ -89,7 +68,7 @@
 
 (fn read_image_base64 [image]
   (var existing (image/base64_data || ""))
-  (if_not (blank_string? existing)
+  (if existing/.not_empty?
     (return existing)
   )
   (var encoded (genex/ai/documents/file_to_base64 image/local_path))
@@ -116,12 +95,12 @@
 
 (fn build_openai_user_content [user_text image_attachments]
   (var images (ensure_array image_attachments))
-  (if (images/.size == 0)
+  (if images/.empty?
     (return user_text)
   )
 
   (var content [])
-  (if_not (blank_string? user_text)
+  (if user_text/.not_empty?
     (content .append {^type "text" ^text user_text})
   )
   (images .each (fn [image]
@@ -133,7 +112,7 @@
 (fn build_anthropic_user_blocks [user_text image_attachments]
   (var blocks [])
   (var images (ensure_array image_attachments))
-  (if_not (blank_string? user_text)
+  (if user_text/.not_empty?
     (blocks .append {^type "text" ^text user_text})
   )
   (images .each (fn [image]
@@ -210,7 +189,7 @@
 
 (fn $ns/build_openai_request [history user_text tools_spec image_attachments = []]
   (var messages [])
-  (messages .append {^role "system" ^content (get_system_prompt)})
+  (messages .append {^role "system" ^content get_system_prompt/.call})
 
   (history .each (fn [entry]
     (var msg {^role entry/role ^content (entry/content || "")})
@@ -260,7 +239,7 @@
     (if (entry/role == "tool")
       (do
         (var tool_use_id (entry/tool_call_id || ""))
-        (if_not tool_use_id/.empty
+        (if tool_use_id/.not_empty?
           (pending_tool_results .append (anthropic_tool_result_from_history entry))
         )
       )
@@ -273,7 +252,7 @@
 
         (var blocks [])
         (var text (entry/content || ""))
-        (if_not text/.empty
+        (if text/.not_empty?
           (blocks .append {^type "text" ^text text})
         )
 
@@ -284,14 +263,14 @@
           ))
         )
 
-        (if (blocks/.size > 0)
+        (if blocks/.not_empty?
           (messages .append {^role entry/role ^content blocks})
         )
       )
     )
   ))
 
-  (if (pending_tool_results/.size > 0)
+  (if pending_tool_results/.not_empty?
     (var final_blocks [])
     (pending_tool_results .each (fn [block]
       (final_blocks .append block)
@@ -299,12 +278,12 @@
     ((build_anthropic_user_blocks user_text image_attachments) .each (fn [block]
       (final_blocks .append block)
     ))
-    (if (final_blocks/.size > 0)
+    (if final_blocks/.not_empty?
       (messages .append {^role "user" ^content final_blocks})
     )
   else
     (var final_blocks (build_anthropic_user_blocks user_text image_attachments))
-    (if (final_blocks/.size > 0)
+    (if final_blocks/.not_empty?
       (messages .append {^role "user" ^content final_blocks})
     )
   )
@@ -319,7 +298,7 @@
   ))
 
   (var request {
-    ^system (get_system_prompt)
+    ^system get_system_prompt/.call
     ^messages (build_anthropic_messages history user_text image_attachments)
     ^tools tools
   })
@@ -329,10 +308,10 @@
 
 (fn $ns/normalize_openai_response [response]
   (var choices (try (response .get "choices" []) catch * []))
-  (if (choices/.size > 0)
+  (if choices/.not_empty?
     (var first_choice choices/0)
     (var msg first_choice/message)
-    (var content ((msg .get "content" "") .to_s))
+    (var content msg/content/.to_s)
     (var tool_calls (msg .get "tool_calls" []))
     (if_not tool_calls (tool_calls = []))
     (return {^content content ^tool_calls tool_calls})
@@ -348,9 +327,8 @@
   (blocks .each (fn [block]
     (var block_type (block/type || ""))
     (if (block_type == "text")
-      (var text (block/text || ""))
-      (if_not text/.empty
-        (text_parts .append text)
+      (if block/text
+        (text_parts .append block/text/.to_s)
       )
     elif (block_type == "tool_use")
       (var input_map (ensure_map (block/input || {})))
@@ -369,26 +347,40 @@
 )
 
 (fn provider_has_credentials []
-  (if (LLM_PROVIDER == "anthropic")
-    (return (not (ANTHROPIC_API_KEY/.empty && ANTHROPIC_AUTH_TOKEN/.empty)))
-  elif (LLM_PROVIDER == "openai")
-    (return (not OPENAI_API_KEY/.empty))
+  (if (CONFIG/llm/provider == "anthropic")
+    (CONFIG/llm/anthropic/api_key/.not_empty? || CONFIG/llm/anthropic/auth_token/.not_empty?)
+  elif (CONFIG/llm/provider == "openai")
+    CONFIG/llm/openai/api_key/.not_empty?
+  else
+    false
   )
-  false
 )
 
 (fn mock_mode_response []
-  (if (LLM_PROVIDER == "anthropic")
-    (return {^content "I received your message. (Running in mock mode - set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN to enable LLM)" ^tool_calls []})
-  elif (LLM_PROVIDER == "openai")
-    (return {^content "I received your message. (Running in mock mode - set OPENAI_API_KEY to enable LLM)" ^tool_calls []})
+  (if (CONFIG/llm/provider == "anthropic")
+    (return {^content "I received your message. (Running in mock mode - set CONFIG/llm/anthropic/api_key or CONFIG/llm/anthropic/auth_token to enable LLM)" ^tool_calls []})
+  elif (CONFIG/llm/provider == "openai")
+    (return {^content "I received your message. (Running in mock mode - set CONFIG/llm/openai/api_key to enable LLM)" ^tool_calls []})
   )
-  {^content #"Unsupported LLM provider: #{LLM_PROVIDER}" ^tool_calls []}
+  {^content #"Unsupported LLM provider: #{CONFIG/llm/provider}" ^tool_calls []}
 )
 
 (fn error_message_from_response [response]
   (try
-    (response/message || "")
+    (if (response is Map)
+      (do
+        (var error_value (response/error || nil))
+        (if (error_value is Map)
+          ((error_value/message || "") .to_s)
+        else
+          ""
+        )
+      )
+    elif ((response/type || "") == "error")
+      ((response/message || "") .to_s)
+    else
+      ""
+    )
   catch *
     ""
   )
@@ -396,10 +388,10 @@
 
 (fn call_openai [history user_text tools_spec image_attachments]
   (var request (build_openai_request history user_text tools_spec image_attachments))
-  (log .info #"Calling LLM provider=openai model=#{OPENAI_MODEL} messages=#{request/messages/.size} tools=#{request/tools/.size} timeout_ms=#{OPENAI_TIMEOUT_MS}")
-  (var client_opts {^api_key OPENAI_API_KEY ^model OPENAI_MODEL ^timeout_ms OPENAI_TIMEOUT_MS})
-  (if_not OPENAI_BASE_URL/.empty
-    (client_opts .set "base_url" OPENAI_BASE_URL)
+  (log .info #"Calling LLM provider=openai model=#{CONFIG/llm/openai/model} messages=#{request/messages/.size} tools=#{request/tools/.size} timeout_ms=#{CONFIG/llm/openai/timeout_ms}")
+  (var client_opts {^api_key CONFIG/llm/openai/api_key ^model CONFIG/llm/openai/model ^timeout_ms CONFIG/llm/openai/timeout_ms})
+  (if CONFIG/llm/openai/base_url/.not_empty?
+    (client_opts .set "base_url" CONFIG/llm/openai/base_url)
   )
   (var client (new OpenAIClient client_opts))
   (var response (client .chat request))
@@ -408,16 +400,16 @@
 
 (fn call_anthropic [history user_text tools_spec image_attachments]
   (var request (build_anthropic_request history user_text tools_spec image_attachments))
-  (log .info #"Calling LLM provider=anthropic model=#{ANTHROPIC_MODEL} messages=#{request/messages/.size} tools=#{request/tools/.size} timeout_ms=#{ANTHROPIC_TIMEOUT_MS}")
-  (var client_opts {^model ANTHROPIC_MODEL ^timeout_ms ANTHROPIC_TIMEOUT_MS})
-  (if_not ANTHROPIC_API_KEY/.empty
-    (client_opts .set "api_key" ANTHROPIC_API_KEY)
+  (log .info #"Calling LLM provider=anthropic model=#{CONFIG/llm/anthropic/model} messages=#{request/messages/.size} tools=#{request/tools/.size} timeout_ms=#{CONFIG/llm/anthropic/timeout_ms}")
+  (var client_opts {^model CONFIG/llm/anthropic/model ^timeout_ms CONFIG/llm/anthropic/timeout_ms})
+  (if CONFIG/llm/anthropic/api_key/.not_empty?
+    (client_opts .set "api_key" CONFIG/llm/anthropic/api_key)
   )
-  (if_not ANTHROPIC_AUTH_TOKEN/.empty
-    (client_opts .set "auth_token" ANTHROPIC_AUTH_TOKEN)
+  (if CONFIG/llm/anthropic/auth_token/.not_empty?
+    (client_opts .set "auth_token" CONFIG/llm/anthropic/auth_token)
   )
-  (if_not ANTHROPIC_BASE_URL/.empty
-    (client_opts .set "base_url" ANTHROPIC_BASE_URL)
+  (if CONFIG/llm/anthropic/base_url/.not_empty?
+    (client_opts .set "base_url" CONFIG/llm/anthropic/base_url)
   )
   (var client (new AnthropicClient client_opts))
   (var response (client .chat request))
@@ -427,24 +419,24 @@
 (fn $ns/call_llm [history user_text tools_spec image_attachments = []]
   (var images (ensure_array image_attachments))
   (var image_error (image_attachment_error images))
-  (if_not (blank_string? image_error)
+  (if image_error/.not_empty?
     (log .warn #"Image input rejected: #{image_error}")
     (return {^content image_error ^tool_calls []})
   )
 
   (if_not (provider_has_credentials)
     (if (images/.size > 0)
-      (log .warn #"LLM image call rejected in mock mode (provider=#{LLM_PROVIDER})")
-      (return {^content #"Image inputs require configured #{(if (LLM_PROVIDER == "anthropic") "Anthropic" elif (LLM_PROVIDER == "openai") "OpenAI" else "LLM")} credentials." ^tool_calls []})
+      (log .warn #"LLM image call rejected in mock mode (provider=#{CONFIG/llm/provider})")
+      (return {^content #"Image inputs require configured #{(if (CONFIG/llm/provider == "anthropic") "Anthropic" elif (CONFIG/llm/provider == "openai") "OpenAI" else "LLM")} credentials." ^tool_calls []})
     )
-    (log .info #"LLM call skipped (mock mode - provider=#{LLM_PROVIDER})")
+    (log .info #"LLM call skipped (mock mode - provider=#{CONFIG/llm/provider})")
     (return (mock_mode_response))
   )
 
   (if genex/ai
     (try
       (var start_ms gene/now/.call/.to_i)
-      (var call_result (if (LLM_PROVIDER == "anthropic")
+      (var call_result (if (CONFIG/llm/provider == "anthropic")
         (call_anthropic history user_text tools_spec images)
       else
         (call_openai history user_text tools_spec images)
@@ -453,12 +445,12 @@
       (var duration (gene/now/.call/.to_i - start_ms))
       (var response call_result/response)
       (var error_message (error_message_from_response response))
-      (if_not error_message/.empty
+      (if error_message/.not_empty?
         (log .error #"LLM call failed: #{error_message}")
         (return {^content #"LLM error: #{error_message}" ^tool_calls []})
       )
       (var normalized call_result/normalized)
-      (log .info #"LLM responded in #{duration}ms provider=#{LLM_PROVIDER} content_len=#{normalized/content/.size} tool_calls=#{normalized/tool_calls/.size}")
+      (log .info #"LLM responded in #{duration}ms provider=#{CONFIG/llm/provider} content_len=#{normalized/content/.size} tool_calls=#{normalized/tool_calls/.size}")
       (log .trace #"LLM response: #{normalized/content}")
       normalized
     catch *

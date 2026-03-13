@@ -140,6 +140,14 @@ test_vm """
 """, false
 
 test_vm """
+  ("abc" .not_empty?)
+""", true
+
+test_vm """
+  ("" .not_empty?)
+""", false
+
+test_vm """
   ("abc" .start_with? "ab")
 """, true
 

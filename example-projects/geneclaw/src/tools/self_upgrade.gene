@@ -1,7 +1,7 @@
 # GeneClaw tool: self_upgrade
 # Create temp git branch/worktree, pause old instance, boot new instance, cut over by killing old pid on port.
 
-(import PORT UPGRADE_HEALTH_ATTEMPTS UPGRADE_HEALTH_INTERVAL_MS from "config")
+(import CONFIG from "config")
 (import pause resume from "hotswap_state")
 
 (fn register_and_check [cmd]
@@ -27,12 +27,12 @@
       )
 
       (var reason ((args .get "reason" "") .to_s))
-      (if reason/.empty
+      (if reason/.empty?
         (return {^ok false ^error "Missing reason"})
       )
 
-      (var old_port PORT)
-      (var new_port (PORT + 1))
+      (var old_port CONFIG/port)
+      (var new_port (CONFIG/port + 1))
       (var ts gene/now/.call/.to_i)
       (var upgrade_branch #"geneclaw-upgrade-#{ts}")
       (var upgrade_dir #"/tmp/geneclaw-upgrade-#{ts}")
@@ -44,7 +44,7 @@
         (register_and_check "git rev-parse --is-inside-work-tree >/dev/null 2>&1")
         (var branch_res (register_and_check "git branch --show-current"))
         (current_branch = branch_res/output/.trim)
-        (if current_branch/.empty
+        (if current_branch/.empty?
           (throw "Could not determine current git branch")
         )
 
@@ -69,9 +69,9 @@
         (var healthy false)
         (var attempts 0)
         (loop
-          (if (attempts >= UPGRADE_HEALTH_ATTEMPTS) (break))
+          (if (attempts >= CONFIG/hotswap/upgrade_health_attempts) (break))
           (attempts += 1)
-          (gene/sleep UPGRADE_HEALTH_INTERVAL_MS)
+          (gene/sleep CONFIG/hotswap/upgrade_health_interval_ms)
           (try
             (var resp (genex/http/http_get #"http://localhost:#{new_port}/health"))
             (if (resp/status == 200)
@@ -108,7 +108,7 @@
           nil
         )
         (try
-          (if_not current_branch/.empty
+          (if current_branch/.not_empty?
             (system/shell #"git checkout #{current_branch}")
           )
         catch *

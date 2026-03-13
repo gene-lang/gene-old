@@ -1,7 +1,7 @@
 # GeneClaw session and state storage
 
 (import load_system_prompt_value interpolate_value read_session_record write_session_record from "home_store")
-(import blank_string? from "config_helpers")
+
 
 (var log (new genex/logging/Logger $ns))
 (var SESSION_CACHE {})
@@ -61,12 +61,12 @@
   (var resolved_thread "")
 
   (if (parts/.size >= 1)
-    (if_not (blank_string? parts/0)
+    (if parts/0/.not_empty?
       (resolved_workspace = parts/0)
     )
   )
   (if (parts/.size >= 2)
-    (if_not (blank_string? parts/1)
+    (if parts/1/.not_empty?
       (resolved_channel = parts/1)
     )
   )
@@ -189,12 +189,12 @@
   (var source (if session session else {}))
   (var raw_session_id (canonical_session_id session_id))
   (var source_session_id (canonical_session_id (session_text source "session_id" "")))
-  (var resolved_session_id (if (blank_string? raw_session_id) source_session_id else raw_session_id))
+  (var resolved_session_id (if raw_session_id/.empty? source_session_id else raw_session_id))
   (var parsed (split_session_id resolved_session_id workspace_id))
   {
     ^session_id resolved_session_id
-    ^workspace_id (if (blank_string? (session_text source "workspace_id" "")) parsed/workspace_id else (session_text source "workspace_id" ""))
-    ^channel_id (if (blank_string? (session_text source "channel_id" "")) parsed/channel_id else (session_text source "channel_id" ""))
+    ^workspace_id (if (session_text source "workspace_id" "")/.empty? parsed/workspace_id else (session_text source "workspace_id" ""))
+    ^channel_id (if (session_text source "channel_id" "")/.empty? parsed/channel_id else (session_text source "channel_id" ""))
     ^thread_id (session_text source "thread_id" parsed/thread_id)
     ^updated_at_ms (session_number source "updated_at_ms" 0)
     ^documents (normalize_document_refs (session_collection source "documents" []))
@@ -224,9 +224,9 @@
   (var incoming_session (normalize_session session_id incoming))
   {
     ^session_id incoming_session/session_id
-    ^workspace_id (if (blank_string? incoming_session/workspace_id) current_session/workspace_id else incoming_session/workspace_id)
-    ^channel_id (if (blank_string? incoming_session/channel_id) current_session/channel_id else incoming_session/channel_id)
-    ^thread_id (if (blank_string? incoming_session/thread_id) current_session/thread_id else incoming_session/thread_id)
+    ^workspace_id (if incoming_session/workspace_id/.empty? current_session/workspace_id else incoming_session/workspace_id)
+    ^channel_id (if incoming_session/channel_id/.empty? current_session/channel_id else incoming_session/channel_id)
+    ^thread_id (if incoming_session/thread_id/.empty? current_session/thread_id else incoming_session/thread_id)
     ^updated_at_ms (if (incoming_session/updated_at_ms >= current_session/updated_at_ms) incoming_session/updated_at_ms else current_session/updated_at_ms)
     ^documents (merge_document_ref_collections current_session/documents incoming_session/documents)
     ^memory (merge_memory_entries current_session/memory incoming_session/memory)
@@ -264,7 +264,7 @@
 )
 
 (fn $ns/get_system_prompt []
-  (var prompt (load_system_prompt_value))
+  (var prompt load_system_prompt_value/.call)
   (var resolved (interpolate_value (if prompt (prompt .to_s) else "")))
   (if (resolved is String)
     resolved
@@ -308,7 +308,7 @@
     ^created_at_ms now
   })
   (session/memory = entries)
-  (session/workspace_id = (if workspace_id then workspace_id else (session/workspace_id || "default")))
+  (session/workspace_id = (workspace_id || session/workspace_id || "default"))
   (session/updated_at_ms = now)
   session
 )

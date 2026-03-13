@@ -95,6 +95,44 @@ test_vm """
   )
 """, 2
 
+test_vm """
+  (ifel true
+    1
+  )
+""", 1
+
+test_vm """
+  (ifel false
+    1
+  )
+""", NIL
+
+test_vm """
+  (ifel true
+    1
+    2
+  )
+""", 1
+
+test_vm """
+  (ifel false
+    1
+    2
+  )
+""", 2
+
+test_vm_error """
+  (ifel true)
+"""
+
+test_vm_error """
+  (ifel true
+    1
+    2
+    3
+  )
+"""
+
 test_vm_error """
   (if_not false
     1

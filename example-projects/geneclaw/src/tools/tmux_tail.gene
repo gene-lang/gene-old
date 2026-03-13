@@ -13,7 +13,7 @@
       (var target args/target)
       (var lines (args/lines || 50))
 
-      (if target/.empty
+      (if target/.empty?
         (return {^error "Missing target"})
       )
 

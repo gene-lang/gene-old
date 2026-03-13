@@ -1,7 +1,7 @@
 # GeneClaw Agent Orchestrator
 # Provider-agnostic tool calling: provider translation lives in llm_provider.gene
 
-(import MAX_STEPS MAX_TOOL_CALLS from "config")
+(import CONFIG from "config")
 (import run_create run_complete from "db")
 (import invoke_tool build_tools_spec from "tools")
 (import is_paused check_pause_timeout get_pause_status from "hotswap_state")
@@ -18,8 +18,8 @@
 )
 
 (fn $ns/build_session_id [workspace_id channel_id thread_id = ""]
-  (var thread_part (if thread_id then (thread_id .to_s) else ""))
-  (if ((thread_part .length) > 0)
+  (var thread_part thread_id/.to_s)
+  (if thread_part/.not_empty?
     #"#{workspace_id}:#{channel_id}:#{thread_part}"
   else
     #"#{workspace_id}:#{channel_id}"
@@ -35,13 +35,13 @@
   (var text initial_text)
 
   (loop
-    (if (step >= MAX_STEPS)
-      (log .warn #"#{run_id} hit MAX_STEPS limit (#{MAX_STEPS})")
+    (if (step >= CONFIG/llm/max_steps)
+      (log .warn #"#{run_id} hit CONFIG/llm/max_steps limit (#{CONFIG/llm/max_steps})")
       (final_response = "Agent reached maximum step limit.")
       (break)
     )
     (step += 1)
-    (log .info #"#{run_id} step #{step}/#{MAX_STEPS}")
+    (log .info #"#{run_id} step #{step}/#{CONFIG/llm/max_steps}")
 
     # Build provider request and call the selected LLM provider
     (var result (call_llm history text tools_spec image_attachments))
@@ -56,8 +56,8 @@
     )
 
     # Dispatch each tool call
-    (if (tool_call_count >= MAX_TOOL_CALLS)
-      (log .warn #"#{run_id} hit MAX_TOOL_CALLS limit (#{MAX_TOOL_CALLS})")
+    (if (tool_call_count >= CONFIG/llm/max_tool_calls)
+      (log .warn #"#{run_id} hit CONFIG/llm/max_tool_calls limit (#{CONFIG/llm/max_tool_calls})")
       (final_response = "Agent reached maximum tool call limit.")
       (break)
     )
@@ -70,7 +70,7 @@
       (var fn_info tc/function)
       (var tool_name fn_info/name)
       (var tool_args_str fn_info/arguments)
-      (log .info #"#{run_id} dispatching tool #{tool_call_count}/#{MAX_TOOL_CALLS}: #{tool_name}")
+      (log .info #"#{run_id} dispatching tool #{tool_call_count}/#{CONFIG/llm/max_tool_calls}: #{tool_name}")
 
       # Parse arguments JSON string; coerce to map for tool handlers.
       (var parsed_args (try (gene/json/parse tool_args_str) catch * nil))
@@ -200,7 +200,7 @@
       (save_session session_id session)
     )
     (run_complete run_id "failed" $ex/message)
-    (throw $ex/message)
+    (throw $ex)
   )
 )
 

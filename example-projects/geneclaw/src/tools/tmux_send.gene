@@ -15,10 +15,10 @@
       (var text args/text)
       (var enter (if (args/enter == false) false else true))
 
-      (if target/.empty
+      (if target/.empty?
         (return {^error "Missing target"})
       )
-      (if text/.empty
+      (if text/.empty?
         (return {^error "Missing text"})
       )
 

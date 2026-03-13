@@ -13,6 +13,14 @@ test_vm """
 """, 2
 
 test_vm """
+  ({} .empty?)
+""", true
+
+test_vm """
+  ({^a 1} .not_empty?)
+""", true
+
+test_vm """
   (fn toValue [k v] v)
   ({} .map toValue)
 """, proc(result: Value) =

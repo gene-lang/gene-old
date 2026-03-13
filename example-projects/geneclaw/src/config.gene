@@ -1,9 +1,10 @@
 # GeneClaw configuration
-# Non-sensitive config is loaded from GENECLAW_HOME/config.
+# Resolves config from schema + env, exports a single CONFIG map.
+# Consumers access values via paths: CONFIG/llm/provider, CONFIG/slack/bot_token, etc.
 
 (import GENECLAW_HOME HOME_CONFIG_PATH HOME_STATE_PATH HOME_WORKSPACE_PATH SESSIONS_PATH SCHEDULER_PATH JOBS_PATH RUNS_PATH ASSETS_ROOT FILES_ROOT DOCUMENT_ROOT ARTIFACT_ROOT LOGS_PATH ARCHIVE_PATH TMP_PATH ensure_home_bootstrap load_home_config_raw interpolate_value from "home_store")
 (import CONFIG_SCHEMA from "config_schema")
-(import blank_string? ensure_map lookup_path set_path_value resolve_config_from_schema build_public_config_from_schema secret_configured:helper_secret_configured redact_secret:helper_redact_secret render_public_config_value:helper_render_public_config_value from "config_helpers")
+(import ensure_map lookup_path set_path_value resolve_config_from_schema build_public_config_from_schema secret_configured:helper_secret_configured redact_secret:helper_redact_secret render_public_config_value:helper_render_public_config_value from "config_helpers")
 
 (var $ns/log (new genex/logging/Logger $ns))
 
@@ -12,37 +13,18 @@
 (var RAW_HOME_CONFIG (load_home_config_raw))
 (var HOME_CONFIG (ensure_map (interpolate_value RAW_HOME_CONFIG)))
 (var EFFECTIVE_CONFIG (resolve_config_from_schema CONFIG_SCHEMA HOME_CONFIG ^env $env))
-(var HOME_ROOT GENECLAW_HOME)
-(var CONFIG_ROOT HOME_CONFIG_PATH)
-(var STATE_ROOT HOME_STATE_PATH)
-(var SESSIONS_ROOT SESSIONS_PATH)
-(var SCHEDULER_ROOT SCHEDULER_PATH)
-(var JOB_ROOT JOBS_PATH)
-(var RUN_ROOT RUNS_PATH)
-(var HOME_ASSETS_ROOT ASSETS_ROOT)
-(var HOME_LOG_ROOT LOGS_PATH)
-(var HOME_ARCHIVE_ROOT ARCHIVE_PATH)
-(var HOME_TMP_ROOT TMP_PATH)
-(var HOME_FILES_ROOT FILES_ROOT)
-(var HOME_DOCUMENT_ROOT DOCUMENT_ROOT)
-(var HOME_ARTIFACT_ROOT ARTIFACT_ROOT)
 
-($ns/GENECLAW_HOME = HOME_ROOT)
-($ns/HOME_CONFIG_PATH = CONFIG_ROOT)
-($ns/HOME_STATE_PATH = STATE_ROOT)
-($ns/HOME_WORKSPACE_PATH = HOME_WORKSPACE_PATH)
-($ns/SESSIONS_PATH = SESSIONS_ROOT)
-($ns/SCHEDULER_PATH = SCHEDULER_ROOT)
-($ns/JOBS_PATH = JOB_ROOT)
-($ns/RUNS_PATH = RUN_ROOT)
-($ns/ASSETS_ROOT = HOME_ASSETS_ROOT)
-($ns/LOGS_PATH = HOME_LOG_ROOT)
-($ns/ARCHIVE_PATH = HOME_ARCHIVE_ROOT)
-($ns/TMP_PATH = HOME_TMP_ROOT)
-($ns/WORKSPACE_ROOT = HOME_FILES_ROOT)
-($ns/DOCUMENT_ROOT = HOME_DOCUMENT_ROOT)
-($ns/ARTIFACT_ROOT = HOME_ARTIFACT_ROOT)
+# ── Canonical config export ───────────────────────────────────
+# All resolved config values live here. Access via path:
+#   CONFIG/port
+#   CONFIG/llm/provider
+#   CONFIG/llm/openai/api_key
+#   CONFIG/slack/bot_token
+#   CONFIG/documents/max_upload_bytes
+($ns/CONFIG = EFFECTIVE_CONFIG)
 
+# Keep scalar exports for compatibility while treating CONFIG as the
+# canonical source of truth for new code.
 ($ns/PORT = EFFECTIVE_CONFIG/port)
 
 ($ns/LLM_PROVIDER = EFFECTIVE_CONFIG/llm/provider)
@@ -65,8 +47,8 @@
 ($ns/SLACK_SIGNING_SECRET = EFFECTIVE_CONFIG/slack/signing_secret)
 ($ns/SLACK_BOT_TOKEN = EFFECTIVE_CONFIG/slack/bot_token)
 ($ns/SLACK_APP_TOKEN = EFFECTIVE_CONFIG/slack/app_token)
-($ns/BRAVE_API_KEY = EFFECTIVE_CONFIG/search/brave_api_key)
 ($ns/SLACK_AGENTX_TOKEN = EFFECTIVE_CONFIG/slack/agentx_token)
+($ns/BRAVE_API_KEY = EFFECTIVE_CONFIG/search/brave_api_key)
 
 ($ns/DOCUMENT_MAX_UPLOAD_BYTES = EFFECTIVE_CONFIG/documents/max_upload_bytes)
 ($ns/DOCUMENT_MAX_INLINE_CHARS = EFFECTIVE_CONFIG/documents/max_inline_chars)
@@ -79,7 +61,25 @@
 ($ns/UPGRADE_HEALTH_ATTEMPTS = EFFECTIVE_CONFIG/hotswap/upgrade_health_attempts)
 ($ns/UPGRADE_HEALTH_INTERVAL_MS = EFFECTIVE_CONFIG/hotswap/upgrade_health_interval_ms)
 
-($ns/CONFIG = EFFECTIVE_CONFIG)
+# ── Directory paths (from home_store) ─────────────────────────
+# These are filesystem layout, not user config — kept as named exports.
+($ns/GENECLAW_HOME = GENECLAW_HOME)
+($ns/HOME_CONFIG_PATH = HOME_CONFIG_PATH)
+($ns/HOME_STATE_PATH = HOME_STATE_PATH)
+($ns/HOME_WORKSPACE_PATH = HOME_WORKSPACE_PATH)
+($ns/SESSIONS_PATH = SESSIONS_PATH)
+($ns/SCHEDULER_PATH = SCHEDULER_PATH)
+($ns/JOBS_PATH = JOBS_PATH)
+($ns/RUNS_PATH = RUNS_PATH)
+($ns/ASSETS_ROOT = ASSETS_ROOT)
+($ns/LOGS_PATH = LOGS_PATH)
+($ns/ARCHIVE_PATH = ARCHIVE_PATH)
+($ns/TMP_PATH = TMP_PATH)
+($ns/WORKSPACE_ROOT = FILES_ROOT)
+($ns/DOCUMENT_ROOT = DOCUMENT_ROOT)
+($ns/ARTIFACT_ROOT = ARTIFACT_ROOT)
+
+# ── Public config helpers ─────────────────────────────────────
 
 (fn $ns/secret_configured [value]
   (helper_secret_configured value)
@@ -107,7 +107,7 @@
   (set_path_value public_config "home/archive_root" ARCHIVE_PATH)
   (set_path_value public_config "home/tmp_root" TMP_PATH)
   (set_path_value public_config "workspace/state_root" HOME_STATE_PATH)
-  (set_path_value public_config "workspace/root" WORKSPACE_ROOT)
+  (set_path_value public_config "workspace/root" FILES_ROOT)
   (set_path_value public_config "workspace/document_root" DOCUMENT_ROOT)
   (set_path_value public_config "workspace/artifact_root" ARTIFACT_ROOT)
   (set_path_value public_config "assets/uploaded_root" DOCUMENT_ROOT)
@@ -136,14 +136,15 @@
   )
 )
 
+# ── Startup logging ───────────────────────────────────────────
 (log .info #"HOME root=#{GENECLAW_HOME} config=#{HOME_CONFIG_PATH} state=#{HOME_STATE_PATH} sessions=#{SESSIONS_PATH} tmp=#{TMP_PATH}")
-(log .info #"LLM provider=#{LLM_PROVIDER} thinking=#{THINKING_LEVEL} context=#{CONTEXT_SIZE} steps=#{MAX_STEPS} tool_calls=#{MAX_TOOL_CALLS}")
-(log .info #"OpenAI model=#{OPENAI_MODEL} timeout_ms=#{OPENAI_TIMEOUT_MS} configured=#{(secret_configured OPENAI_API_KEY)}")
-(log .info #"Anthropic model=#{ANTHROPIC_MODEL} timeout_ms=#{ANTHROPIC_TIMEOUT_MS} configured=#{((secret_configured ANTHROPIC_API_KEY) || (secret_configured ANTHROPIC_AUTH_TOKEN))}")
-(log .info #"Documents upload_bytes=#{DOCUMENT_MAX_UPLOAD_BYTES} inline_chars=#{DOCUMENT_MAX_INLINE_CHARS} image_max=#{IMAGE_MAX_COUNT}")
-(log .info #"Scheduler tick_ms=#{SCHEDULER_TICK_MS} hotswap pause_timeout_ms=#{PAUSE_TIMEOUT_MS} pause_check_interval_ms=#{PAUSE_CHECK_INTERVAL_MS}")
-(if (blank_string? SLACK_APP_TOKEN)
-  (if (blank_string? SLACK_BOT_TOKEN)
+(log .info #"LLM provider=#{CONFIG/llm/provider} thinking=#{CONFIG/llm/thinking_level} context=#{CONFIG/llm/context_size} steps=#{CONFIG/llm/max_steps} tool_calls=#{CONFIG/llm/max_tool_calls}")
+(log .info #"OpenAI model=#{CONFIG/llm/openai/model} timeout_ms=#{CONFIG/llm/openai/timeout_ms} configured=#{(secret_configured CONFIG/llm/openai/api_key)}")
+(log .info #"Anthropic model=#{CONFIG/llm/anthropic/model} timeout_ms=#{CONFIG/llm/anthropic/timeout_ms} configured=#{((secret_configured CONFIG/llm/anthropic/api_key) || (secret_configured CONFIG/llm/anthropic/auth_token))}")
+(log .info #"Documents upload_bytes=#{CONFIG/documents/max_upload_bytes} inline_chars=#{CONFIG/documents/max_inline_chars} image_max=#{CONFIG/documents/max_image_count}")
+(log .info #"Scheduler tick_ms=#{CONFIG/scheduler/tick_ms} hotswap pause_timeout_ms=#{CONFIG/hotswap/pause_timeout_ms} pause_check_interval_ms=#{CONFIG/hotswap/pause_check_interval_ms}")
+(if CONFIG/slack/app_token/.empty?
+  (if CONFIG/slack/bot_token/.empty?
     (log .debug "Slack integration not configured")
   else
     (log .info "Slack Webhook Mode enabled")

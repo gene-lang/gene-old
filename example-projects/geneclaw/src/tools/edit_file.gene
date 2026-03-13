@@ -15,7 +15,7 @@
       (var old_text args/old_text)
       (var new_text args/new_text)
 
-      (if path/.empty
+      (if path/.empty?
         (return {^error "Missing path"})
       )
       (if (path .include? "..")

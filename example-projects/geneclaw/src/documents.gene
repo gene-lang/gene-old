@@ -1,6 +1,6 @@
 # GeneClaw document ingestion and prompt shaping
 
-(import WORKSPACE_ROOT DOCUMENT_ROOT ARTIFACT_ROOT DOCUMENT_MAX_UPLOAD_BYTES DOCUMENT_MAX_INLINE_CHARS SLACK_BOT_TOKEN from "config")
+(import CONFIG WORKSPACE_ROOT DOCUMENT_ROOT ARTIFACT_ROOT from "config")
 (import document_record_path from "home_store")
 (import document_save from "db")
 
@@ -24,10 +24,7 @@
   (sanitize_component value "upload.bin")
 )
 
-(fn blank_string? [value]
-  (var text (if value (value .to_s) else ""))
-  ((text .length) == 0)
-)
+
 
 (fn filename_extension [filename]
   (var parts (((filename || "") .to_s) .split "."))
@@ -131,18 +128,18 @@
   (var download_url (attachment_download_url resolved))
   (var missing_fields false)
 
-  (if ((blank_string? download_url) ||
-       (blank_string? resolved/filename) ||
-       (blank_string? resolved/mime_type) ||
+  (if (download_url/.empty? ||
+       resolved/filename/.empty? ||
+       resolved/mime_type/.empty? ||
        ((resolved/size || 0) == 0))
     (missing_fields = true)
   )
 
   (if (missing_fields &&
-       ((blank_string? resolved/file_id) == false) &&
-       ((blank_string? SLACK_BOT_TOKEN) == false))
+       resolved/file_id/.not_empty? &&
+       CONFIG/slack/bot_token/.not_empty?)
     (try
-      (var info (genex/ai/slack_file_info SLACK_BOT_TOKEN resolved/file_id))
+      (var info (genex/ai/slack_file_info CONFIG/slack/bot_token resolved/file_id))
       (resolved/file_id = (info/file_id || resolved/file_id))
       (resolved/filename = (info/filename || resolved/filename))
       (resolved/title = (info/title || resolved/title))
@@ -196,26 +193,26 @@
   })
   (var chunks [])
 
-  (if (blank_string? SLACK_BOT_TOKEN)
-    (record/error = "SLACK_BOT_TOKEN is required for document download")
+  (if CONFIG/slack/bot_token/.empty?
+    (record/error = "CONFIG/slack/bot_token is required for document download")
     (document_save record chunks "inbound")
     (return record)
   )
 
-  (if (blank_string? resolved/file_id)
+  (if resolved/file_id/.empty?
     (record/error = "Slack attachment is missing file_id")
     (document_save record chunks "inbound")
     (return record)
   )
 
-  (if (blank_string? (attachment_download_url resolved))
+  (if (attachment_download_url resolved)/.empty?
     (record/error = "Slack attachment is missing download URL")
     (document_save record chunks "inbound")
     (return record)
   )
 
-  (if ((declared_size > 0) && (declared_size > DOCUMENT_MAX_UPLOAD_BYTES))
-    (record/error = #"Upload exceeds #{DOCUMENT_MAX_UPLOAD_BYTES} bytes")
+  (if ((declared_size > 0) && (declared_size > CONFIG/documents/max_upload_bytes))
+    (record/error = #"Upload exceeds #{CONFIG/documents/max_upload_bytes} bytes")
     (document_save record chunks "inbound")
     (return record)
   )
@@ -228,7 +225,7 @@
 
   (try
     (system/shell #"mkdir -p '#{local_dir}'")
-    (var transfer (genex/ai/slack_download_file SLACK_BOT_TOKEN (attachment_download_url resolved) local_path))
+    (var transfer (genex/ai/slack_download_file CONFIG/slack/bot_token (attachment_download_url resolved) local_path))
     (record/byte_size = (transfer/byte_size || record/byte_size || 0))
     (record/sha256 = (transfer/sha256 || ""))
     (record/local_path = (transfer/path || local_path))
@@ -237,7 +234,7 @@
       (record/status = "staged")
     else
       (var text (extract_document_text record/local_path filename mime_type))
-      (if (blank_string? text)
+      (if text/.empty?
         (record/status = "failed")
         (record/error = "No extractable text found")
       else
@@ -298,7 +295,7 @@
 
 (fn $ns/build_document_context_text [documents]
   (var lines ["Attached documents:"])
-  (var remaining DOCUMENT_MAX_INLINE_CHARS)
+  (var remaining CONFIG/documents/max_inline_chars)
   (var index 0)
 
   (for doc in documents
@@ -307,7 +304,7 @@
       (lines .append #"#{index}. #{doc/filename} (#{doc/byte_size} bytes, document_id=#{doc/document_id})")
       (if (remaining > 0)
         (var excerpt (document_excerpt doc/extracted_text remaining))
-        (if_not (blank_string? excerpt)
+        (if excerpt/.not_empty?
           (lines .append #"   Excerpt: #{excerpt}")
           (remaining -= excerpt/.length)
         )
@@ -333,7 +330,7 @@
 (fn $ns/append_document_notices [response notices]
   (if (notices/.size == 0)
     response
-  elif (blank_string? response)
+  elif response/.empty?
     (build_document_notice_response notices)
   else
     #"#{response}\n\nAttachment notices:\n- #{(notices .join "\n- ")}"
@@ -352,8 +349,8 @@
   (var notices (if (ingest/notices is Array) ingest/notices else []))
   (var image_count (image_attachment_count ingest))
 
-  (if (blank_string? text)
-    (if (blank_string? context)
+  (if text/.empty?
+    (if context/.empty?
       (if (notices/.size > 0)
         (parts .append "The user uploaded one or more files, but GeneClaw could not prepare all of them. Explain what happened clearly.")
       elif (image_count > 0)
@@ -369,7 +366,7 @@
   (if (image_count > 0)
     (parts .append #"The current request includes #{image_count} image attachment(s). Analyze the attached images directly.")
   )
-  (if_not (blank_string? context)
+  (if context/.not_empty?
     (parts .append context)
   )
   (if (notices/.size > 0)
@@ -383,7 +380,7 @@
   (var names [])
   (for doc in documents
     (if (((doc/status == "extracted") || (doc/status == "staged") || (doc/status == "uploaded")) &&
-         ((blank_string? doc/filename) == false))
+         doc/filename/.not_empty?)
       (names .append doc/filename)
     )
   )
@@ -396,7 +393,7 @@
   (var names (successful_attachment_names documents))
   (var parts [])
 
-  (if_not (blank_string? text)
+  (if text/.not_empty?
     (parts .append text)
   )
 
@@ -415,11 +412,11 @@
 
 (fn $ns/record_outbound_document [session_id workspace_id role upload_result meta]
   (var real_path (upload_result/real_path || ""))
-  (if (blank_string? real_path)
+  (if real_path/.empty?
     (return nil)
   )
 
-  (var resolved_role (if role then role else "outbound"))
+  (var resolved_role (role || "outbound"))
   (var document_id (make_document_id))
   (var path_parts (real_path .split "/"))
   (var filename "artifact.bin")

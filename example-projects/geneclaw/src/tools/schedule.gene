@@ -23,12 +23,12 @@
      ^required ["action"]}
     (fn [args]
       (var action args/action)
-      (var ctx (args .get "_context" {}))
+      (var ctx (args/_context || {}))
 
       (if (action == "create")
         (var stype (args .get "type" "once"))
         (var text (args .get "text" ""))
-        (if text/.empty
+        (if text/.empty?
           (return {^error "Missing 'text' for scheduled job"})
         )
         (var workspace_id (ctx .get "workspace_id" "default"))
@@ -51,7 +51,7 @@
           (next_run_ms = (now + delay))
         elif (stype == "cron")
           (cron_expr = (args .get "cron" ""))
-          (if cron_expr/.empty
+          (if cron_expr/.empty?
             (return {^error "Missing 'cron' expression for cron job"})
           )
           (var next (compute_cron_next cron_expr now))
@@ -79,14 +79,16 @@
 
       elif (action == "get")
         (var jid args/job_id)
-        (if jid/.empty (return {^error "Missing job_id"}))
+        (if jid/.empty? (return {^error "Missing job_id"}))
         (var job (job_get jid))
-        (if job then {^ok true ^job job}
-        else {^ok false ^error #"Job not found: #{jid}"})
+        (if job
+          {^ok true ^job job}
+        else
+          {^ok false ^error #"Job not found: #{jid}"})
 
       elif ((action == "cancel") || (action == "pause") || (action == "resume"))
         (var jid args/job_id)
-        (if jid/.empty (return {^error "Missing job_id"}))
+        (if jid/.empty? (return {^error "Missing job_id"}))
         (var new_state (if (action == "cancel") "cancelled"
                        elif (action == "pause") "paused"
                        else "active"))

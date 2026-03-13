@@ -1,6 +1,6 @@
 # GeneClaw tool: web_search
 
-(import BRAVE_API_KEY from "config")
+(import CONFIG from "config")
 
 (fn $ns/register_web_search_tool [register_tool log]
   (register_tool "web_search"
@@ -13,12 +13,12 @@
      ^required ["query"]}
     (fn [args]
       (var query args/query)
-      (if query/.empty
+      (if query/.empty?
         (return {^error "Missing query"})
       )
 
-      (if_not BRAVE_API_KEY
-        (return {^error "BRAVE_API_KEY not configured"})
+      (if_not CONFIG/search/brave_api_key
+        (return {^error "CONFIG/search/brave_api_key not configured"})
       )
 
       (var count (args/count || 5))
@@ -28,7 +28,7 @@
       (log .debug #"web_search: query=#{query} count=#{count}")
       (try
         # URL-encode the query by escaping special chars via curl --data-urlencode
-        (var result (system/shell #"curl -s -G --data-urlencode 'q=#{query}' -H 'Accept: application/json' -H 'X-Subscription-Token: #{BRAVE_API_KEY}' 'https://api.search.brave.com/res/v1/web/search?count=#{count}'"))
+        (var result (system/shell #"curl -s -G --data-urlencode 'q=#{query}' -H 'Accept: application/json' -H 'X-Subscription-Token: #{CONFIG/search/brave_api_key}' 'https://api.search.brave.com/res/v1/web/search?count=#{count}'"))
         (if (result/exit_code != 0)
           (return {^error #"curl failed: #{result/output}"})
         )

@@ -12,6 +12,22 @@ test_vm """
 """, ""
 
 test_vm """
+  (nil .empty?)
+""", true
+
+test_vm """
+  (nil .not_empty?)
+""", false
+
+test_vm """
+  (gene .empty?)
+""", false
+
+test_vm """
+  (gene .not_empty?)
+""", true
+
+test_vm """
   (`a .to_s)
 """, "a"
 

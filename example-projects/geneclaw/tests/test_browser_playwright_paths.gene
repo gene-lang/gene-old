@@ -1,0 +1,27 @@
+#!/usr/bin/env gene run
+
+(import ARTIFACT_ROOT from "config")
+(import resolve_browser_output_path from "tools/browser_playwright")
+
+(var relative_path (resolve_browser_output_path "daoqi_screenshot.png" ARTIFACT_ROOT))
+(assert (relative_path == #"#{ARTIFACT_ROOT}/daoqi_screenshot.png"))
+
+(var nested_path (resolve_browser_output_path "screenshots/board.png" ARTIFACT_ROOT))
+(assert (nested_path == #"#{ARTIFACT_ROOT}/screenshots/board.png"))
+
+(var generated_path (resolve_browser_output_path "" ARTIFACT_ROOT))
+(assert ((generated_path .start_with? #"#{ARTIFACT_ROOT}/geneclaw-shot-") == true))
+(assert ((generated_path .end_with? ".png") == true))
+
+(var absolute_path "/tmp/browser-shot.png")
+(assert ((resolve_browser_output_path absolute_path ARTIFACT_ROOT) == absolute_path))
+
+(var invalid_path_caught false)
+(try
+  (resolve_browser_output_path "../outside.png" ARTIFACT_ROOT)
+catch *
+  (invalid_path_caught = true)
+)
+(assert (invalid_path_caught == true))
+
+(println "ok")

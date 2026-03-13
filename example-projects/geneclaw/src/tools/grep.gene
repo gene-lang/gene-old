@@ -15,7 +15,7 @@
       (var path (args/path || "."))
       (var flags (args/flags || ""))
 
-      (if pattern/.empty
+      (if pattern/.empty?
         (return {^error "Missing pattern"})
       )
       # Block path traversal

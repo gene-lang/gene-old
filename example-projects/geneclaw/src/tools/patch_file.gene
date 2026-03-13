@@ -13,13 +13,13 @@
       (var path args/path)
       (var diff args/diff)
 
-      (if path/.empty
+      (if path/.empty?
         (return {^error "Missing path"})
       )
       (if (path .include? "..")
         (return {^error "Path traversal not allowed"})
       )
-      (if diff/.empty
+      (if diff/.empty?
         (return {^error "Missing diff"})
       )
 

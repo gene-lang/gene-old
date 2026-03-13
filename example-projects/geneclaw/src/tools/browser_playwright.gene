@@ -1,7 +1,43 @@
 # GeneClaw tool: browser_playwright
 # Uses Playwright protocol via a local Node helper.
 
-(fn $ns/register_browser_playwright_tool [register_tool log workspace_root]
+
+(fn ensure_parent_dir [path]
+  (var target ((path || "") .to_s))
+  (if target/.empty?
+    (return nil)
+  )
+  (var parts (target .split "/"))
+  (if (parts/.size <= 1)
+    (return nil)
+  )
+  (var parent ((parts .slice 0 (parts/.size - 1)) .join "/"))
+  (if parent/.not_empty?
+    (system/shell #"mkdir -p '#{parent}'")
+  )
+)
+
+(fn normalized_relative_output_path [path]
+  (var requested ((path || "") .to_s))
+  (requested = (requested .replace "\\" "/"))
+  (if ((requested .starts_with "/") || (requested .include? ".."))
+    (throw #"Invalid relative screenshot path: #{path}")
+  )
+  requested
+)
+
+(fn $ns/resolve_browser_output_path [path artifact_root]
+  (var requested ((path || "") .to_s))
+  (if requested/.empty?
+    #"#{artifact_root}/geneclaw-shot-#{gene/now/.call/.to_i}.png"
+  elif (requested .starts_with "/")
+    requested
+  else
+    #"#{artifact_root}/#{(normalized_relative_output_path requested)}"
+  )
+)
+
+(fn $ns/register_browser_playwright_tool [register_tool log workspace_root artifact_root]
   (register_tool "browser_playwright"
     "Control a browser using Playwright protocol (auto-attach to Chrome CDP or start managed server, then navigate/click/fill/extract/screenshot)"
     {^type "object"
@@ -36,6 +72,17 @@
       )
       (var state_dir #"#{workspace_root}/playwright")
       (var state_file #"#{state_dir}/state.json")
+      (var request_args (if (args is Map) args else {}))
+
+      (if (request_args/action == "screenshot")
+        (try
+          (var output_path (resolve_browser_output_path request_args/path artifact_root))
+          (ensure_parent_dir output_path)
+          (request_args/path = output_path)
+        catch *
+          (return {^ok false ^error #"Failed to prepare screenshot path: #{$ex/message}"})
+        )
+      )
 
       (try
         (system/shell #"mkdir -p #{state_dir}")
@@ -44,7 +91,7 @@
       )
 
       (var req_file #"#{state_dir}/req_#{gene/now/.call/.to_i}.json")
-      (gene/io/write req_file args/.to_json)
+      (gene/io/write req_file request_args/.to_json)
 
       (var cmd #"node #{script_path} #{req_file} #{state_file}")
       (log .debug #"browser_playwright exec: #{cmd}")

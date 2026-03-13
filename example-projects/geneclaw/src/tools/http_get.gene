@@ -12,14 +12,14 @@
      ^required ["url"]}
     (fn [args]
       (var url args/url)
-      (if url/.empty
+      (if url/.empty?
         (return {^error "Missing url"})
       )
       (log .debug #"http_get: #{url}")
       (try
         (var resp (await (http_get url)))
         (log .debug #"http_get status=#{resp/status} body_len=#{resp/body/.size}")
-        {^status resp/status ^body (if (resp/body/.size > 4000) then ((resp/body .substr 0 4000) .append "...[truncated]") else resp/body)}
+        {^status resp/status ^body (ifel (resp/body/.size > 4000) #"#(resp/body .substr 0 4000)...[truncated]" resp/body)}
       catch *
         (log .error #"http_get failed: #{url} - #{$ex/message}")
         {^error #"HTTP fetch failed: #{$ex/message}"}

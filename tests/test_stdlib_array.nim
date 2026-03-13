@@ -8,6 +8,14 @@ test_vm """
 """, 2
 
 test_vm """
+  ([] .empty?)
+""", true
+
+test_vm """
+  ([1 2] .not_empty?)
+""", true
+
+test_vm """
   ([1 2] ./0)
 """, 1
 

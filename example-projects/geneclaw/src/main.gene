@@ -3,7 +3,7 @@
 # GeneClaw - Tool-using Agent Platform
 # Entry point: HTTP server with Slack webhook and REST API
 
-(import PORT SLACK_SIGNING_SECRET SLACK_BOT_TOKEN SLACK_APP_TOKEN get_public_config_gene get_public_config_at_path render_public_config_value from "config")
+(import CONFIG get_public_config_gene get_public_config_at_path render_public_config_value from "config")
 (import init_db from "db")
 (import init_tools from "tools")
 (import run_agent run_agent_envelope from "agent")
@@ -22,26 +22,13 @@
 )
 
 (fn gene_response [status body]
-  (genex/http/respond status body {^Content-Type "text/plain; charset=utf-8"})
-)
-
-(fn ensure_attachments [value]
-  (if (value is Array) value else [])
-)
-
-(fn blank_string? [value]
-  (var text (if value (value .to_s) else ""))
-  ((text .length) == 0)
+  (genex/http/respond status body/.to_s {^Content-Type "text/plain; charset=utf-8"})
 )
 
 (fn normalize_slack_attachment [file]
   (var url_private (file/url_private || ""))
   (var url_private_download (file/url_private_download || ""))
-  (var download_url (if (blank_string? url_private_download)
-    url_private
-  else
-    url_private_download
-  ))
+  (var download_url (url_private_download || url_private))
   {
     ^source "slack"
     ^file_id (file/id || "")
@@ -64,7 +51,7 @@
       (attachments .append (normalize_slack_attachment file))
     )
   )
-  (if ((attachments/.size == 0) && event/file)
+  (if (attachments/.empty? && event/file)
     (attachments .append (normalize_slack_attachment event/file))
   )
   attachments
@@ -77,7 +64,7 @@
     ^channel_id (body/channel_id || "general")
     ^thread_id (body/thread_id || body/thread_ts || "")
     ^text (body/text || "")
-    ^attachments (ensure_attachments body/attachments)
+    ^attachments body/attachments
     ^metadata {^source "web"}
   }
 )
@@ -104,16 +91,7 @@
 )
 
 (fn get_header [req name default_val]
-  # (try
-    (var headers req/.headers)
-    (if headers
-      (headers .get name default_val)
-    else
-      default_val
-    )
-  # catch *
-  #   default_val
-  # )
+  (req/.headers/<name> || default_val)
 )
 
 # ============================================================
@@ -151,14 +129,14 @@
     (var text envelope/text)
     (var attachments envelope/attachments)
 
-    (if (blank_string? thread_id)
+    (if thread_id/.empty?
       (log .info #"Chat request workspace=#{workspace_id} user=#{user_id} channel=#{channel_id} attachments=#{attachments/.size}")
     else
       (log .info #"Chat request workspace=#{workspace_id} user=#{user_id} channel=#{channel_id} thread=#{thread_id} attachments=#{attachments/.size}")
     )
     (log .debug #"Chat text: #{text}")
 
-    (if ((blank_string? text) && (attachments/.size == 0))
+    (if (text/.empty? && attachments/.empty?)
       (log .warn "Chat request missing text and attachments")
       (return (json_response 400 {^error "Missing text or attachments"}))
     )
@@ -181,15 +159,15 @@
 (fn handle_config [req]
   # REST endpoint: GET /api/config
   (log .trace "Config export request")
-  (var config_path ((req/.params .get "path" "") .trim))
-  (if (blank_string? config_path)
+  (var config_path req/.params/path/.to_s/.trim)
+  (if config_path/.empty?
     (gene_response 200 (get_public_config_gene))
   else
     (var path_result (get_public_config_at_path config_path))
     (if path_result/found
       (gene_response 200 (render_public_config_value path_result/value))
     else
-      (gene_response 404 ({^error "Config path not found" ^path config_path} .to_s))
+      (gene_response 404 {^error "Config path not found" ^path config_path})
     )
   )
 )
@@ -235,12 +213,12 @@
     (var text envelope/text)
     (var attachments envelope/attachments)
 
-    (if ((blank_string? channel_id) || ((blank_string? text) && (attachments/.size == 0)))
+    (if (channel_id/.empty? || (text/.empty? && (attachments/.size == 0)))
       (log .debug "Slack event missing channel or message content - skipping")
       (return (json_response 200 {^ok true}))
     )
 
-    (if (blank_string? thread_id)
+    (if thread_id/.empty?
       (log .info #"Slack event workspace=#{workspace_id} user=#{user_id} channel=#{channel_id} attachments=#{attachments/.size}")
     else
       (log .info #"Slack event workspace=#{workspace_id} user=#{user_id} channel=#{channel_id} thread=#{thread_id} attachments=#{attachments/.size}")
@@ -252,7 +230,7 @@
     (log .info #"Slack agent done run=#{result/run_id} steps=#{result/steps}")
 
     # Reply to Slack
-    (if (SLACK_BOT_TOKEN && result/response && ((blank_string? result/response) == false))
+    (if (CONFIG/slack/bot_token && result/response && result/response/.not_empty?)
       (var reply_payload (build_post_message_payload channel_id result/response thread_id))
       (try
         (log .debug #"Posting Slack reply to channel=#{channel_id}")
@@ -260,7 +238,7 @@
           reply_payload/.to_json
           {
             ^Content-Type "application/json; charset=utf-8"
-            ^Authorization #"Bearer #{SLACK_BOT_TOKEN}"}))
+            ^Authorization #"Bearer #{CONFIG/slack/bot_token}"}))
         (log .info "Slack reply sent successfully")
       catch *
         (log .error #"Slack reply failed: #{$ex/message}")
@@ -316,16 +294,16 @@
 (start_pause_watchdog)
 (start_scheduler)
 
-(if SLACK_APP_TOKEN
+(if CONFIG/slack/app_token
   # Socket Mode: connect to Slack via outbound WebSocket (no public URL needed)
-  (log .info #"Starting Slack Socket Mode on http://localhost:#{PORT}")
+  (log .info #"Starting Slack Socket Mode on http://localhost:#{CONFIG/port}")
   (log .info "Endpoints: GET /health, GET /api/config, POST /api/chat, POST /slack/events (disabled)")
-  (genex/http/start_server PORT handle_request)
-  (genex/ai/start_slack_socket_mode SLACK_APP_TOKEN SLACK_BOT_TOKEN handle_socket_slack_command)
+  (genex/http/start_server CONFIG/port handle_request)
+  (genex/ai/start_slack_socket_mode CONFIG/slack/app_token CONFIG/slack/bot_token handle_socket_slack_command)
 else
   # Webhook mode: Slack sends events via HTTP POST
-  (log .info #"Starting server on http://localhost:#{PORT}")
+  (log .info #"Starting server on http://localhost:#{CONFIG/port}")
   (log .info "Endpoints: GET /health, GET /api/config, POST /api/chat, POST /slack/events")
-  (genex/http/start_server PORT handle_request)
+  (genex/http/start_server CONFIG/port handle_request)
 )
 (run_forever)

@@ -1,6 +1,6 @@
 # GeneClaw tool: send_message
 
-(import SLACK_AGENTX_TOKEN from "config")
+(import CONFIG from "config")
 (import build_post_message_payload from "slack")
 (import genex/http/http_post)
 
@@ -19,14 +19,14 @@
       (var text args/text)
       (var thread_ts args/thread_ts)
 
-      (if channel/.empty
+      (if channel/.empty?
         (return {^error "Missing channel"})
       )
-      (if text/.empty
+      (if text/.empty?
         (return {^error "Missing text"})
       )
-      (if_not SLACK_AGENTX_TOKEN
-        (return {^error "SLACK_AGENTX_TOKEN not configured"})
+      (if_not CONFIG/slack/agentx_token
+        (return {^error "CONFIG/slack/agentx_token not configured"})
       )
 
       (log .debug #"send_message: channel=#{channel}")
@@ -36,7 +36,7 @@
           payload/.to_json
           {
             ^Content-Type "application/json; charset=utf-8"
-            ^Authorization #"Bearer #{SLACK_AGENTX_TOKEN}"
+            ^Authorization #"Bearer #{CONFIG/slack/agentx_token}"
           })))
         (var resp (gene/json/parse result))
         (if resp/ok
