@@ -52,7 +52,10 @@ proc compile_gene_default(self: Compiler, gene: ptr Gene) {.inline.} =
 
   # compile_gene_default is used for literal Gene construction (quoted/_ forms).
   # It should never tail-call; always finish with IkGeneEnd.
-  self.emit(Instruction(kind: IkGeneEnd))
+  var flags = 1'i32
+  if gene.frozen:
+    flags = flags or 2'i32
+  self.emit(Instruction(kind: IkGeneEnd, arg1: flags))
 
 # For a call that is unsure whether it is a function call or a macro call,
 # we need to handle both cases and decide at runtime:
@@ -968,7 +971,8 @@ proc compile_gene(self: Compiler, input: Value) =
   let is_quoted_symbol_method_call = gene.type.kind == VkQuote and gene.type.ref.quote.kind == VkSymbol and
     gene.children.len >= 1 and gene.children[0].kind == VkSymbol and gene.children[0].str.starts_with(".")
 
-  if self.quote_level > 0 or gene.type == "_".to_symbol_value() or (gene.type.kind == VkQuote and not is_quoted_symbol_method_call):
+  if self.quote_level > 0 or gene.frozen or gene.type == "_".to_symbol_value() or
+     (gene.type.kind == VkQuote and not is_quoted_symbol_method_call):
     self.compile_gene_default(gene)
     return
 

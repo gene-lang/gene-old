@@ -971,8 +971,8 @@ proc add_line_col(self: var Parser, gene: ptr Gene, start_pos: int) =
   gene.trace = trace
   self.push_trace(trace)
 
-proc read_gene(self: var Parser): Value {.gcsafe.} =
-  var gene = new_gene()
+proc read_gene_impl(self: var Parser, frozen = false): Value {.gcsafe.} =
+  var gene = new_gene(frozen = frozen)
   #echo "line ", getCurrentLine(p), "lineno: ", p.line_number, " col: ", getColNumber(p, p.bufpos)
   #echo $get_current_line(p) & " LINENO(" & $p.line_number & ")"
   let start_pos = (if self.bufpos > 0: self.bufpos - 1 else: 0)
@@ -997,7 +997,7 @@ proc read_gene(self: var Parser): Value {.gcsafe.} =
     var current_gene: Value
     if segments.len > 0 and segments[0].len > 0:
       # First segment has content - build (gene.type segment[0]...)
-      let g = new_gene(gene.type)
+      let g = new_gene(gene.type, frozen = frozen)
       for item in segments[0]:
         g.children.add(item)
       for k, v in segment_props[0]:
@@ -1005,14 +1005,14 @@ proc read_gene(self: var Parser): Value {.gcsafe.} =
       current_gene = g.to_gene_value()
     else:
       # First segment is empty - just wrap gene.type: (gene.type)
-      current_gene = new_gene(gene.type).to_gene_value()
+      current_gene = new_gene(gene.type, frozen = frozen).to_gene_value()
     
     # Process remaining segments
     for i in 1..<segments.len:
       let segment = segments[i]
       let seg_props = segment_props[i]
       # Wrap current_gene as type, add segment items as children
-      let g = new_gene(current_gene)
+      let g = new_gene(current_gene, frozen = frozen)
       for item in segment:
         g.children.add(item)
       for k, v in seg_props:
@@ -1032,6 +1032,12 @@ proc read_gene(self: var Parser): Value {.gcsafe.} =
       return handler(self, result)
 
   result = gene.to_gene_value()
+
+proc read_gene(self: var Parser): Value {.gcsafe.} =
+  read_gene_impl(self)
+
+proc read_frozen_gene(self: var Parser): Value {.gcsafe.} =
+  read_gene_impl(self, frozen = true)
 
 proc read_map(self: var Parser): Value {.gcsafe.} =
   let r = new_map_value()
@@ -1247,6 +1253,7 @@ proc init_macro_array() =
   macros['}'] = read_unmatched_delimiter
 
 proc init_dispatch_macro_array() =
+  dispatch_macros['('] = read_frozen_gene
   dispatch_macros['['] = read_frozen_array
   dispatch_macros['{'] = read_frozen_map
   dispatch_macros['/'] = read_regex

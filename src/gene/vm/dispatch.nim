@@ -245,7 +245,7 @@ proc render_template(self: ptr VirtualMachine, tpl: Value): Value =
     of VkGene:
       # Recursively render gene expressions
       let gene = tpl.gene
-      let new_gene = new_gene(self.render_template(gene.type))
+      let new_gene = new_gene(self.render_template(gene.type), frozen = gene.frozen)
 
       # Render properties
       for k, v in gene.props:

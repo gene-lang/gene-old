@@ -669,7 +669,7 @@ proc serialize*(self: Serialization, value: Value): Value =
       map_data(map)[k] = self.serialize(v)
     return map
   of VkGene:
-    let gene = new_gene(self.serialize(value.gene.type))
+    let gene = new_gene(self.serialize(value.gene.type), frozen = gene_is_frozen(value))
     for k, v in value.gene.props:
       gene.props[k] = self.serialize(v)
     for child in value.gene.children:
@@ -925,7 +925,7 @@ proc materialize_lazy_tree_deep*(value: Value): Value {.gcsafe.} =
     for k, v in map_data(current):
       map_data(result)[k] = materialize_lazy_tree_deep(v)
   of VkGene:
-    let gene = new_gene(materialize_lazy_tree_deep(current.gene.type))
+    let gene = new_gene(materialize_lazy_tree_deep(current.gene.type), frozen = gene_is_frozen(current))
     for k, v in current.gene.props:
       gene.props[k] = materialize_lazy_tree_deep(v)
     for child in current.gene.children:
@@ -1437,7 +1437,7 @@ proc value_to_gene_str(self: Value): string =
       first = false
     result &= "}"
   of VkGene:
-    result = "("
+    result = if gene_is_frozen(self): "#(" else: "("
     result &= value_to_gene_str(self.gene.type)
     # Add properties
     for k, v in self.gene.props:
@@ -1473,7 +1473,7 @@ proc deserialize*(self: Serialization, value: Value): Value =
     elif value.gene.type.kind == VkComplexSymbol:
       type_str = value.gene.type.ref.csymbol.join("/")
     else:
-      let gene = new_gene(self.deserialize(value.gene.type))
+      let gene = new_gene(self.deserialize(value.gene.type), frozen = gene_is_frozen(value))
       for k, v in value.gene.props:
         gene.props[k] = self.deserialize(v)
       for child in value.gene.children:
@@ -1529,7 +1529,7 @@ proc deserialize*(self: Serialization, value: Value): Value =
         return self.deserialize(legacy.to_gene_value())
       return NIL
     else:
-      let gene = new_gene(self.deserialize(value.gene.type))
+      let gene = new_gene(self.deserialize(value.gene.type), frozen = gene_is_frozen(value))
       for k, v in value.gene.props:
         gene.props[k] = self.deserialize(v)
       for child in value.gene.children:
@@ -1583,7 +1583,7 @@ proc eval_in_caller_context(vm: ptr VirtualMachine, expr: Value, caller_frame: F
     for k, v in map_data(expr):
       map_data(result)[k] = eval_in_caller_context(vm, v, caller_frame)
   of VkGene:
-    let gene = new_gene(eval_in_caller_context(vm, expr.gene.type, caller_frame))
+    let gene = new_gene(eval_in_caller_context(vm, expr.gene.type, caller_frame), frozen = gene_is_frozen(expr))
     for k, v in expr.gene.props:
       gene.props[k] = eval_in_caller_context(vm, v, caller_frame)
     for child in expr.gene.children:

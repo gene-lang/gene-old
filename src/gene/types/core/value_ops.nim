@@ -163,6 +163,14 @@ proc ensure_mutable_map*(v: Value, op_name = "mutate"): void {.inline.} =
   if map_is_frozen(v):
     not_allowed("Cannot " & op_name & " immutable map")
 
+proc gene_is_frozen*(v: Value): bool {.inline, gcsafe, noSideEffect.} =
+  let u = cast[uint64](v)
+  ((u and 0xFFFF_0000_0000_0000u64) == GENE_TAG) and cast[ptr Gene](u and PAYLOAD_MASK).frozen
+
+proc ensure_mutable_gene*(v: Value, op_name = "mutate"): void {.inline.} =
+  if gene_is_frozen(v):
+    not_allowed("Cannot " & op_name & " immutable gene")
+
 proc instance_ptr*(v: Value): ptr InstanceObj {.inline.} =
   let u = cast[uint64](v)
   when defined(release):

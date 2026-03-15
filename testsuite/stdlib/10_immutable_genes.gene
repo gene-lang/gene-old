@@ -1,0 +1,41 @@
+# Immutable gene literal tests
+# Expected: #(1 ^a 2 3)
+# Expected: immutable gene testsuite ok
+
+(var g #(1 ^a 2 3))
+(assert ((g .immutable?) == true))
+(println g)
+
+(var set_caught false)
+(try
+  (g .set "a" 4)
+catch *
+  (set_caught = true)
+)
+(assert (set_caught == true))
+
+(var prop_caught false)
+(try
+  (g/a = 4)
+catch *
+  (prop_caught = true)
+)
+(assert (prop_caught == true))
+
+(var child_caught false)
+(try
+  (g/0 = 4)
+catch *
+  (child_caught = true)
+)
+(assert (child_caught == true))
+
+(var add_caught false)
+(try
+  (g .add_child 4)
+catch *
+  (add_caught = true)
+)
+(assert (add_caught == true))
+
+(println "immutable gene testsuite ok")

@@ -50,6 +50,16 @@ proc init_gene_and_meta_classes*(object_class: Class) =
 
   gene_class.def_native_method("children", gene_children_method)
 
+  proc gene_immutable_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("Gene.immutable? requires self")
+    let gene_val = get_positional_arg(args, 0, has_keyword_args)
+    if gene_val.kind != VkGene:
+      not_allowed("immutable? must be called on a gene")
+    gene_is_frozen(gene_val).to_value()
+
+  gene_class.def_native_method("immutable?", gene_immutable_method)
+
   # Gene property (member) APIs
   proc gene_has_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 2:
@@ -102,6 +112,7 @@ proc init_gene_and_meta_classes*(object_class: Class) =
     else:
       not_allowed("Gene.set key must be a string or symbol")
     let value = get_positional_arg(args, 2, has_keyword_args)
+    ensure_mutable_gene(gene_val, "set property on")
     gene_val.gene.props[key] = value
     gene_val
 
@@ -114,6 +125,7 @@ proc init_gene_and_meta_classes*(object_class: Class) =
     let gene_val = get_positional_arg(args, 0, has_keyword_args)
     if gene_val.kind != VkGene:
       not_allowed("Gene.del must be called on a gene")
+    ensure_mutable_gene(gene_val, "delete property from")
     var last_removed = NIL
     for i in 1..<pos_count:
       let key_val = get_positional_arg(args, i, has_keyword_args)
@@ -177,6 +189,7 @@ proc init_gene_and_meta_classes*(object_class: Class) =
     if idx < 0 or idx >= gene_val.gene.children.len:
       not_allowed("Gene.set_child index out of bounds")
     let value = get_positional_arg(args, 2, has_keyword_args)
+    ensure_mutable_gene(gene_val, "set child on")
     gene_val.gene.children[idx] = value
     gene_val
 
@@ -189,6 +202,7 @@ proc init_gene_and_meta_classes*(object_class: Class) =
     if gene_val.kind != VkGene:
       not_allowed("Gene.add_child must be called on a gene")
     let value = get_positional_arg(args, 1, has_keyword_args)
+    ensure_mutable_gene(gene_val, "append child to")
     gene_val.gene.children.add(value)
     gene_val
 
@@ -207,6 +221,7 @@ proc init_gene_and_meta_classes*(object_class: Class) =
     if idx < 0 or idx > gene_val.gene.children.len:
       not_allowed("Gene.ins_child index out of bounds")
     let value = get_positional_arg(args, 2, has_keyword_args)
+    ensure_mutable_gene(gene_val, "insert child into")
     gene_val.gene.children.insert(value, idx)
     gene_val
 
@@ -224,6 +239,7 @@ proc init_gene_and_meta_classes*(object_class: Class) =
     let idx = idx_val.int64.int
     if idx < 0 or idx >= gene_val.gene.children.len:
       not_allowed("Gene.del_child index out of bounds")
+    ensure_mutable_gene(gene_val, "delete child from")
     let removed = gene_val.gene.children[idx]
     gene_val.gene.children.delete(idx)
     removed
@@ -254,6 +270,7 @@ proc init_gene_and_meta_classes*(object_class: Class) =
     if gene_val.kind != VkGene:
       not_allowed("Gene.set_genetype must be called on a gene")
     let new_type = get_positional_arg(args, 1, has_keyword_args)
+    ensure_mutable_gene(gene_val, "set type on")
     gene_val.gene.type = new_type
     gene_val
 

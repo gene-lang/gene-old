@@ -740,6 +740,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             ensure_mutable_map(target, "set item on")
             map_data(target)[name] = value
           of VkGene:
+            ensure_mutable_gene(target, "set property on")
             target.gene.props[name] = value
           of VkNamespace:
             target.ref.ns[name] = value
@@ -797,6 +798,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             else:
               discard
         of VkGene:
+          ensure_mutable_gene(target, if prop.kind == VkInt: "set child on" else: "set property on")
           case prop.kind:
             of VkInt:
               let idx = prop.int64
@@ -1310,6 +1312,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             let children_len = target.gene.children.len.int64
             if i < 0 or i >= children_len:
               not_allowed("Gene child index out of bounds: " & $i & " (len=" & $children_len & ")")
+            ensure_mutable_gene(target, "set child on")
             target.gene.children[i] = new_value
           else:
             when not defined(release):
@@ -2259,7 +2262,11 @@ proc exec*(self: ptr VirtualMachine): Value =
           else:
             # Check if this is a gene with a generator function as its type
             let value = self.frame.current()
-            if value.kind == VkGene and value.gene.type.kind == VkFunction:
+            if value.kind == VkGene and (inst.arg1 and 2'i32) != 0:
+              value.gene.frozen = true
+            if value.kind == VkGene and (inst.arg1 and 1'i32) != 0:
+              discard
+            elif value.kind == VkGene and value.gene.type.kind == VkFunction:
               let f = value.gene.type.ref.fn
               if f.is_generator:
                 # Create generator instance with the arguments from the gene

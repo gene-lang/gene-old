@@ -41,6 +41,20 @@ test "Serdes: frozen maps preserve immutable flag":
   check map_is_frozen(roundtripped)
   check map_data(roundtripped)["a".to_key()] == 1.to_value()
 
+test "Serdes: frozen genes preserve immutable flag":
+  init_all()
+  init_serdes()
+  let value = VM.exec("#(1 ^a 2 3)", "serdes_frozen_gene_source")
+  check value.kind == VkGene
+  check gene_is_frozen(value)
+  let serialized = serialize(value).to_s()
+  let roundtripped = deserialize(serialized)
+  check roundtripped.kind == VkGene
+  check gene_is_frozen(roundtripped)
+  check roundtripped.gene.type == 1.to_value()
+  check roundtripped.gene.props["a".to_key()] == 2.to_value()
+  check roundtripped.gene.children == @[3.to_value()]
+
 test_serdes """
   `(a ^a 2 3 4)
 """, proc(r: Value) =

@@ -4,7 +4,7 @@ import ./types
 
 const
   GIR_MAGIC = "GENE"
-  GIR_VERSION* = 21'u32
+  GIR_VERSION* = 22'u32
   COMPILER_VERSION = "0.1.3"
   VALUE_ABI_VERSION* = 2'u32  # Version 2: Value is object wrapper with GC
   
@@ -351,10 +351,12 @@ proc write_value(stream: Stream, v: Value) =
       write_value(stream, pair[1])
   of VkGene:
     if v.gene == nil:
+      stream.write(0'u8)
       write_value(stream, NIL)
       stream.write(0'u32)
       stream.write(0'u32)
     else:
+      stream.write(if gene_is_frozen(v): 1'u8 else: 0'u8)
       write_value(stream, v.gene.`type`)
       stream.write(v.gene.props.len.uint32)
       for pair in v.gene.props.pairs():
@@ -420,8 +422,9 @@ proc read_value(stream: Stream): Value =
       let key = stream.read_key()
       map_data(result)[key] = read_value(stream)
   of VkGene:
+    let frozen = stream.readUint8() == 1'u8
     let gene_type = read_value(stream)
-    var g = new_gene(gene_type)
+    var g = new_gene(gene_type, frozen = frozen)
     let prop_count = stream.readUint32()
     for _ in 0..<prop_count:
       let key = stream.read_key()

@@ -4,7 +4,7 @@
 
 Gene currently has inconsistent mutation semantics — scalars copy by value, collections share by reference. This is confusing and a poor foundation for an AI-oriented language.
 
-This document describes the target model. The current implementation now uses `#[...]` for immutable arrays, but the rest of the proposal is still design work rather than a complete description of shipped behavior.
+This document describes the target model. The current implementation now uses `#[...]` for immutable arrays, `#{...}` for immutable maps, and `#(...)` for immutable genes, but the rest of the proposal is still design work rather than a complete description of shipped behavior.
 
 ## Design Decision
 

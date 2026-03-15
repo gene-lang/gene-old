@@ -324,6 +324,7 @@ type
 
   Gene* = object
     ref_count*: int
+    frozen*: bool
     `type`*: Value
     trace*: SourceTrace
     props*: Table[Key, Value]

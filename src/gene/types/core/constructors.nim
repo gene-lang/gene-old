@@ -351,34 +351,49 @@ proc to_gene_value*(v: ptr Gene): Value {.inline.} =
   result = cast[Value](GENE_TAG or ptr_addr)
 
 proc `$`*(self: ptr Gene): string =
-  result = "(" & $self.type
+  result = if self.frozen: "#(" else: "("
+  result &= $self.type
   for k, v in self.props:
     result &= " ^" & get_symbol(k.symbol_index) & " " & $v
   for child in self.children:
     result &= " " & $child
   result &= ")"
 
-proc new_gene*(): ptr Gene =
+proc new_gene*(frozen = false): ptr Gene =
   result = cast[ptr Gene](alloc0(sizeof(Gene)))
   result.ref_count = 1
+  result.frozen = frozen
   result.type = NIL
   result.trace = nil
   result.props = Table[Key, Value]()
   result.children = @[]
 
-proc new_gene*(`type`: Value): ptr Gene =
+proc new_gene*(`type`: Value, frozen = false): ptr Gene =
   result = cast[ptr Gene](alloc0(sizeof(Gene)))
   result.ref_count = 1
+  result.frozen = frozen
   result.type = `type`
   result.trace = nil
   result.props = Table[Key, Value]()
   result.children = @[]
 
-proc new_gene_value*(): Value {.inline.} =
-  new_gene().to_gene_value()
+proc new_frozen_gene*(): ptr Gene =
+  new_gene(frozen = true)
 
-proc new_gene_value*(`type`: Value): Value {.inline.} =
-  new_gene(`type`).to_gene_value()
+proc new_frozen_gene*(`type`: Value): ptr Gene =
+  new_gene(`type`, frozen = true)
+
+proc new_gene_value*(frozen = false): Value {.inline.} =
+  new_gene(frozen = frozen).to_gene_value()
+
+proc new_gene_value*(`type`: Value, frozen = false): Value {.inline.} =
+  new_gene(`type`, frozen = frozen).to_gene_value()
+
+proc new_frozen_gene_value*(): Value {.inline.} =
+  new_frozen_gene().to_gene_value()
+
+proc new_frozen_gene_value*(`type`: Value): Value {.inline.} =
+  new_frozen_gene(`type`).to_gene_value()
 
 # proc args_are_literal(self: ptr Gene): bool =
 #   for k, v in self.props:

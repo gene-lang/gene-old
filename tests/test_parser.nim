@@ -200,6 +200,21 @@ test_parser "#{^outer #{^inner 1}}", proc(r: Value) =
 test_parser_error "#{1 2}"
 test_parser_error "#{^a 1"
 
+test_parser "#()", proc(r: Value) =
+  check r.kind == VkGene
+  check r.gene.type == NIL
+  check r.gene.children.len == 0
+  check gene_is_frozen(r)
+
+test_parser "#(f ^a 1 2)", proc(r: Value) =
+  check r.kind == VkGene
+  check r.gene.type == "f".to_symbol_value()
+  check r.gene.props["a".to_key()] == 1.to_value()
+  check r.gene.children == @[2.to_value()]
+  check gene_is_frozen(r)
+
+test_parser_error "#(1 2"
+
 test_parser ",a", to_symbol_value("a")
 test_parser "a,", to_symbol_value("a")
 

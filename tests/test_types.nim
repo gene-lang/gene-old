@@ -1,4 +1,5 @@
 import unicode
+import tables
 import unittest
 
 import gene/types except Exception
@@ -92,3 +93,11 @@ test "Set display is unsupported":
   check s.kind == VkSet
   check s.str_no_quotes() == "unsupported"
   check $s == "unsupported"
+
+test "Frozen gene display":
+  var gene_ptr = new_frozen_gene(1.to_value())
+  gene_ptr[].props["a".to_key()] = 2.to_value()
+  gene_ptr[].children.add(3.to_value())
+  let g = gene_ptr.to_gene_value()
+  check g.str_no_quotes() == "#(1 ^a 2 3)"
+  check $g == "#(1 ^a 2 3)"
