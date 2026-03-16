@@ -1,6 +1,6 @@
 #!/usr/bin/env gene run
 
-(import image_attachment? text_document? build_document_context_text build_prompt_text build_memory_user_text append_document_notices from "documents")
+(import image_attachment? text_document? build_document_context_text build_prompt_text build_memory_user_text append_document_notices build_compact_prompt from "documents")
 
 (assert (image_attachment? "screen.png" "image/png"))
 (assert (((image_attachment? "spec.pdf" "application/pdf") .to_s) == "false"))
@@ -36,8 +36,20 @@
 (assert (ingest/context .include? "spec.pdf"))
 (assert ((build_prompt_text "summarize this" ingest) .include? "Analyze the attached images directly"))
 (assert ((build_prompt_text "summarize this" ingest) .include? "Attachment preparation notices"))
+(assert ((build_prompt_text "summarize this" ingest) .include? "Context:\n"))
+(assert ((build_prompt_text "summarize this" ingest) .include? "Current round:\n"))
 (assert ((build_memory_user_text "summarize this" ingest) .include? "[Attached files: spec.pdf, screen.png]"))
 (assert ((append_document_notices "done" ingest/notices) .include? "Attachment notices"))
 (assert ((build_prompt_text "" {^documents docs ^image_attachments [docs/1] ^usable_count 1 ^notices [] ^context ""}) .include? "uploaded one or more images"))
+
+(var long_context "")
+(repeat 260
+  (long_context = #"#{long_context}abcde")
+)
+(var compact_prompt (build_compact_prompt long_context "Round text"))
+(assert (compact_prompt .include? "Context:\n"))
+(assert (compact_prompt .include? "Current round:\nRound text"))
+(assert (compact_prompt .include? "..."))
+(assert (compact_prompt/.length < 1100))
 
 (println "ok")

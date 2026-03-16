@@ -1,0 +1,14 @@
+#!/usr/bin/env gene run
+
+(import init_tools invoke_tool from "tools")
+
+(init_tools)
+
+(var invalid_args (gene/json/parse "{\"path\":\"csv-parser/csv_parser.py\"}"))
+(var invalid_write (invoke_tool "run-tools-validation" "ws-tools-validation" "user-1" "chan-1" "" "session-1" "write_file" invalid_args))
+(assert (invalid_write/ok == false))
+(assert (invalid_write/error == "Missing required arguments for write_file: content"))
+(assert (invalid_write/result/error == "Missing required arguments for write_file: content"))
+(assert (invalid_write/result/missing/0 == "content"))
+
+(println "ok")

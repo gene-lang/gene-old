@@ -293,6 +293,28 @@
   )
 )
 
+(fn compact_prompt_block [label text]
+  (var body (((text || "") .to_s) .trim))
+  (if body/.empty?
+    ""
+  else
+    #"#{label}:\n#{body}"
+  )
+)
+
+(fn $ns/build_compact_prompt [context_text round_text]
+  (var sections [])
+  (var context_block (compact_prompt_block "Context" (document_excerpt context_text 1000)))
+  (var round_block (compact_prompt_block "Current round" round_text))
+  (if context_block/.not_empty?
+    (sections .append context_block)
+  )
+  (if round_block/.not_empty?
+    (sections .append round_block)
+  )
+  (sections .join "\n\n")
+)
+
 (fn $ns/build_document_context_text [documents]
   (var lines ["Attached documents:"])
   (var remaining CONFIG/documents/max_inline_chars)
@@ -343,7 +365,8 @@
 )
 
 (fn $ns/build_prompt_text [user_text ingest]
-  (var parts [])
+  (var context_parts [])
+  (var round_parts [])
   (var text ((user_text || "") .to_s))
   (var context (ingest/context || ""))
   (var notices (if (ingest/notices is Array) ingest/notices else []))
@@ -352,28 +375,28 @@
   (if text/.empty?
     (if context/.empty?
       (if (notices/.size > 0)
-        (parts .append "The user uploaded one or more files, but GeneClaw could not prepare all of them. Explain what happened clearly.")
+        (round_parts .append "The user uploaded one or more files, but GeneClaw could not prepare all of them. Explain what happened clearly.")
       elif (image_count > 0)
-        (parts .append "The user uploaded one or more images without additional text. Review the attached image inputs and respond helpfully.")
+        (round_parts .append "The user uploaded one or more images without additional text. Review the attached image inputs and respond helpfully.")
       )
     else
-      (parts .append "The user uploaded one or more documents without additional text. Review the attached document context and respond helpfully.")
+      (round_parts .append "The user uploaded one or more documents without additional text. Review the attached document context and respond helpfully.")
     )
   else
-    (parts .append text)
+    (round_parts .append text)
   )
 
   (if (image_count > 0)
-    (parts .append #"The current request includes #{image_count} image attachment(s). Analyze the attached images directly.")
+    (round_parts .append #"The current request includes #{image_count} image attachment(s). Analyze the attached images directly.")
   )
   (if context/.not_empty?
-    (parts .append context)
+    (context_parts .append context)
   )
   (if (notices/.size > 0)
-    (parts .append #"Attachment preparation notices:\n- #{(notices .join "\n- ")}")
+    (context_parts .append #"Attachment preparation notices:\n- #{(notices .join "\n- ")}")
   )
 
-  (parts .join "\n\n")
+  (build_compact_prompt (context_parts .join "\n\n") (round_parts .join "\n\n"))
 )
 
 (fn successful_attachment_names [documents]

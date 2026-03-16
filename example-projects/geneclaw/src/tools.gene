@@ -78,6 +78,28 @@
 
   (var start_ms gene/now/.call/.to_i)
   (try
+    (var missing_args [])
+    (var required_args (if (((tool/params is Map) && (tool/params/required is Array)))
+      tool/params/required
+    else
+      []
+    ))
+    (for required_name in required_args
+      (var key ((required_name || "") .to_s))
+      (if key/.not_empty?
+        (if ((tool_args .get key nil) == nil)
+          (missing_args .append key)
+        )
+      )
+    )
+    (if missing_args/.not_empty?
+      (var error_msg #"Missing required arguments for #{tool_name}: #{(missing_args .join ", ")}")
+      (var result {^error error_msg ^missing missing_args})
+      (log .warn #"Tool #{tool_name} rejected before execution: #{error_msg}")
+      (audit_log run_id workspace_id tool_name "failed" tool_args result 0)
+      (return {^ok false ^error error_msg ^result result})
+    )
+
     (var result (tool/handler tool_args))
     (var duration (gene/now/.call/.to_i - start_ms))
     (if (tool_result_success? result)

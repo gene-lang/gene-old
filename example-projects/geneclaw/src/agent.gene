@@ -6,7 +6,7 @@
 (import invoke_tool build_tools_spec from "tools")
 (import is_paused check_pause_timeout get_pause_status from "hotswap_state")
 (import call_llm from "llm_provider")
-(import ingest_attachments build_prompt_text build_memory_user_text append_document_notices from "documents")
+(import ingest_attachments build_prompt_text build_memory_user_text append_document_notices build_compact_prompt from "documents")
 (import load_session save_session session_append_memory memory_recent_from_session from "workspace_state")
 
 (var log (new genex/logging/Logger $ns))
@@ -15,6 +15,10 @@
 (fn make_run_id []
   (RUN_COUNTER += 1)
   #"run-#{RUN_COUNTER}"
+)
+
+(fn $ns/build_tool_followup_text [context_text]
+  (build_compact_prompt context_text "Continue based on the tool results above. Complete the current request.")
 )
 
 (fn $ns/build_session_id [workspace_id channel_id thread_id = ""]
@@ -28,7 +32,7 @@
 
 # Keep the LLM/tool loop in a helper. Re-entering the larger run_agent frame
 # after repeated LLM calls was corrupting subsequent history loads.
-(fn execute_agent_steps [run_id workspace_id user_id channel_id thread_id session_id history initial_text tools_spec image_attachments]
+(fn execute_agent_steps [run_id workspace_id user_id channel_id thread_id session_id history initial_text followup_context tools_spec image_attachments]
   (var step 0)
   (var tool_call_count 0)
   (var final_response "")
@@ -90,7 +94,7 @@
     ))
 
     # Update text for next iteration context
-    (text = "Continue based on the tool results above.")
+    (text = (build_tool_followup_text followup_context))
   )
 
   {^response final_response ^steps step ^tool_calls tool_call_count}
@@ -166,6 +170,17 @@
     (var prompt_text (build_prompt_text text ingest))
     (var memory_text (build_memory_user_text text ingest))
     (log .debug #"#{run_id} prepared prompt_len=#{prompt_text/.length} memory_len=#{memory_text/.length}")
+    (var followup_context_parts [])
+    (if memory_text/.not_empty?
+      (followup_context_parts .append memory_text)
+    )
+    (if ((ingest/context || "") .not_empty?)
+      (followup_context_parts .append (ingest/context || ""))
+    )
+    (if (((ingest/notices || []) .size) > 0)
+      (followup_context_parts .append #"Attachment preparation notices:\n- #{((ingest/notices || []) .join "\n- ")}")
+    )
+    (var followup_context (followup_context_parts .join "\n\n"))
 
     # Record user message in memory; flush when the turn completes.
     (session_append_memory workspace_id session "user" memory_text {
@@ -178,7 +193,7 @@
 
     (var tools_spec (build_tools_spec))
     (log .debug #"#{run_id} built tools spec count=#{tools_spec/.size}")
-    (var phase (execute_agent_steps run_id workspace_id user_id channel_id thread_id session_id history prompt_text tools_spec (ingest/image_attachments || [])))
+    (var phase (execute_agent_steps run_id workspace_id user_id channel_id thread_id session_id history prompt_text followup_context tools_spec (ingest/image_attachments || [])))
     (var final_response (append_document_notices phase/response (ingest/notices || [])))
     (var step phase/steps)
     (var tool_call_count phase/tool_calls)

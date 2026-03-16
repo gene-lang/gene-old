@@ -1,27 +1,57 @@
 # GeneClaw tool: write_file
 
+(fn ensure_parent_dir [path]
+  (var target ((path || "") .to_s))
+  (if target/.empty?
+    (return nil)
+  )
+  (var parts (target .split "/"))
+  (if (parts/.size <= 1)
+    (return nil)
+  )
+  (var parent ((parts .slice 0 (parts/.size - 1)) .join "/"))
+  (if parent/.not_empty?
+    (system/shell #"mkdir -p '#{parent}'")
+  )
+)
+
 (fn $ns/register_write_file_tool [register_tool log workspace_root]
   (register_tool "write_file"
-    "Write a file within the workspace"
+    "Write or create a file within the workspace using a relative path. Include both path and complete content in the same call."
     {^type "object"
      ^properties {
-       ^path {^type "string" ^description "Relative path within workspace"}
-       ^content {^type "string" ^description "File content to write"}
+       ^path {^type "string" ^description "Relative path within workspace; absolute paths are not allowed"}
+       ^content {^type "string" ^description "Complete file content to write; do not omit this field"}
      }
      ^required ["path" "content"]}
     (fn [args]
-      (var path args/path)
-      (var content args/content)
+      (var path ((args/path || "") .to_s))
       (if path/.empty?
         (return {^error "Missing path"})
       )
+      (if ((path .starts_with "/") || (path .starts_with "~"))
+        (return {^error "Path must be relative to the workspace"})
+      )
+      (if (path .include? "..")
+        (return {^error "Path traversal not allowed"})
+      )
+      (if_not (args .contains "content")
+        (return {^error "Missing content"})
+      )
+      (var content args/content)
+      (if (content == nil)
+        (return {^error "Missing content"})
+      )
+
+      (var content_text (if (content is String) content else (content .to_s)))
 
       (var full_path #"#{workspace_root}/#{path}")
-      (log .debug #"write_file: #{full_path} (#{content/.size} bytes)")
+      (log .debug #"write_file: #{full_path} (#{content_text/.size} bytes)")
       (try
-        (gene/io/write full_path content)
-        (log .info #"write_file success: #{path} (#{content/.size} bytes)")
-        {^path path ^bytes content/.size}
+        (ensure_parent_dir full_path)
+        (gene/io/write full_path content_text)
+        (log .info #"write_file success: #{path} (#{content_text/.size} bytes)")
+        {^path path ^bytes content_text/.size}
       catch *
         (log .error #"write_file failed: #{path} - #{$ex/message}")
         {^error #"Cannot write: #{$ex/message}"}

@@ -1,0 +1,37 @@
+#!/usr/bin/env gene run
+
+(import register_write_file_tool from "tools/write_file")
+
+(var log (new genex/logging/Logger $ns))
+(var tool_handler nil)
+(var workspace_root #"/tmp/geneclaw-write-file-#{gene/now/.call/.to_i}")
+
+(fn register_test_tool [name description params handler]
+  (if (name == "write_file")
+    (tool_handler = handler)
+  )
+)
+
+(system/shell #"rm -rf '#{workspace_root}'")
+(system/shell #"mkdir -p '#{workspace_root}'")
+
+(register_write_file_tool register_test_tool log workspace_root)
+(assert (tool_handler != nil))
+
+(var missing_content (tool_handler {^path "csv_parser.py"}))
+(assert (missing_content/error == "Missing content"))
+
+(var absolute_path (tool_handler {^path "/root/gene-workspace/csv-parser/csv_parser.py" ^content "print('hello')"}))
+(assert (absolute_path/error == "Path must be relative to the workspace"))
+
+(var traversal_path (tool_handler {^path "../outside.py" ^content "print('hello')"}))
+(assert (traversal_path/error == "Path traversal not allowed"))
+
+(var nested_write (tool_handler {^path "csv-parser/csv_parser.py" ^content "print('hello')"}))
+(assert (nested_write/path == "csv-parser/csv_parser.py"))
+(assert (nested_write/bytes == 14))
+(assert ((gene/io/read #"#{workspace_root}/csv-parser/csv_parser.py") == "print('hello')"))
+
+(system/shell #"rm -rf '#{workspace_root}'")
+
+(println "ok")
