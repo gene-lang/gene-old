@@ -2,7 +2,7 @@
 # Resolves config from schema + env, exports a single CONFIG map.
 # Consumers access values via paths: CONFIG/llm/provider, CONFIG/slack/bot_token, etc.
 
-(import GENECLAW_HOME HOME_CONFIG_PATH HOME_STATE_PATH HOME_WORKSPACE_PATH SESSIONS_PATH SCHEDULER_PATH JOBS_PATH RUNS_PATH ASSETS_ROOT FILES_ROOT DOCUMENT_ROOT ARTIFACT_ROOT LOGS_PATH ARCHIVE_PATH TMP_PATH ensure_home_bootstrap load_home_config_raw interpolate_value from "home_store")
+(import GENECLAW_HOME HOME_CONFIG_PATH HOME_STATE_PATH SESSIONS_PATH SCHEDULER_PATH JOBS_PATH RUNS_PATH ASSETS_ROOT DOCUMENT_ROOT ARTIFACT_ROOT LOGS_PATH ARCHIVE_PATH TMP_PATH ensure_home_bootstrap load_home_config_raw interpolate_value from "home_store")
 (import CONFIG_SCHEMA from "config_schema")
 (import ensure_map lookup_path set_path_value resolve_config_from_schema build_public_config_from_schema secret_configured:helper_secret_configured redact_secret:helper_redact_secret render_public_config_value:helper_render_public_config_value from "config_helpers")
 
@@ -66,7 +66,6 @@
 ($ns/GENECLAW_HOME = GENECLAW_HOME)
 ($ns/HOME_CONFIG_PATH = HOME_CONFIG_PATH)
 ($ns/HOME_STATE_PATH = HOME_STATE_PATH)
-($ns/HOME_WORKSPACE_PATH = HOME_WORKSPACE_PATH)
 ($ns/SESSIONS_PATH = SESSIONS_PATH)
 ($ns/SCHEDULER_PATH = SCHEDULER_PATH)
 ($ns/JOBS_PATH = JOBS_PATH)
@@ -75,7 +74,6 @@
 ($ns/LOGS_PATH = LOGS_PATH)
 ($ns/ARCHIVE_PATH = ARCHIVE_PATH)
 ($ns/TMP_PATH = TMP_PATH)
-($ns/WORKSPACE_ROOT = FILES_ROOT)
 ($ns/DOCUMENT_ROOT = DOCUMENT_ROOT)
 ($ns/ARTIFACT_ROOT = ARTIFACT_ROOT)
 
@@ -106,10 +104,6 @@
   (set_path_value public_config "home/logs_root" LOGS_PATH)
   (set_path_value public_config "home/archive_root" ARCHIVE_PATH)
   (set_path_value public_config "home/tmp_root" TMP_PATH)
-  (set_path_value public_config "workspace/state_root" HOME_STATE_PATH)
-  (set_path_value public_config "workspace/root" FILES_ROOT)
-  (set_path_value public_config "workspace/document_root" DOCUMENT_ROOT)
-  (set_path_value public_config "workspace/artifact_root" ARTIFACT_ROOT)
   (set_path_value public_config "assets/uploaded_root" DOCUMENT_ROOT)
   (set_path_value public_config "assets/generated_root" ARTIFACT_ROOT)
   public_config

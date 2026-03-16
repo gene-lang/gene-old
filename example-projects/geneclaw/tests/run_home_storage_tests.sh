@@ -42,6 +42,7 @@ run_test() {
     cd "$APP_DIR"
     env \
       GENECLAW_HOME="$HOME_DIR" \
+      EXPECTED_PROVIDER="anthropic" \
       GENECLAW_TEST_PROVIDER="anthropic" \
       GENECLAW_TEST_MODEL="gpt-5.1-mini" \
       GENECLAW_TEST_ANTHROPIC_MODEL="claude-sonnet-4-6" \
@@ -54,6 +55,7 @@ run_test() {
 }
 
 run_test tests/test_config_schema_helpers.gene
+run_test tests/test_config_provider.gene
 run_test tests/test_home_storage_config.gene
 run_test tests/test_home_storage_write.gene
 run_test tests/test_home_storage_runtime_write.gene

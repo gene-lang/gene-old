@@ -7,7 +7,6 @@
 ($ns/GENECLAW_HOME = ($env .get "GENECLAW_HOME" DEFAULT_GENECLAW_HOME))
 ($ns/HOME_CONFIG_PATH = #"#{GENECLAW_HOME}/config")
 ($ns/HOME_STATE_PATH = #"#{GENECLAW_HOME}/state")
-($ns/HOME_WORKSPACE_PATH = HOME_STATE_PATH)
 ($ns/STATE_SYSTEM_PROMPT_PATH = #"#{HOME_STATE_PATH}/system_prompt")
 ($ns/SESSIONS_PATH = #"#{GENECLAW_HOME}/sessions")
 ($ns/SCHEDULER_PATH = #"#{GENECLAW_HOME}/scheduler")
@@ -19,7 +18,6 @@
 ($ns/LOGS_PATH = #"#{GENECLAW_HOME}/logs")
 ($ns/ARCHIVE_PATH = #"#{GENECLAW_HOME}/archive")
 ($ns/TMP_PATH = #"#{GENECLAW_HOME}/tmp")
-($ns/FILES_ROOT = TMP_PATH)
 ($ns/BOOTSTRAPPED = false)
 ($ns/DEFAULT_SYSTEM_PROMPT = "You are GeneClaw, a capable AI agent. You can use tools to complete tasks. After receiving a tool result, provide a natural response. For general conversation, respond normally without tool calls.")
 

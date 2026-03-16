@@ -1,6 +1,6 @@
 # GeneClaw tool: send_document
 
-(import CONFIG WORKSPACE_ROOT ARTIFACT_ROOT from "config")
+(import CONFIG TMP_PATH ARTIFACT_ROOT from "config")
 (import select_send_document_path record_outbound_document from "documents")
 
 
@@ -61,7 +61,7 @@
           CONFIG/slack/bot_token
           resolved_path
           {
-            ^allowed_roots [WORKSPACE_ROOT ARTIFACT_ROOT]
+            ^allowed_roots [TMP_PATH ARTIFACT_ROOT]
             ^channel_id channel_id
             ^thread_ts thread_ts
             ^title title

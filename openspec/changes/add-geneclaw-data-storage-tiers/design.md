@@ -1,9 +1,8 @@
 ## Context
 
-GeneClaw's current filesystem persistence is functional, but it is still
-framed around a unified workspace tree. The strategy note in
-`example-projects/geneclaw/tmp/diff_data_diff_strategy.md` argues for a more
-explicit storage taxonomy:
+This change started from GeneClaw's earlier workspace-tree persistence model.
+The strategy note in `example-projects/geneclaw/tmp/diff_data_diff_strategy.md`
+argues for a more explicit storage taxonomy:
 
 - Config stays human-authored and low-churn.
 - Small runtime state stays eagerly loaded.
@@ -30,6 +29,33 @@ work in general, with GeneClaw as the first adopter.
   - Introduce a binary persistence format.
   - Define automatic migration tooling from the current layout.
   - Fully specify archival compaction or retention algorithms.
+
+## Implementation Status
+
+- GeneClaw has now adopted the app-chosen tiered home layout described by this
+  change.
+  - Current roots in `example-projects/geneclaw/src/home_store.gene`:
+    ```text
+    config/
+    state/
+    sessions/
+    scheduler/jobs/
+    scheduler/runs/
+    assets/uploaded/
+    assets/generated/
+    logs/
+    archive/
+    tmp/
+    ```
+
+- The earlier GeneClaw filesystem-storage follow-on
+  `update-geneclaw-workspace-filesystem-storage` carried the initial
+  implementation work, and the current code has since converged on the tiered
+  layout rather than a single `GENECLAW_HOME/workspace` tree.
+
+- GeneClaw's public config surface now exposes only the tiered home roots.
+  - The old `workspace/*` compatibility aliases were removed so the runtime and
+    config API match the on-disk contract directly.
 
 ## Decisions
 
@@ -152,20 +178,24 @@ work in general, with GeneClaw as the first adopter.
 ## Migration Plan
 
 1. Ratify the tiered storage model in OpenSpec.
-2. Create follow-on implementation proposals for adopting apps, starting with
-   GeneClaw.
+2. Carry GeneClaw adoption through the home-store implementation and align its
+   durable layout with app-selected tier roots.
 3. Allow first-adopter implementations to reset durable state instead of
    migrating old data.
 4. Implement archive and append-only log optimizations after the mutable record
    tiers are stable.
 
-## Open Questions
+## Follow-On Defaults
 
-- Whether tool audit should live in `.log` text files or append-only `.gene`
-  files for the first implementation.
-  A: append only .gene file
-- Whether document indexes should remain purely derived or gain a rebuildable
-  cache file when collection sizes grow.
-  A: derived in v1
-- What operational threshold should trigger archival of cold sessions or runs.
-  A: when last modification time is >X days (X defaults to 10)
+- Operational logs use append-only `.gene` files under `logs/`, partitioned by
+  day.
+  - GeneClaw's current audit path follows the form `logs/audit-YYYY-MM-DD.gene`.
+
+- Document, session, and job indexes remain derived in v1 rather than stored as
+  authoritative registries or caches.
+
+- Cold sessions and runs should become archive candidates when their last
+  modification time is older than `X` days.
+  - Default planning value: `X = 10`.
+  - Automatic archival, compaction, and retention enforcement remain a later
+    follow-on once the mutable record tiers are stable.

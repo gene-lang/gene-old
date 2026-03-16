@@ -1,6 +1,6 @@
 # GeneClaw document ingestion and prompt shaping
 
-(import CONFIG WORKSPACE_ROOT DOCUMENT_ROOT ARTIFACT_ROOT from "config")
+(import CONFIG TMP_PATH DOCUMENT_ROOT ARTIFACT_ROOT from "config")
 (import document_record_path from "home_store")
 (import document_save from "db")
 
@@ -458,7 +458,7 @@
   (if (requested .starts_with "/")
     [requested]
   else
-    [#"#{ARTIFACT_ROOT}/#{requested}" #"#{WORKSPACE_ROOT}/#{requested}"]
+    [#"#{ARTIFACT_ROOT}/#{requested}" #"#{TMP_PATH}/#{requested}"]
   )
 )
 

@@ -4,7 +4,7 @@ A tool-using AI agent platform built entirely in Gene.
 
 ## What it does
 
-GeneClaw receives commands (via REST API or Slack webhook), runs a bounded agent loop that can call tools, and returns the result. Tool audit, run tracking, schedules, document metadata, and session state are persisted under `GENECLAW_HOME/workspace` as serialized Gene files.
+GeneClaw receives commands (via REST API or Slack webhook), runs a bounded agent loop that can call tools, and returns the result. Tool audit, run tracking, schedules, document metadata, session state, and hot runtime state are persisted across tiered home roots under `GENECLAW_HOME`.
 
 ## Architecture
 
@@ -15,7 +15,7 @@ Slack/REST → Router → Agent Orchestrator → LLM Provider (OpenAI / Anthropi
                         ↓      ↓       ↓       ↓        ↓
                      shell  read_file  http   get_time  browser_playwright
                                ↓
-      GENECLAW_HOME (config + workspace filesystem tree)
+      GENECLAW_HOME (config + state + records + logs filesystem tree)
 ```
 
 ## Files
@@ -28,8 +28,8 @@ Slack/REST → Router → Agent Orchestrator → LLM Provider (OpenAI / Anthropi
 - `src/tools/*.mjs` - Playwright helper scripts
 - `src/config.gene` - Home-backed config loader and public config export
 - `src/home_store.gene` - `GENECLAW_HOME` bootstrap and interpolation helpers
-- `src/workspace_state.gene` - Serialized system prompt and session memory store
-- `src/db.gene` - filesystem-backed storage for audit, runs, schedules, and documents
+- `src/workspace_state.gene` - Serialized hot-state and session memory store
+- `src/db.gene` - filesystem-backed keyed-record and append-only log storage
 
 ## Docs
 
@@ -52,8 +52,12 @@ cd example-projects/geneclaw
 GeneClaw now boots from `GENECLAW_HOME`.
 
 - `GENECLAW_HOME/config` stores non-sensitive runtime config as serialized Gene.
-- `GENECLAW_HOME/workspace` stores the system prompt and session memory as serialized Gene.
-- `GENECLAW_HOME/files`, `GENECLAW_HOME/documents`, and `GENECLAW_HOME/artifacts` are managed filesystem roots for tools and document staging.
+- `GENECLAW_HOME/state` stores hot runtime state such as the system prompt.
+- `GENECLAW_HOME/sessions`, `GENECLAW_HOME/scheduler/jobs`, and `GENECLAW_HOME/scheduler/runs` store keyed durable records.
+- `GENECLAW_HOME/assets/uploaded` and `GENECLAW_HOME/assets/generated` are managed roots for inbound and generated files.
+- `GENECLAW_HOME/logs` stores append-only audit data.
+- `GENECLAW_HOME/archive` is reserved for cold durable data.
+- `GENECLAW_HOME/tmp` is the scratch workspace root used by file-oriented tools.
 - The built-in repository instance uses `/Users/gcao/gene-workspace/gene-old/example-projects/geneclaw/home`.
 
 Non-sensitive config can use environment placeholders inside any string:
@@ -68,7 +72,7 @@ Key bootstrap and secret environment variables:
 
 | Variable | Description |
 |---|---|
-| `GENECLAW_HOME` | Root directory for serialized config, workspace state, and managed files |
+| `GENECLAW_HOME` | Root directory for serialized config, hot state, keyed records, logs, archive, and managed files |
 | `OPENAI_API_KEY` | OpenAI API key |
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `ANTHROPIC_AUTH_TOKEN` | Anthropic auth token / OAuth token |
@@ -103,7 +107,10 @@ You can also fetch a nested value with a slash-delimited query path:
 ```
 GET /api/config?path=llm/provider
 GET /api/config?path=home/root
-GET /api/config?path=workspace/state_root
+GET /api/config?path=home/state_root
+GET /api/config?path=home/sessions_root
+GET /api/config?path=home/tmp_root
+GET /api/config?path=assets/uploaded_root
 GET /api/config?path=slack/bot_token_configured
 ```
 
