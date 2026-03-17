@@ -6,6 +6,16 @@ import gene/viewer/editor
 import gene/viewer/model
 
 suite "Terminal Gene Viewer Model":
+  test "scalar classification marks supported inline edit token kinds":
+    check classify_scalar_text("12") == VskNumber
+    check classify_scalar_text("true") == VskBool
+    check classify_scalar_text("nil") == VskNil
+    check classify_scalar_text("\"hello\"") == VskString
+    check classify_scalar_text("symbol") == VskSymbol
+    check classify_scalar_text("a/b") == VskComplexSymbol
+    check classify_scalar_text("#/x/") == VskOther
+    check classify_scalar_text("[1]") == VskOther
+
   test "multi-form input becomes a synthetic root sequence":
     let source = """
       # comment
@@ -167,6 +177,68 @@ suite "Terminal Gene Viewer Model":
 
   test "ctrl-e is treated as edit input":
     check classify_input(5).key == VkF2
+
+  test "tab enters inline edit mode for supported scalars":
+    let doc = open_viewer_document_from_source("[1 true]", "inline_tab.gene")
+    let state = new_viewer_state(doc)
+
+    check state.handle_key(VkTab, 10)
+    check state.is_inline_editing()
+    check state.inline_edit_buffer() == "1"
+
+  test "tab rejects inline edit for containers":
+    let doc = open_viewer_document_from_source("[1 [2 3]]", "inline_reject.gene")
+    let state = new_viewer_state(doc)
+    state.move_selection(1, 10)
+
+    check state.handle_key(VkTab, 10)
+    check not state.is_inline_editing()
+    check state.status.contains("unavailable")
+
+  test "inline edit save rewrites the selected scalar and reloads":
+    let source_path = absolutePath("tmp/viewer_inline_save.gene")
+    createDir(parentDir(source_path))
+    writeFile(source_path, "[1 true]")
+
+    defer:
+      if fileExists(source_path):
+        removeFile(source_path)
+
+    let doc = open_viewer_document(source_path)
+    let state = new_viewer_state(doc)
+
+    check state.start_inline_edit()
+    state.backspace_inline_edit()
+    state.append_inline_edit("2")
+    check state.save_inline_edit()
+    check not state.is_inline_editing()
+    check readFile(source_path) == "[2 true]"
+    check state.selected_path() == "/1"
+    check state.current_summary() == "2"
+
+  test "invalid inline edit stays in edit mode until cancel":
+    let source_path = absolutePath("tmp/viewer_inline_invalid.gene")
+    createDir(parentDir(source_path))
+    writeFile(source_path, "[1 true]")
+
+    defer:
+      if fileExists(source_path):
+        removeFile(source_path)
+
+    let doc = open_viewer_document(source_path)
+    let state = new_viewer_state(doc)
+
+    check state.start_inline_edit()
+    state.backspace_inline_edit()
+    state.append_inline_edit("[")
+    state.append_inline_edit("]")
+    check not state.save_inline_edit()
+    check state.is_inline_editing()
+    check state.status.contains("invalid")
+    check readFile(source_path) == "[1 true]"
+
+    state.cancel_inline_edit()
+    check not state.is_inline_editing()
 
   test "ctrl-c requires confirmation before exit":
     let doc = open_viewer_document_from_source("[1 2 3]", "quit_confirm.gene")

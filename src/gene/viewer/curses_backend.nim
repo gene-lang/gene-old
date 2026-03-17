@@ -19,6 +19,8 @@ type
 
   ViewerKey* = enum
     VkNone
+    VkTab
+    VkBackspace
     VkEscape
     VkUp
     VkDown
@@ -46,6 +48,7 @@ const
   NcKeyRight = 261
   NcKeyPageDown = 338
   NcKeyPageUp = 339
+  NcKeyBackspace = 263
   NcKeyEnter = 343
   NcKeyF0 = 264
   NcKeyResize = 410
@@ -197,6 +200,10 @@ proc draw_text*(row, col, width: int, text: string, highlighted = false, color =
 
 proc classify_input*(key: int): ViewerInput =
   case key
+  of 9:
+    ViewerInput(key: VkTab)
+  of NcKeyBackspace, 8, 127:
+    ViewerInput(key: VkBackspace)
   of 27:
     ViewerInput(key: VkEscape)
   of NcKeyUp:

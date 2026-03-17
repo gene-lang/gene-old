@@ -10,6 +10,7 @@ The parser already exposes `read_stream`, which makes it possible to consume top
   - Open large Gene files in a terminal TUI without dumping the full document to stdout.
   - Support arrow-key navigation for moving within a container and drilling into nested values.
   - Support quick type-ahead navigation within the current container.
+  - Support quick inline edits for simple scalar values without leaving the viewer.
   - Allow the user to hand the current file off to an external terminal editor and return to the viewer afterward.
   - Show the current file path and logical node path at the top of the screen.
   - Show a stable function-key legend at the bottom of the screen.
@@ -17,6 +18,7 @@ The parser already exposes `read_stream`, which makes it possible to consume top
   - Avoid recursive eager parsing of unopened descendants.
 - Non-Goals:
   - Embedded split-pane editing inside the ncurses layout
+  - Editing arrays, maps, genes, or other structural nodes inline
   - Live log tailing
   - Search, filtering, or query language support
   - Syntax highlighting or rich text formatting
@@ -60,6 +62,24 @@ The parser already exposes `read_stream`, which makes it possible to consume top
   - Rationale: the current viewer and terminal editors such as `nvim` both need full ownership of the TTY. Closing curses, launching the editor, and reopening the viewer keeps the implementation simple and robust.
   - Consequence: the first version edits the whole file, not an isolated subtree buffer, and uses the current node only to choose the initial cursor location.
 
+- Decision: add a separate inline-edit mode for simple scalar values only.
+  - Supported initial value kinds:
+    - numbers
+    - `true` / `false`
+    - `nil`
+    - strings
+    - symbols and complex symbols
+  - Rationale: the viewer already tracks exact source spans for scalar nodes, so replacing a single token in place is much cheaper than handing off to a full editor for trivial edits.
+  - Consequence: the model needs explicit scalar editability classification beyond its current color buckets.
+
+- Decision: save inline edits by replacing the selected source span in the backing file, then reloading the document.
+  - Rationale: this reuses the existing reload and path-restore behavior instead of mutating the in-memory tree in place.
+  - Consequence: save must validate that the edited text is a single legal scalar token of a supported kind before writing the file.
+
+- Decision: use `Tab` to enter inline edit mode, `Enter` to save, and `Esc` to cancel while editing.
+  - Rationale: the user explicitly requested `Tab` and `Enter`, and `Esc` is the lowest-friction cancel path in a terminal UI.
+  - Consequence: `Esc` has mode-dependent meaning: cancel while editing, otherwise return to root.
+
 ## Risks / Trade-offs
 
 - Large single-root containers can still be expensive if all child rows are materialized at once.
@@ -76,6 +96,9 @@ The parser already exposes `read_stream`, which makes it possible to consume top
 
 - Type-ahead search can be ambiguous when labels and summaries share repeated prefixes.
   - Mitigation: define deterministic behavior as "jump to the first matching child in current source order" and reset the buffer after a short idle timeout.
+
+- Inline span replacement can produce invalid Gene syntax if the replacement token is malformed.
+  - Mitigation: validate edits as supported single-token scalar values before writing, keep the user in edit mode on validation failure, and allow cancel with `Esc`.
 
 ## Migration Plan
 

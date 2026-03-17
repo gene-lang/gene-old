@@ -5,6 +5,7 @@ import ./curses_backend
 import ./editor
 
 const FooterLegend = "Esc Root  F1 Help  F2 Edit  F5 Reload  F10 Quit"
+const InlineEditLegend = "Enter Save  Esc Cancel  Backspace Delete"
 
 func entry_is_container(entry: ViewerEntry): bool =
   entry.node.kind in {VnkSequence, VnkArray, VnkMap, VnkGene}
@@ -29,10 +30,15 @@ proc draw_header(state: ViewerState, width: int) =
   draw_text(1, 0, width, "Path: " & state.selected_path())
 
 proc draw_footer(state: ViewerState, height, width: int) =
-  draw_text(height - 2, 0, width, state.current_summary(), color = viewer_color(state.current_color()))
+  if state.is_inline_editing():
+    draw_text(height - 2, 0, width, "Edit> " & state.inline_edit_buffer())
+  else:
+    draw_text(height - 2, 0, width, state.current_summary(), color = viewer_color(state.current_color()))
   let status_text =
     if state.status.len > 0:
       state.status
+    elif state.is_inline_editing():
+      InlineEditLegend
     else:
       FooterLegend
   draw_text(height - 1, 0, width, status_text)
@@ -44,6 +50,7 @@ proc draw_help(height, width: int) =
     "Arrow Right or Enter: enter selected container",
     "Arrow Left: return to parent container",
     "Esc: return to root container",
+    "Tab: edit selected scalar inline",
     "Type digits/text: jump by index or substring",
     "F2 or Ctrl-E: open file in external editor",
     "F5: reload file from disk",
@@ -128,6 +135,8 @@ proc handle_key*(state: ViewerState, key: ViewerKey, body_height: int): bool =
     state.clear_quit_pending()
     state.status = ""
   case key
+  of VkTab:
+    discard state.start_inline_edit()
   of VkEscape:
     state.return_to_root()
   of VkUp:
@@ -156,7 +165,25 @@ proc handle_key*(state: ViewerState, key: ViewerKey, body_height: int): bool =
     if state.request_quit():
       return false
     state.status = "Press Ctrl-C again to exit"
-  of VkResize, VkNone:
+  of VkBackspace, VkResize, VkNone:
+    discard
+  true
+
+proc handle_inline_edit_input(state: ViewerState, input: ViewerInput, body_height: int): bool =
+  if input.text.len > 0:
+    state.append_inline_edit(input.text)
+    return true
+
+  case input.key
+  of VkBackspace:
+    state.backspace_inline_edit()
+  of VkEnter:
+    discard state.save_inline_edit()
+  of VkEscape:
+    state.cancel_inline_edit()
+  of VkQuit, VkF10:
+    return state.handle_key(input.key, body_height)
+  else:
     discard
   true
 
@@ -170,7 +197,10 @@ proc run_viewer*(doc: ViewerDocument) =
   while true:
     let input = read_input()
     let body_height = max(1, terminal_height() - 5)
-    if input.text.len > 0:
+    if state.is_inline_editing():
+      if not handle_inline_edit_input(state, input, body_height):
+        break
+    elif input.text.len > 0:
       state.apply_type_ahead(input.text, epochTime(), body_height)
     elif input.key == VkF2:
       state.clear_type_ahead()

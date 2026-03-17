@@ -16,6 +16,7 @@ Navigation:
   Right arrow or Enter  Enter selected container
   Left arrow            Return to parent container
   Esc                   Return to root container
+  Tab                   Edit selected scalar inline
   Type digits/text      Jump by index or substring (0.5s buffer)
   F1                    Toggle help
   F2 or Ctrl-E          Open file in external editor

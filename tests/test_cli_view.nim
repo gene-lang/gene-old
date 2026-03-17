@@ -8,6 +8,7 @@ suite "View CLI":
     check result.success
     check result.output.contains("Usage: gene view <file>")
     check result.output.contains("Esc")
+    check result.output.contains("Tab")
     check result.output.contains("Ctrl-E")
     check result.output.contains("Type digits/text")
     check result.output.contains("F2")

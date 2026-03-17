@@ -126,6 +126,43 @@ The viewer SHALL allow the user to open the current file in an external terminal
 - **THEN** the viewer SHALL remain available after the failed handoff
 - **AND** show a clear status message describing the editor launch failure
 
+### Requirement: Viewer can edit simple scalar values inline
+The viewer SHALL allow in-place editing of selected simple scalar values without leaving the terminal UI.
+
+#### Scenario: Enter inline edit mode for a supported scalar
+- **GIVEN** the current selection is a simple scalar value of a supported kind
+- **AND** the supported kinds include numbers, booleans, `nil`, strings, symbols, and complex symbols
+- **WHEN** the user presses `Tab`
+- **THEN** the viewer SHALL enter inline edit mode
+- **AND** initialize the edit buffer from the selected value's current source text
+
+#### Scenario: Reject inline edit mode for unsupported nodes
+- **GIVEN** the current selection is a container or another non-editable node
+- **WHEN** the user presses `Tab`
+- **THEN** the viewer SHALL remain in browse mode
+- **AND** show a clear status message that inline edit is not available for that selection
+
+#### Scenario: Save a valid inline scalar edit
+- **GIVEN** the viewer is in inline edit mode for a supported scalar
+- **WHEN** the user presses `Enter` with a valid replacement scalar token in the edit buffer
+- **THEN** the viewer SHALL replace the selected source span in the backing file with that token
+- **AND** reload the file from disk
+- **AND** restore the deepest still-valid logical path
+- **AND** leave inline edit mode
+
+#### Scenario: Reject an invalid inline scalar edit
+- **GIVEN** the viewer is in inline edit mode for a supported scalar
+- **WHEN** the user presses `Enter` with an invalid or unsupported replacement token in the edit buffer
+- **THEN** the viewer SHALL NOT modify the backing file
+- **AND** remain in inline edit mode
+- **AND** show a clear validation error
+
+#### Scenario: Cancel inline edit mode
+- **GIVEN** the viewer is in inline edit mode
+- **WHEN** the user presses `Esc`
+- **THEN** the viewer SHALL leave inline edit mode without writing the file
+- **AND** restore normal browse-mode key behavior
+
 ### Requirement: Viewer reload and startup failures are recoverable
 The viewer SHALL fail clearly when startup cannot proceed and SHALL allow a running session to reload the file from disk.
 

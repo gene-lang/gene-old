@@ -24,6 +24,15 @@ type
     VckLiteral
     VckOther
 
+  ViewerScalarKind* = enum
+    VskNumber
+    VskBool
+    VskNil
+    VskString
+    VskSymbol
+    VskComplexSymbol
+    VskOther
+
   ViewerPathSegment* = object
     kind*: ViewerPathKind
     index*: int
@@ -70,10 +79,14 @@ type
     type_ahead_query: string
     last_type_ahead_at: float
     quit_pending: bool
+    inline_editing: bool
+    inline_edit_buffer: string
 
 proc open_viewer_document*(file_path: string): ViewerDocument
 proc open_viewer_document_from_source*(source, file_path: string): ViewerDocument
 proc new_viewer_state*(doc: ViewerDocument): ViewerState
+proc scan_top_level_spans(source: string): seq[ViewerSpan]
+proc kind_from_source(source: string, span: ViewerSpan): ViewerNodeKind
 proc ensure_entries*(node: ViewerNode)
 proc current_frame*(state: ViewerState): var ViewerFrame
 proc current_entries*(state: ViewerState): seq[ViewerEntry]
@@ -82,9 +95,18 @@ proc selected_path_segments*(state: ViewerState): seq[ViewerPathSegment]
 proc selected_path*(state: ViewerState): string
 proc current_summary*(state: ViewerState): string
 proc selected_location*(state: ViewerState): ViewerSourceLocation
+proc classify_scalar_text*(text: string): ViewerScalarKind
 proc classify_node*(node: ViewerNode): ViewerColorKind
 proc classify_entry*(entry: ViewerEntry): ViewerColorKind
 proc current_color*(state: ViewerState): ViewerColorKind
+proc is_inline_editing*(state: ViewerState): bool
+proc inline_edit_buffer*(state: ViewerState): string
+proc can_inline_edit*(state: ViewerState): bool
+proc start_inline_edit*(state: ViewerState): bool
+proc cancel_inline_edit*(state: ViewerState)
+proc append_inline_edit*(state: ViewerState, text: string)
+proc backspace_inline_edit*(state: ViewerState)
+proc save_inline_edit*(state: ViewerState): bool
 proc clear_type_ahead*(state: ViewerState)
 proc clear_quit_pending*(state: ViewerState)
 proc request_quit*(state: ViewerState): bool
@@ -244,6 +266,33 @@ proc scalar_color_kind(node: ViewerNode): ViewerColorKind =
   if text in ["nil", "true", "false", "void", "_"] or text[0] == '\'' or looks_numeric(text):
     return VckLiteral
   VckOther
+
+proc classify_scalar_text*(text: string): ViewerScalarKind =
+  if text.len == 0:
+    return VskOther
+
+  let spans = scan_top_level_spans(text)
+  if spans.len != 1:
+    return VskOther
+  let span = spans[0]
+  if span.start != 0 or span.stop != text.len:
+    return VskOther
+  if kind_from_source(text, span) != VnkScalar:
+    return VskOther
+
+  if text[0] == '"' or text.startsWith("#\""):
+    return VskString
+  if text == "true" or text == "false":
+    return VskBool
+  if text == "nil":
+    return VskNil
+  if looks_numeric(text):
+    return VskNumber
+  if text[0] == '\'' or text.startsWith("#/"):
+    return VskOther
+  if text.contains('/'):
+    return VskComplexSymbol
+  VskSymbol
 
 proc kind_from_source(source: string, span: ViewerSpan): ViewerNodeKind =
   if span.synthetic:
@@ -665,7 +714,9 @@ proc new_viewer_state*(doc: ViewerDocument): ViewerState =
     show_help: false,
     type_ahead_query: "",
     last_type_ahead_at: 0.0,
-    quit_pending: false
+    quit_pending: false,
+    inline_editing: false,
+    inline_edit_buffer: ""
   )
   if doc.root.kind == VnkScalar:
     result.status = "scalar value"
@@ -710,6 +761,12 @@ proc current_summary*(state: ViewerState): string =
     return selected.summary
   collapse_preview(state.current_frame().node.span_text())
 
+proc current_target_node(state: ViewerState): ViewerNode =
+  let selected = state.selected_entry()
+  if selected != nil:
+    return selected[].node
+  state.current_frame().node
+
 proc location_for_offset(source: string, offset: int): ViewerSourceLocation =
   let stop_at = max_int(0, min_int(source.len, offset))
   result = ViewerSourceLocation(line: 1, column: 1)
@@ -732,13 +789,7 @@ proc location_for_offset(source: string, offset: int): ViewerSourceLocation =
       inc(pos)
 
 proc selected_location*(state: ViewerState): ViewerSourceLocation =
-  let selected = state.selected_entry()
-  let node =
-    if selected != nil:
-      selected[].node
-    else:
-      state.current_frame().node
-
+  let node = state.current_target_node()
   if node.span.synthetic:
     return ViewerSourceLocation(line: 1, column: 1)
   location_for_offset(state.doc.source, node.span.start)
@@ -762,6 +813,58 @@ proc current_color*(state: ViewerState): ViewerColorKind =
   if selected != nil:
     return classify_entry(selected[])
   classify_node(state.current_frame().node)
+
+proc is_editable_scalar(node: ViewerNode): bool =
+  node != nil and
+  node.kind == VnkScalar and
+  not node.span.synthetic and
+  classify_scalar_text(node.span_text()) != VskOther
+
+proc is_inline_editing*(state: ViewerState): bool =
+  state.inline_editing
+
+proc inline_edit_buffer*(state: ViewerState): string =
+  state.inline_edit_buffer
+
+proc can_inline_edit*(state: ViewerState): bool =
+  is_editable_scalar(state.current_target_node())
+
+proc clear_inline_edit(state: ViewerState) =
+  state.inline_editing = false
+  state.inline_edit_buffer = ""
+
+proc start_inline_edit*(state: ViewerState): bool =
+  state.clear_type_ahead()
+  state.clear_quit_pending()
+  let node = state.current_target_node()
+  if not is_editable_scalar(node):
+    state.status = "inline edit unavailable for this value"
+    return false
+  state.inline_editing = true
+  state.inline_edit_buffer = node.span_text()
+  state.status = ""
+  true
+
+proc cancel_inline_edit*(state: ViewerState) =
+  if not state.inline_editing:
+    return
+  state.clear_inline_edit()
+  state.status = "edit cancelled"
+
+proc append_inline_edit*(state: ViewerState, text: string) =
+  if not state.inline_editing or text.len == 0:
+    return
+  state.clear_quit_pending()
+  state.inline_edit_buffer.add(text)
+  state.status = ""
+
+proc backspace_inline_edit*(state: ViewerState) =
+  if not state.inline_editing:
+    return
+  state.clear_quit_pending()
+  if state.inline_edit_buffer.len > 0:
+    state.inline_edit_buffer.setLen(state.inline_edit_buffer.len - 1)
+  state.status = ""
 
 proc clear_type_ahead*(state: ViewerState) =
   state.type_ahead_query = ""
@@ -881,6 +984,7 @@ proc reload*(state: ViewerState) =
   let bodyless = 1
   state.clear_type_ahead()
   state.clear_quit_pending()
+  state.clear_inline_edit()
   state.doc = open_viewer_document(state.doc.file_path)
   state.frames = @[new_frame(state.doc.root)]
 
@@ -901,3 +1005,36 @@ proc reload*(state: ViewerState) =
 
   restore_visible_selection(state, bodyless)
   set_status(state, "reloaded")
+
+proc save_inline_edit*(state: ViewerState): bool =
+  if not state.inline_editing:
+    return false
+
+  let replacement = state.inline_edit_buffer
+  if classify_scalar_text(replacement) == VskOther:
+    state.status = "invalid scalar value"
+    return false
+
+  let node = state.current_target_node()
+  if not is_editable_scalar(node):
+    state.status = "inline edit unavailable for this value"
+    return false
+
+  let span = node.span
+  var updated = newStringOfCap(state.doc.source.len - (span.stop - span.start) + replacement.len)
+  if span.start > 0:
+    updated.add(state.doc.source[0 ..< span.start])
+  updated.add(replacement)
+  if span.stop < state.doc.source.len:
+    updated.add(state.doc.source[span.stop ..< state.doc.source.len])
+
+  try:
+    writeFile(state.doc.file_path, updated)
+  except IOError as e:
+    state.status = "save failed: " & e.msg
+    return false
+
+  state.clear_inline_edit()
+  state.reload()
+  state.status = "saved"
+  true
