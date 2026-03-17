@@ -108,6 +108,7 @@ proc openai_error_value*(err: OpenAIError): Value {.gcsafe.} =
   let error_obj = new_instance_value(error_class)
   attach_error_class(error_obj)
   instance_props(error_obj)["message".to_key()] = err.msg.to_value
+  instance_props(error_obj)["type".to_key()] = "error".to_value
   instance_props(error_obj)["status".to_key()] = err.status.to_value
   if err.provider_error.len > 0:
     instance_props(error_obj)["provider_error".to_key()] = err.provider_error.to_value
@@ -115,6 +116,8 @@ proc openai_error_value*(err: OpenAIError): Value {.gcsafe.} =
     instance_props(error_obj)["request_id".to_key()] = err.request_id.to_value
   if err.retry_after != 0:
     instance_props(error_obj)["retry_after".to_key()] = err.retry_after.to_value
+  if err.raw_body.len > 0:
+    instance_props(error_obj)["raw_body".to_key()] = err.raw_body.to_value
   if err.metadata != nil:
     instance_props(error_obj)["metadata".to_key()] = jsonToGeneValue(err.metadata)
   result = error_obj
@@ -184,6 +187,7 @@ proc anthropic_error_value*(err: AnthropicError): Value {.gcsafe.} =
   let error_obj = new_instance_value(error_class)
   attach_anthropic_error_class(error_obj)
   instance_props(error_obj)["message".to_key()] = err.msg.to_value
+  instance_props(error_obj)["type".to_key()] = "error".to_value
   instance_props(error_obj)["status".to_key()] = err.status.to_value
   if err.provider_error.len > 0:
     instance_props(error_obj)["provider_error".to_key()] = err.provider_error.to_value
@@ -191,6 +195,8 @@ proc anthropic_error_value*(err: AnthropicError): Value {.gcsafe.} =
     instance_props(error_obj)["request_id".to_key()] = err.request_id.to_value
   if err.retry_after != 0:
     instance_props(error_obj)["retry_after".to_key()] = err.retry_after.to_value
+  if err.raw_body.len > 0:
+    instance_props(error_obj)["raw_body".to_key()] = err.raw_body.to_value
   if err.metadata != nil:
     instance_props(error_obj)["metadata".to_key()] = jsonToGeneValue(err.metadata)
   result = error_obj
@@ -295,6 +301,8 @@ proc call_openai_endpoint(config: OpenAIConfig, endpoint: string, payload: JsonN
   except OpenAIError as e:
     if ai_debug:
       echo "[genex/ai] call_openai_endpoint caught OpenAIError: ", e.msg
+      if e.status != 0 or e.raw_body.len > 0:
+        echo "[genex/ai] call_openai_endpoint error_details status=", e.status, " body=", e.raw_body
     return openai_error_value(e)
 
 proc call_anthropic_endpoint(config: AnthropicConfig, endpoint: string, payload: JsonNode): Value {.gcsafe.} =
@@ -309,6 +317,8 @@ proc call_anthropic_endpoint(config: AnthropicConfig, endpoint: string, payload:
   except AnthropicError as e:
     if ai_debug:
       echo "[genex/ai] call_anthropic_endpoint caught AnthropicError: ", e.msg
+      if e.status != 0 or e.raw_body.len > 0:
+        echo "[genex/ai] call_anthropic_endpoint error_details status=", e.status, " body=", e.raw_body
     return anthropic_error_value(e)
 
 proc call_gene_callable(vm: ptr VirtualMachine, callable: Value, args: seq[Value]) {.gcsafe.} =

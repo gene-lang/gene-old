@@ -18,6 +18,44 @@ cd example-projects/llm_app/frontend
 npm install
 npm run dev
 
+### Anthropic OAuth
+ANTHROPIC_AUTH_TOKEN='sk-ant-oat01-REPLACE_ME'
+
+curl -N -sS \
+  -D /tmp/anthropic.headers \
+  -o /tmp/anthropic.body \
+  -w '\nHTTP %{http_code}\n' \
+  https://api.anthropic.com/v1/messages \
+  -H 'content-type: application/json' \
+  -H 'accept: application/json' \
+  -H 'anthropic-version: 2023-06-01' \
+  -H 'anthropic-dangerous-direct-browser-access: true' \
+  -H 'anthropic-beta: claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14' \
+  -H 'user-agent: claude-cli/2.1.75' \
+  -H 'x-app: cli' \
+  -H "authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
+  --data-binary @- <<'JSON'
+{
+  "model": "claude-sonnet-4-6",
+  "max_tokens": 32,
+  "stream": true,
+  "system": [
+    {
+      "type": "text",
+      "text": "You are Claude Code, Anthropic's official CLI for Claude."
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": "Reply with OK."
+    }
+  ]
+}
+JSON
+
+cat /tmp/anthropic.body
+
 open http://localhost:5173
 
 ## Major features to add:

@@ -1,6 +1,6 @@
 #!/usr/bin/env gene run
 
-(import build_openai_request build_anthropic_request normalize_anthropic_response provider_supports_images? validate_image_inputs from "llm_provider")
+(import build_openai_request build_anthropic_request error_message_from_response normalize_anthropic_response provider_supports_images? validate_image_inputs from "llm_provider")
 
 (var tools_spec [
   {^type "function"
@@ -99,5 +99,16 @@
 (assert (normalized/tool_calls/0/function/name == "list_files"))
 (var parsed_args (gene/json/parse normalized/tool_calls/0/function/arguments))
 (assert (parsed_args/path == "/tmp"))
+
+(var anthropic_error_message (error_message_from_response {
+  ^type "error"
+  ^message "Anthropic API Error: Error"
+  ^status 401
+  ^raw_body "{\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"invalid x-api-key\"}}"
+}))
+
+(assert (anthropic_error_message .include? "Anthropic API Error: Error"))
+(assert (anthropic_error_message .include? "status=401"))
+(assert (anthropic_error_message .include? "body={\"type\":\"error\""))
 
 (println "ok")

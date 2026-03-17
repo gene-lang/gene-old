@@ -20,12 +20,26 @@ type
     request_id*: string
     retry_after*: int
     metadata*: JsonNode
+    raw_body*: string
 
 const
   DEFAULT_ANTHROPIC_BASE_URL* = "https://api.anthropic.com/v1"
   DEFAULT_ANTHROPIC_VERSION* = "2023-06-01"
   DEFAULT_ANTHROPIC_TIMEOUT_MS* = 30000
   DEFAULT_ANTHROPIC_MAX_RETRIES* = 3
+  DEFAULT_ANTHROPIC_USER_AGENT* = "gene-anthropic-client/1.0"
+  CLAUDE_CODE_USER_AGENT* = "claude-cli/2.1.75"
+  CLAUDE_CODE_SYSTEM_PROMPT* = "You are Claude Code, Anthropic's official CLI for Claude."
+  PI_AI_DEFAULT_ANTHROPIC_BETAS* = [
+    "fine-grained-tool-streaming-2025-05-14",
+    "interleaved-thinking-2025-05-14"
+  ]
+  PI_AI_OAUTH_ANTHROPIC_BETAS* = [
+    "claude-code-20250219",
+    "oauth-2025-04-20",
+    "fine-grained-tool-streaming-2025-05-14",
+    "interleaved-thinking-2025-05-14"
+  ]
 
 proc get_env_var(key: string, default: string = ""): string =
   try:
@@ -36,6 +50,58 @@ proc get_env_var(key: string, default: string = ""): string =
 proc isAnthropicOAuthToken*(token: string): bool =
   ## OpenClaw/pi-ai detects Anthropic OAuth tokens via this prefix.
   token.len > 0 and token.contains("sk-ant-oat")
+
+proc addUniqueAnthropicBeta(parts: var seq[string], beta: string) =
+  let trimmed = beta.strip()
+  if trimmed.len == 0:
+    return
+  if trimmed notin parts:
+    parts.add(trimmed)
+
+proc mergeAnthropicBetas(existing: string, required: openArray[string]): string =
+  var parts: seq[string] = @[]
+  for beta in required:
+    addUniqueAnthropicBeta(parts, beta)
+  for beta in existing.split(','):
+    addUniqueAnthropicBeta(parts, beta)
+  result = parts.join(",")
+
+proc addAnthropicSystemTextBlock(blocks: JsonNode, text: string) =
+  if text.strip().len == 0:
+    return
+  blocks.add(%*{
+    "type": "text",
+    "text": text
+  })
+
+proc normalizeAnthropicSystemBlocks(system_value: JsonNode): JsonNode =
+  result = newJArray()
+  case system_value.kind
+  of JNull:
+    discard
+  of JString:
+    addAnthropicSystemTextBlock(result, system_value.getStr())
+  of JArray:
+    for item in system_value:
+      case item.kind
+      of JString:
+        addAnthropicSystemTextBlock(result, item.getStr())
+      else:
+        result.add(item)
+  else:
+    result.add(system_value)
+
+proc applyAnthropicOAuthCompatibility(config: AnthropicConfig, payload: var JsonNode) =
+  if not isAnthropicOAuthToken(config.auth_token):
+    return
+
+  var system_blocks = newJArray()
+  addAnthropicSystemTextBlock(system_blocks, CLAUDE_CODE_SYSTEM_PROMPT)
+  if payload.hasKey("system"):
+    let existing_system = normalizeAnthropicSystemBlocks(payload["system"])
+    for item in existing_system:
+      system_blocks.add(item)
+  payload["system"] = system_blocks
 
 proc buildAnthropicConfig*(options: JsonNode = newJNull()): AnthropicConfig =
   let opts = if options.kind != JNull: options else: %*{}
@@ -90,13 +156,20 @@ proc buildAnthropicConfig*(options: JsonNode = newJNull()): AnthropicConfig =
   )
 
   result.headers["Content-Type"] = "application/json"
-  result.headers["User-Agent"] = "gene-anthropic-client/1.0"
+  result.headers["Accept"] = "application/json"
+  result.headers["User-Agent"] = DEFAULT_ANTHROPIC_USER_AGENT
   result.headers["anthropic-version"] = anthropic_version
 
   if result.auth_token.len > 0:
     result.headers["Authorization"] = "Bearer " & result.auth_token
   elif result.api_token.len > 0:
     result.headers["x-api-key"] = result.api_token
+
+  let uses_oauth_setup_token = isAnthropicOAuthToken(result.auth_token)
+  if uses_oauth_setup_token:
+    result.headers["User-Agent"] = CLAUDE_CODE_USER_AGENT
+    result.headers["x-app"] = "cli"
+    result.headers["anthropic-dangerous-direct-browser-access"] = "true"
 
   var anthropic_beta = ""
   if opts.hasKey("anthropic_beta"):
@@ -106,8 +179,9 @@ proc buildAnthropicConfig*(options: JsonNode = newJNull()): AnthropicConfig =
   else:
     anthropic_beta = get_env_var("ANTHROPIC_BETA")
 
-  # Mirror OpenClaw default for OAuth-authenticated flows.
-  if anthropic_beta.len == 0 and result.auth_token.len > 0:
+  if uses_oauth_setup_token:
+    anthropic_beta = mergeAnthropicBetas(anthropic_beta, PI_AI_OAUTH_ANTHROPIC_BETAS)
+  elif anthropic_beta.len == 0 and result.auth_token.len > 0:
     anthropic_beta = "oauth-2025-04-20"
   if anthropic_beta.len > 0:
     result.headers["anthropic-beta"] = anthropic_beta
@@ -199,7 +273,8 @@ proc performAnthropicRequest*(
         msg: "Anthropic API Error: " & errorMsg,
         status: status_code,
         provider_error: errorType,
-        metadata: errorBody
+        metadata: errorBody,
+        raw_body: response_body
       )
 
       if response.headers.hasKey("request-id"):
@@ -259,6 +334,8 @@ proc buildAnthropicMessagesPayload*(config: AnthropicConfig, options: JsonNode):
   if config.extra != nil:
     for key, value in config.extra:
       payload[key] = value
+
+  applyAnthropicOAuthCompatibility(config, payload)
 
   return payload
 

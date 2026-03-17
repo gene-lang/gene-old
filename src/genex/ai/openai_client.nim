@@ -20,6 +20,7 @@ type
     request_id*: string
     retry_after*: int
     metadata*: JsonNode
+    raw_body*: string
 
   StreamingChunk* = ref object
     delta*: JsonNode
@@ -210,7 +211,8 @@ proc performRequest*(config: OpenAIConfig, httpMethod: string, endpoint: string,
         msg: "OpenAI API Error: " & errorMsg,
         status: parseInt(statusCode),
         provider_error: errorType,
-        metadata: errorBody
+        metadata: errorBody,
+        raw_body: response_body
       )
 
       # Extract request ID if available

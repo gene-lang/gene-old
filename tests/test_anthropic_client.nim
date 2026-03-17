@@ -1,6 +1,12 @@
-import unittest, json, tables, os
+import unittest, json, tables, os, strutils
 
 import ../src/genex/ai/anthropic_client
+
+proc splitBetas(value: string): seq[string] =
+  for part in value.split(','):
+    let trimmed = part.strip()
+    if trimmed.len > 0:
+      result.add(trimmed)
 
 suite "Anthropic Client":
   test "auth token takes precedence over api token":
@@ -20,6 +26,23 @@ suite "Anthropic Client":
     check cfg.auth_token == "sk-ant-oat-from-api-token"
     check cfg.headers.hasKey("Authorization")
     check not cfg.headers.hasKey("x-api-key")
+
+  test "oauth setup token adds Claude Code headers and betas":
+    let cfg = buildAnthropicConfig(%*{
+      "auth_token": "sk-ant-oat01-test-token",
+      "anthropic_beta": "custom-beta"
+    })
+    check cfg.headers["Authorization"] == "Bearer sk-ant-oat01-test-token"
+    check cfg.headers["User-Agent"] == CLAUDE_CODE_USER_AGENT
+    check cfg.headers["x-app"] == "cli"
+    check cfg.headers["anthropic-dangerous-direct-browser-access"] == "true"
+    check cfg.headers["Accept"] == "application/json"
+    let betas = splitBetas(cfg.headers["anthropic-beta"])
+    check "claude-code-20250219" in betas
+    check "oauth-2025-04-20" in betas
+    check "fine-grained-tool-streaming-2025-05-14" in betas
+    check "interleaved-thinking-2025-05-14" in betas
+    check "custom-beta" in betas
 
   test "api token mode uses x-api-key header":
     let cfg = buildAnthropicConfig(%*{
@@ -70,3 +93,20 @@ suite "Anthropic Client":
     check payload["system"].getStr() == "You are helpful."
     check payload["messages"].kind == JArray
     check payload["messages"].len == 1
+
+  test "oauth payload prepends Claude Code system prompt":
+    let cfg = buildAnthropicConfig(%*{
+      "auth_token": "sk-ant-oat01-test-token",
+      "model": "claude-sonnet-4-6"
+    })
+    let payload = buildAnthropicMessagesPayload(cfg, %*{
+      "messages": [{"role": "user", "content": "hello"}],
+      "max_tokens": 42,
+      "system": "You are helpful."
+    })
+    check payload["system"].kind == JArray
+    check payload["system"].len == 2
+    check payload["system"][0]["type"].getStr() == "text"
+    check payload["system"][0]["text"].getStr() == CLAUDE_CODE_SYSTEM_PROMPT
+    check payload["system"][1]["type"].getStr() == "text"
+    check payload["system"][1]["text"].getStr() == "You are helpful."

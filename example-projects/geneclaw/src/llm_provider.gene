@@ -365,22 +365,60 @@
   {^content #"Unsupported LLM provider: #{CONFIG/llm/provider}" ^tool_calls []}
 )
 
-(fn error_message_from_response [response]
+(fn response_error_body_text [response]
   (try
+    (var raw_body ((response/raw_body || "") .to_s))
+    (if raw_body/.not_empty?
+      (return raw_body)
+    )
+    (var metadata (response/metadata || nil))
+    (if metadata
+      (return metadata/.to_json)
+    )
+    ""
+  catch *
+    ""
+  )
+)
+
+(fn $ns/error_message_from_response [response]
+  (try
+    (var message "")
     (if (response is Map)
       (do
         (var error_value (response/error || nil))
         (if (error_value is Map)
-          ((error_value/message || "") .to_s)
+          (message = ((error_value/message || "") .to_s))
         else
-          ""
+          (message = ((response/message || "") .to_s))
         )
       )
-    elif ((response/type || "") == "error")
-      ((response/message || "") .to_s)
     else
-      ""
+      (message = ((response/message || "") .to_s))
     )
+
+    (var status_text "")
+    (try
+      (var status_value (response/status || nil))
+      (if (status_value && ((status_value .to_i) > 0))
+        (status_text = (status_value .to_s))
+      )
+    catch *
+      nil
+    )
+
+    (var body_text (response_error_body_text response))
+    (var parts [])
+    (if message/.not_empty?
+      (parts .append message)
+    )
+    (if status_text/.not_empty?
+      (parts .append #"status=#{status_text}")
+    )
+    (if body_text/.not_empty?
+      (parts .append #"body=#{body_text}")
+    )
+    (parts .join " | ")
   catch *
     ""
   )
