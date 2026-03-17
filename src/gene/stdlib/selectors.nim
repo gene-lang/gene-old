@@ -218,18 +218,24 @@ proc init_selector_class*(object_class: Class) =
         of SmValue:
           if current == VOID:
             not_allowed("Selector did not match (VOID)")
+          if current == NIL:
+            not_allowed("Selector matched but value is nil")
         of SmValues:
           if values_stream.len == 0:
             not_allowed("Selector did not match (empty)")
           for v in values_stream:
             if v == VOID:
               not_allowed("Selector did not match (VOID)")
+            if v == NIL:
+              not_allowed("Selector matched but value is nil")
         of SmEntries:
           if entries_stream.len == 0:
             not_allowed("Selector did not match (empty)")
           for (_, v) in entries_stream:
             if v == VOID:
               not_allowed("Selector did not match (VOID)")
+            if v == NIL:
+              not_allowed("Selector matched but value is nil")
         continue
 
       if seg.kind == VkSymbol:

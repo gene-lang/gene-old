@@ -256,6 +256,29 @@ test_vm """
 """, proc(r: Value) =
   check r.int64 == 2
 
+test_vm """
+  (class Proxy
+    (on_method_missing [name args...]
+      "handled"
+    )
+  )
+  (class LoggingProxy < Proxy)
+  ((new LoggingProxy) .missing)
+""", "handled"
+
+test_vm """
+  ((nil .anything) is Nil)
+""", TRUE
+
+test_vm_error """
+  (class Loop
+    (on_method_missing [name args...]
+      (self .still_missing)
+    )
+  )
+  ((new Loop) .missing)
+"""
+
 # on_extended callback
 # test_vm """
 #   (class A

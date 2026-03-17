@@ -73,6 +73,20 @@ test_vm """
 """, proc(v: Value) =
   check v.kind == VkGene
 
+test_vm """
+  (class Base
+    (on_method_missing [name args...]
+      "base"
+    )
+  )
+  (class Child < Base
+    (on_method_missing [name args...]
+      (super .on_method_missing name)
+    )
+  )
+  ((new Child) .missing)
+""", "base".to_value()
+
 # Super call to parent macro constructor
 
 test_vm """

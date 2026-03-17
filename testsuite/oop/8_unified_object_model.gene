@@ -1,0 +1,32 @@
+# Nil-safe navigation and unified class behavior
+# Expected: true
+# Expected: true
+# Expected: handled
+# Expected: DynamicGreeter
+# Expected: hello from dynamic class
+
+(var nil_prop nil/x)
+(println (nil_prop is Nil))
+(println ((nil .anything) is Nil))
+
+(class Proxy
+  (on_method_missing [name args...]
+    "handled"
+  )
+)
+
+(class LoggingProxy < Proxy)
+(println ((new LoggingProxy) .missing))
+
+(var DynamicGreeter
+  (Class
+    ^name "DynamicGreeter"
+    ^parent Object
+    ^methods {
+      ^greet (fn [] "hello from dynamic class")
+    }
+  )
+)
+
+(println (DynamicGreeter .name))
+(println ((new DynamicGreeter) .greet))

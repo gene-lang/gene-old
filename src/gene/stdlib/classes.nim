@@ -131,6 +131,18 @@ proc object_to_s_method*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value]
   let self_arg = get_positional_arg(args, 0, has_keyword_args)
   display_value(self_arg, true).to_value()
 
+proc nil_to_bool_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
+                        arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  FALSE
+
+proc nil_serialize_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
+                          arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  "nil".to_value()
+
+proc nil_on_method_missing_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
+                                  arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  NIL
+
 proc object_is_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
                       arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
   let positional = get_positional_count(arg_count, has_keyword_args)
@@ -299,6 +311,9 @@ proc init_basic_classes*(): Class =
   let nil_class = new_class("Nil")
   nil_class.parent = object_class
   nil_class.def_native_method("to_s", object_to_s_method)
+  nil_class.def_native_method("to_bool", nil_to_bool_method)
+  nil_class.def_native_method("serialize", nil_serialize_method)
+  nil_class.def_native_method("on_method_missing", nil_on_method_missing_method)
 
   proc nil_empty_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value],
                         arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =

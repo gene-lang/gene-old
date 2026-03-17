@@ -296,6 +296,18 @@ proc compile_method_definition(self: Compiler, gene: ptr Gene) =
   # Add the method to the class
   self.emit(Instruction(kind: IkDefineMethod, arg0: method_name))
 
+proc compile_on_method_missing_definition(self: Compiler, gene: ptr Gene) =
+  if gene.children.len < 1:
+    not_allowed("on_method_missing requires an argument list")
+
+  var method_gene = new_gene("method".to_symbol_value())
+  for k, v in gene.props:
+    method_gene.props[k] = v
+  method_gene.children.add("on_method_missing".to_symbol_value())
+  for child in gene.children:
+    method_gene.children.add(child)
+  self.compile_method_definition(method_gene)
+
 proc compile_constructor_definition(self: Compiler, gene: ptr Gene) =
   # Constructor definition: (ctor args body...) or (ctor! args body...)
 

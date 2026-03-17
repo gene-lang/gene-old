@@ -5,6 +5,8 @@
 ## resolve_current_instance_and_parent, call_super_constructor.
 ## Included from vm.nim — shares its scope.
 
+const MissingMethodMaxDepth = 32
+
 proc pop_call_base_info(vm: ptr VirtualMachine, expected: int = -1): tuple[hasBase: bool, base: uint16, count: int] {.inline.} =
   ## Retrieve call base metadata if present, otherwise fall back to expected count.
   if vm.frame.call_bases.is_empty():
@@ -493,25 +495,8 @@ proc call_super_method(self: ptr VirtualMachine, super_value: Value, method_name
   let super_ref = super_value.ref
   return self.call_super_method_resolved(super_ref.super_class, super_ref.super_instance, method_name, args, method_name.ends_with("!"), kw_pairs)
 
-proc call_value_method(self: ptr VirtualMachine, value: Value, method_name: string,
-                       args: openArray[Value], kw_pairs: seq[(Key, Value)] = @[]): bool =
-  ## Helper for calling native/class methods on non-instance values (strings, selectors, etc.)
-  let value_class = get_value_class(value)
-  if value_class == nil:
-    when not defined(release):
-      if self.trace:
-        echo "call_value_method: no class for ", value.kind, " method ", method_name
-    return false
-
-  let meth = value_class.get_method(method_name)
-  if meth == nil:
-    when not defined(release):
-      if self.trace:
-        echo "call_value_method: method ", method_name, " missing on ", value.kind
-    return false
-  if value_class.runtime_type != nil:
-    discard resolve_method(value_class.runtime_type, method_name.to_key())
-
+proc invoke_method_value(self: ptr VirtualMachine, value: Value, meth: Method,
+                         args: openArray[Value], kw_pairs: seq[(Key, Value)] = @[]): bool =
   proc validate_native_method_arity(meth: Method, positional_count: int, keyword_count: int) =
     if not meth.native_signature_known:
       return
@@ -533,7 +518,6 @@ proc call_value_method(self: ptr VirtualMachine, value: Value, method_name: stri
         scope.ref_count.inc()
     else:
       scope = new_scope(f.scope_tracker, f.parent_scope)
-      # Build argument list including self and positional args
       var all_args = newSeq[Value](args.len + 1)
       all_args[0] = value
       for i in 0..<args.len:
@@ -599,6 +583,49 @@ proc call_value_method(self: ptr VirtualMachine, value: Value, method_name: stri
   else:
     not_allowed("Method must be a function or native function")
     return false
+
+proc call_missing_method(self: ptr VirtualMachine, value: Value, value_class: Class,
+                         missing_name: string, args: openArray[Value],
+                         kw_pairs: seq[(Key, Value)] = @[]): bool =
+  if value_class == nil or missing_name == "on_method_missing":
+    return false
+  if self.missing_method_depth >= MissingMethodMaxDepth:
+    not_allowed("on_method_missing recursion limit exceeded while resolving '" & missing_name & "'")
+  self.missing_method_depth.inc()
+  defer:
+    self.missing_method_depth.dec()
+  if value_class.runtime_type != nil:
+    discard resolve_method(value_class.runtime_type, "on_method_missing".to_key())
+  let missing = value_class.get_method("on_method_missing")
+  if missing == nil:
+    return false
+
+  var missing_args = newSeq[Value](args.len + 1)
+  missing_args[0] = missing_name.to_symbol_value()
+  for i in 0..<args.len:
+    missing_args[i + 1] = args[i]
+  self.invoke_method_value(value, missing, missing_args, kw_pairs)
+
+proc call_value_method(self: ptr VirtualMachine, value: Value, method_name: string,
+                       args: openArray[Value], kw_pairs: seq[(Key, Value)] = @[]): bool =
+  ## Helper for calling native/class methods on non-instance values (strings, selectors, etc.)
+  let value_class = get_value_class(value)
+  if value_class == nil:
+    when not defined(release):
+      if self.trace:
+        echo "call_value_method: no class for ", value.kind, " method ", method_name
+    return false
+
+  if value_class.runtime_type != nil:
+    discard resolve_method(value_class.runtime_type, method_name.to_key())
+
+  let meth = value_class.get_method(method_name)
+  if meth == nil:
+    when not defined(release):
+      if self.trace:
+        echo "call_value_method: method ", method_name, " missing on ", value.kind
+    return self.call_missing_method(value, value_class, method_name, args, kw_pairs)
+  self.invoke_method_value(value, meth, args, kw_pairs)
 
 proc run_intercepted_method(self: ptr VirtualMachine, interception: Interception, instance: Value,
                             args: seq[Value], kw_pairs: seq[(Key, Value)] = @[]): Value

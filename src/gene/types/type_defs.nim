@@ -1020,6 +1020,7 @@ type
     # Scheduler mode
     scheduler_running*: bool  # Set to true when run_forever is active, false to stop
     aop_contexts*: seq[AopContext]  # Stack of active around advice contexts
+    missing_method_depth*: int  # Recursion guard for on_method_missing dispatch
     native_tier*: NativeCompileTier  # Native dispatch policy
     native_code*: bool  # Enable native code execution when available
     type_check*: bool  # Whether runtime type validation is enabled (set from --no-type-check)

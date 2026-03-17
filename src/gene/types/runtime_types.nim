@@ -264,6 +264,7 @@ proc runtime_type_name*(v: Value): string =
   of VkFunction: "Function"
   of VkBlock: "Block"
   of VkNativeFn: "Function"
+  of VkClass: "Class"
   else: $v.kind
 
 proc adt_type_name(value: Value): string =
@@ -298,6 +299,13 @@ proc is_named_compatible(value: Value, expected_type: string): bool =
     return value.kind in {VkFunction, VkBlock, VkNativeFn}
   else:
     discard
+  if value.kind == VkClass:
+    if App != NIL and App.kind == VkApplication and App.app.class_class.kind == VkClass:
+      var current = App.app.class_class.ref.class
+      while current != nil:
+        if current.name == expected_type:
+          return true
+        current = current.parent
   if value.kind == VkInstance:
     let inst = cast[ptr InstanceObj](value.raw and PAYLOAD_MASK)
     if inst != nil and inst.instance_class != nil:

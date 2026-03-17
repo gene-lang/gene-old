@@ -929,13 +929,18 @@ proc exec*(self: ptr VirtualMachine): Value =
         self.frame.pop2(target)
 
         # Not found returns VOID by default. Use /! (IkAssertValue) to throw.
-        if target == VOID or target == NIL:
+        if target == VOID:
           self.frame.push(VOID)
+        elif target == NIL:
+          self.frame.push(NIL)
         else:
           if has_custom_materializer(target):
             target = materialize_custom(target)
-          if target == VOID or target == NIL:
+          if target == VOID:
             self.frame.push(VOID)
+            continue
+          if target == NIL:
+            self.frame.push(NIL)
             continue
           case target.kind:
             of VkMap:
@@ -3829,12 +3834,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         of VkDateTime:
           class_val = App.app.datetime_class
         of VkClass:
-          if value.ref.class.parent != nil:
-            let parent_ref = new_ref(VkClass)
-            parent_ref.class = value.ref.class.parent
-            class_val = parent_ref.to_ref_value()
-          else:
-            class_val = App.app.object_class
+          class_val = App.app.class_class
         of VkInstance:
           # Get the class of the instance
           let instance_class_ref = new_ref(VkClass)
@@ -5043,6 +5043,109 @@ proc exec*(self: ptr VirtualMachine): Value =
           let result = self.call_bound_method(target, args, kw_pairs)
           self.frame.push(result)
 
+        of VkClass:
+          if App != NIL and App.kind == VkApplication and App.app.class_class.kind == VkClass and
+             target.ref.class == App.app.class_class.ref.class:
+            if args.len > 0:
+              not_allowed("Class(...) dynamic construction only supports keyword arguments")
+
+            var class_name = ""
+            var parent_class =
+              if App.app.object_class.kind == VkClass:
+                App.app.object_class.ref.class
+              else:
+                nil
+            var ctor_value = NIL
+            var methods_value = NIL
+            var missing_value = NIL
+
+            for (k, v) in kw_pairs:
+              let key_name = get_symbol(symbol_index(k))
+              case key_name
+              of "name":
+                case v.kind
+                of VkString, VkSymbol:
+                  class_name = v.str
+                of VkQuote:
+                  if v.ref.quote.kind in {VkString, VkSymbol}:
+                    class_name = v.ref.quote.str
+                  else:
+                    not_allowed("Class.name must be a string or symbol")
+                else:
+                  not_allowed("Class.name must be a string or symbol")
+              of "parent":
+                if v == NIL:
+                  parent_class = nil
+                elif v.kind == VkClass:
+                  parent_class = v.ref.class
+                else:
+                  not_allowed("Class.parent must be a class")
+              of "ctor":
+                ctor_value = v
+              of "methods":
+                methods_value = v
+              of "on_method_missing":
+                missing_value = v
+              else:
+                discard
+
+            if class_name.len == 0:
+              not_allowed("Class(...) requires ^name")
+
+            let class = new_class(class_name, parent_class)
+            class.ns.parent = self.frame.ns
+            class.add_standard_instance_methods()
+            discard ensure_class_runtime_type(self, class)
+
+            if ctor_value != NIL:
+              if ctor_value.kind notin {VkFunction, VkNativeFn}:
+                not_allowed("Class.ctor must be a function or native function")
+              class.constructor = ctor_value
+              if ctor_value.kind == VkFunction:
+                ctor_value.ref.fn.ns = class.ns
+                class.has_macro_constructor = ctor_value.ref.fn.is_macro_like
+
+            if methods_value != NIL:
+              if methods_value.kind != VkMap:
+                not_allowed("Class.methods must be a map")
+              for method_key, method_callable in map_data(methods_value):
+                if method_callable.kind notin {VkFunction, VkNativeFn}:
+                  not_allowed("Class method values must be functions or native functions")
+                let method_name = get_symbol(symbol_index(method_key))
+                if method_callable.kind == VkFunction:
+                  method_callable.ref.fn.ns = class.ns
+                class.methods[method_key] = Method(
+                  class: class,
+                  name: method_name,
+                  callable: method_callable,
+                  is_macro: method_callable.kind == VkFunction and method_callable.ref.fn.is_macro_like,
+                  native_signature_known: false,
+                  native_param_types: @[],
+                  native_return_type: NIL,
+                )
+
+            if missing_value != NIL:
+              if missing_value.kind notin {VkFunction, VkNativeFn}:
+                not_allowed("Class.on_method_missing must be a function or native function")
+              if missing_value.kind == VkFunction:
+                missing_value.ref.fn.ns = class.ns
+              class.methods["on_method_missing".to_key()] = Method(
+                class: class,
+                name: "on_method_missing",
+                callable: missing_value,
+                is_macro: missing_value.kind == VkFunction and missing_value.ref.fn.is_macro_like,
+                native_signature_known: false,
+                native_param_types: @[],
+                native_return_type: NIL,
+              )
+
+            class.version.inc()
+            let class_ref = new_ref(VkClass)
+            class_ref.class = class
+            self.frame.push(class_ref.to_ref_value())
+          else:
+            not_allowed("Keyword class calls are not supported for " & target.ref.class.name)
+
         of VkInstance, VkCustom:
           if call_instance_method(self, target, "call", args, kw_pairs):
             inst = self.cu.instructions[self.pc].addr
@@ -5455,6 +5558,9 @@ proc exec*(self: ptr VirtualMachine): Value =
             else:
               not_allowed("Method must be a function or native function")
           else:
+            if self.call_missing_method(obj, class, method_name, @[], @[]):
+              inst = self.cu.instructions[self.pc].addr
+              continue
             not_allowed("Method " & method_name & " not found on instance")
         of VkString, VkArray, VkMap, VkRange, VkGene, VkNamespace, VkFuture, VkGenerator, VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock:
           # Use template to get class
@@ -5613,6 +5719,9 @@ proc exec*(self: ptr VirtualMachine): Value =
             else:
               not_allowed("Method must be a function or native function")
           else:
+            if self.call_missing_method(obj, class, method_name, [arg], @[]):
+              inst = self.cu.instructions[self.pc].addr
+              continue
             not_allowed("Method " & method_name & " not found on instance")
         of VkString, VkArray, VkMap, VkRange, VkGene, VkNamespace, VkFuture, VkGenerator, VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock:
           # Use template to get class
@@ -5781,6 +5890,9 @@ proc exec*(self: ptr VirtualMachine): Value =
             else:
               not_allowed("Method must be a function or native function")
           else:
+            if self.call_missing_method(obj, class, method_name, [arg1, arg2], @[]):
+              inst = self.cu.instructions[self.pc].addr
+              continue
             not_allowed("Method " & method_name & " not found on instance")
         of VkString, VkArray, VkMap, VkRange, VkGene, VkNamespace, VkFuture, VkGenerator, VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock:
           # Use template to get class
@@ -5886,6 +5998,9 @@ proc exec*(self: ptr VirtualMachine): Value =
             else:
               not_allowed("Method must be a function or native function")
           else:
+            if self.call_missing_method(obj, class, method_name, args, @[]):
+              inst = self.cu.instructions[self.pc].addr
+              continue
             not_allowed("Method " & method_name & " not found on instance")
         of VkString, VkArray, VkMap, VkRange, VkGene, VkNamespace, VkFuture, VkGenerator, VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock:
           # Use template to get class
@@ -6038,6 +6153,9 @@ proc exec*(self: ptr VirtualMachine): Value =
             else:
               not_allowed("Method must be a function or native function")
           else:
+            if self.call_missing_method(obj, class, method_name, args, kw_pairs):
+              inst = self.cu.instructions[self.pc].addr
+              continue
             not_allowed("Method " & method_name & " not found on instance")
         else:
           not_allowed("Unified method call with keywords not supported for " & $obj.kind)

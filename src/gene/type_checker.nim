@@ -1304,6 +1304,8 @@ proc check_method_call(self: TypeChecker, recv_type: TypeExpr, method_name: stri
     let cls = self.classes[rt.name]
     let mt = self.find_method(cls, method_name)
     if mt == nil:
+      if self.find_method(cls, "on_method_missing") != nil:
+        return ANY_TYPE
       raise new_exception(types.Exception, "Type error: unknown method " & method_name & " on " & rt.name)
     let fn_t = self.resolve(mt)
     if fn_t.kind != TkFn:
@@ -2443,6 +2445,12 @@ proc check_class(self: TypeChecker, gene: ptr Gene): TypeExpr =
       let k = child.gene.`type`.str
       if k == "method":
         discard self.check_method(child.gene, class_name, cls)
+      elif k == "on_method_missing":
+        var lowered = new_gene("method".to_symbol_value())
+        lowered.children.add("on_method_missing".to_symbol_value())
+        for grandchild in child.gene.children:
+          lowered.children.add(grandchild)
+        discard self.check_method(lowered, class_name, cls)
       elif k == "ctor" or k == "ctor!":
         discard self.check_ctor(child.gene, class_name, cls)
       else:

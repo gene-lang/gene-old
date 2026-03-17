@@ -166,6 +166,22 @@ test_vm_error """
 """
 
 test_vm """
+  (var x nil)
+  x/a
+""", proc(r: Value) =
+  check r == NIL
+
+test_vm """
+  (var x nil)
+  (x/a is Nil)
+""", TRUE
+
+test_vm_error """
+  (var x nil)
+  x/!/a
+"""
+
+test_vm """
   ({^a "A"} ./a)
 """, "A"
 

@@ -1370,6 +1370,9 @@ proc compile_gene(self: Compiler, input: Value) =
         # Method definition inside class body
         self.compile_method_definition(gene)
         return
+      of "on_method_missing":
+        self.compile_on_method_missing_definition(gene)
+        return
       of "method!":
         not_allowed("method! is not supported; use (method name! [args] ...) for macro-like methods")
       of "ctor", "ctor!":
