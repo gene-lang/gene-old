@@ -19,9 +19,15 @@ The viewer SHALL support arrow-key navigation for browsing nested Gene values.
 - **THEN** the viewer SHALL move the current selection within that container
 - **AND** keep the selected row visible in the scroll window
 
+#### Scenario: Move by page within the current container
+- **GIVEN** the current node is a container with more visible children than fit in one viewport
+- **WHEN** the user presses Page Up or Page Down
+- **THEN** the viewer SHALL move the current selection by approximately one viewport
+- **AND** keep the selected row visible in the scroll window
+
 #### Scenario: Drill into and back out of nested data
 - **GIVEN** the current selection refers to a composite value such as an array, map, or Gene node
-- **WHEN** the user presses the Right arrow key
+- **WHEN** the user presses the Right arrow key or Enter
 - **THEN** the viewer SHALL enter that value and make it the current container
 - **AND** update the logical path shown at the top of the screen
 - **WHEN** the user presses the Left arrow key

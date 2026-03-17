@@ -1086,8 +1086,6 @@ proc remove_tree_dir(path: string) =
       remove_tree_dir(child)
     of pcLinkToDir:
       removeDir(child)
-    else:
-      discard
   removeDir(path)
 
 proc remove_tree_base(path: string) =

@@ -910,10 +910,10 @@ proc try_member_missing_handlers*(vm: ptr VirtualMachine, ns: Namespace, name: s
   ns_ref.ns = ns
   let ns_value = ns_ref.to_ref_value()
   for handler in ns.on_member_missing:
-    let result = vm_exec_callable_with_self(vm, handler, ns_value, @[name_val])
-    if result != NIL:
-      ns.members[name.to_key()] = result
-      return result
+    let handler_result = vm_exec_callable_with_self(vm, handler, ns_value, @[name_val])
+    if handler_result != NIL:
+      ns.members[name.to_key()] = handler_result
+      return handler_result
   return NIL
 
 proc resolve_from_root(vm: ptr VirtualMachine, root: Value, parts: seq[string]): Value =

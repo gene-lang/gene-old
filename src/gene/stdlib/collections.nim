@@ -790,10 +790,10 @@ proc init_collection_classes*(object_class: Class) =
         items[i] = data[i]
       items.sort(proc(a, b: Value): int =
         {.cast(gcsafe).}:
-          let result = vm_exec_callable(vm, comparator, @[a, b])
-          if result.kind == VkInt:
-            return result.int64.int
-          elif result.to_bool():
+          let compare_result = vm_exec_callable(vm, comparator, @[a, b])
+          if compare_result.kind == VkInt:
+            return compare_result.int64.int
+          elif compare_result.to_bool():
             return -1
           else:
             return 1

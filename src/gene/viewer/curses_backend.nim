@@ -8,12 +8,24 @@ type
   CWindow {.importc: "WINDOW", header: "<curses.h>", incompleteStruct.} = object
   WindowPtr = ptr CWindow
 
+  ViewerColor* = enum
+    VcDefault
+    VcGene
+    VcArray
+    VcMap
+    VcString
+    VcLiteral
+    VcOther
+
   ViewerKey* = enum
     VkNone
     VkUp
     VkDown
+    VkPageUp
+    VkPageDown
     VkLeft
     VkRight
+    VkEnter
     VkF1
     VkF5
     VkF10
@@ -26,6 +38,9 @@ const
   NcKeyUp = 259
   NcKeyLeft = 260
   NcKeyRight = 261
+  NcKeyPageDown = 338
+  NcKeyPageUp = 339
+  NcKeyEnter = 343
   NcKeyF0 = 264
   NcKeyResize = 410
   NcAttrReverse = 0x0004_0000'u32
@@ -42,11 +57,33 @@ proc getch(): cint {.importc, header: "<curses.h>".}
 proc mvaddnstr(y, x: cint, text: cstring, n: cint): cint {.importc, header: "<curses.h>".}
 proc attron(attrs: uint32): cint {.importc, header: "<curses.h>".}
 proc attroff(attrs: uint32): cint {.importc, header: "<curses.h>".}
+proc has_colors(): bool {.importc, header: "<curses.h>".}
+proc start_color(): cint {.importc, header: "<curses.h>".}
+proc use_default_colors(): cint {.importc, header: "<curses.h>".}
+proc init_pair(pair, fg, bg: cshort): cint {.importc, header: "<curses.h>".}
+proc color_set(pair: cshort, opts: pointer): cint {.importc, header: "<curses.h>".}
 
 var stdscr {.importc, header: "<curses.h>".}: WindowPtr
 var session_active = false
 var hook_installed = false
 var quit_proc_installed = false
+var colors_enabled = false
+
+const
+  NcColorBlue = 4'i16
+  NcColorGreen = 2'i16
+  NcColorCyan = 6'i16
+  NcColorRed = 1'i16
+  NcColorMagenta = 5'i16
+  NcColorYellow = 3'i16
+  NcDefaultBg = -1'i16
+
+  PairGene = 1'i16
+  PairArray = 2'i16
+  PairMap = 3'i16
+  PairString = 4'i16
+  PairLiteral = 5'i16
+  PairOther = 6'i16
 
 type
   CursesSession* = object
@@ -68,6 +105,37 @@ proc terminal_height*(): int =
 proc terminal_width*(): int =
   terminalSize().w
 
+proc init_colors_if_available() =
+  if not has_colors():
+    colors_enabled = false
+    return
+  discard start_color()
+  discard use_default_colors()
+  discard init_pair(PairGene, NcColorMagenta, NcDefaultBg)
+  discard init_pair(PairArray, NcColorCyan, NcDefaultBg)
+  discard init_pair(PairMap, NcColorYellow, NcDefaultBg)
+  discard init_pair(PairString, NcColorGreen, NcDefaultBg)
+  discard init_pair(PairLiteral, NcColorBlue, NcDefaultBg)
+  discard init_pair(PairOther, NcColorRed, NcDefaultBg)
+  colors_enabled = true
+
+proc color_pair_id(color: ViewerColor): cshort =
+  case color
+  of VcDefault:
+    0
+  of VcGene:
+    PairGene
+  of VcArray:
+    PairArray
+  of VcMap:
+    PairMap
+  of VcString:
+    PairString
+  of VcLiteral:
+    PairLiteral
+  of VcOther:
+    PairOther
+
 proc open_session*(): CursesSession =
   if not quit_proc_installed:
     addExitProc(cleanup_terminal)
@@ -80,6 +148,7 @@ proc open_session*(): CursesSession =
   discard noecho()
   discard keypad(stdscr, 1)
   discard curs_set(0)
+  init_colors_if_available()
   session_active = true
   CursesSession(active: true)
 
@@ -108,13 +177,17 @@ proc crop_line(text: string, width: int): string =
     return text[0 ..< width]
   text[0 ..< width - 3] & "..."
 
-proc draw_text*(row, col, width: int, text: string, highlighted = false) =
+proc draw_text*(row, col, width: int, text: string, highlighted = false, color = VcDefault) =
   let line = crop_line(text, width)
+  if colors_enabled:
+    discard color_set(color_pair_id(color), nil)
   if highlighted:
     discard attron(NcAttrReverse)
   discard mvaddnstr(row.cint, col.cint, line.cstring, line.len.cint)
   if highlighted:
     discard attroff(NcAttrReverse)
+  if colors_enabled:
+    discard color_set(0, nil)
 
 proc read_key*(): ViewerKey =
   let key = getch().int
@@ -123,10 +196,16 @@ proc read_key*(): ViewerKey =
     VkUp
   of NcKeyDown:
     VkDown
+  of NcKeyPageUp:
+    VkPageUp
+  of NcKeyPageDown:
+    VkPageDown
   of NcKeyLeft:
     VkLeft
   of NcKeyRight:
     VkRight
+  of NcKeyEnter, 10, 13:
+    VkEnter
   of NcKeyResize:
     VkResize
   of NcKeyF0 + 1:
@@ -135,8 +214,6 @@ proc read_key*(): ViewerKey =
     VkF5
   of NcKeyF0 + 10:
     VkF10
-  of int('q'), int('Q'):
-    VkQuit
   of 3:
     VkQuit
   of int('?'):

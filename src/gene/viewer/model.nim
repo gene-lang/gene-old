@@ -16,6 +16,14 @@ type
     VpkGeneType
     VpkGeneProp
 
+  ViewerColorKind* = enum
+    VckGene
+    VckArray
+    VckMap
+    VckString
+    VckLiteral
+    VckOther
+
   ViewerPathSegment* = object
     kind*: ViewerPathKind
     index*: int
@@ -66,6 +74,9 @@ proc selected_entry*(state: ViewerState): ptr ViewerEntry
 proc selected_path_segments*(state: ViewerState): seq[ViewerPathSegment]
 proc selected_path*(state: ViewerState): string
 proc current_summary*(state: ViewerState): string
+proc classify_node*(node: ViewerNode): ViewerColorKind
+proc classify_entry*(entry: ViewerEntry): ViewerColorKind
+proc current_color*(state: ViewerState): ViewerColorKind
 proc move_selection*(state: ViewerState, delta: int, body_height: int)
 proc enter_selected*(state: ViewerState)
 proc leave_current*(state: ViewerState)
@@ -175,6 +186,38 @@ proc render_segment(segment: ViewerPathSegment): string =
     "type"
   of VpkGeneProp:
     "^" & segment.name
+
+proc looks_numeric(text: string): bool =
+  if text.len == 0:
+    return false
+  var pos = 0
+  if text[pos] in {'+', '-'}:
+    inc(pos)
+  if pos >= text.len:
+    return false
+
+  var has_digit = false
+  while pos < text.len:
+    let ch = text[pos]
+    case ch
+    of '0'..'9':
+      has_digit = true
+    of '.', '_', '/', ':', 'e', 'E':
+      discard
+    else:
+      return false
+    inc(pos)
+  has_digit
+
+proc scalar_color_kind(node: ViewerNode): ViewerColorKind =
+  let text = collapse_preview(node.span_text(), max_len = 256).strip()
+  if text.len == 0:
+    return VckOther
+  if text[0] == '"' or text.startsWith("#\""):
+    return VckString
+  if text in ["nil", "true", "false", "void", "_"] or text[0] == '\'' or looks_numeric(text):
+    return VckLiteral
+  VckOther
 
 proc kind_from_source(source: string, span: ViewerSpan): ViewerNodeKind =
   if span.synthetic:
@@ -394,12 +437,8 @@ proc prop_key_info(token: string): tuple[is_prop: bool, implied: bool, value: st
 proc entry_summary(doc: ViewerDocument, span: ViewerSpan, kind: ViewerNodeKind): string =
   let preview = collapse_preview(doc.span_text(span))
   case kind
-  of VnkArray:
-    "Array " & preview
-  of VnkMap:
-    "Map " & preview
-  of VnkGene:
-    "Gene " & preview
+  of VnkArray, VnkMap, VnkGene:
+    preview
   of VnkSequence:
     "Sequence"
   of VnkScalar:
@@ -620,6 +659,26 @@ proc current_summary*(state: ViewerState): string =
   if selected != nil:
     return selected.summary
   collapse_preview(state.current_frame().node.span_text())
+
+proc classify_node*(node: ViewerNode): ViewerColorKind =
+  case node.kind
+  of VnkGene:
+    VckGene
+  of VnkArray, VnkSequence:
+    VckArray
+  of VnkMap:
+    VckMap
+  of VnkScalar:
+    scalar_color_kind(node)
+
+proc classify_entry*(entry: ViewerEntry): ViewerColorKind =
+  classify_node(entry.node)
+
+proc current_color*(state: ViewerState): ViewerColorKind =
+  let selected = state.selected_entry()
+  if selected != nil:
+    return classify_entry(selected[])
+  classify_node(state.current_frame().node)
 
 proc move_selection*(state: ViewerState, delta: int, body_height: int) =
   var frame = addr state.current_frame()

@@ -12,7 +12,8 @@ Open a full-screen terminal viewer for a Gene data file or multi-form Gene log.
 
 Navigation:
   Up/Down arrows        Move selection
-  Right arrow           Enter selected container
+  Page Up/Page Down     Move one screen
+  Right arrow or Enter  Enter selected container
   Left arrow            Return to parent container
   F1                    Toggle help
   F5                    Reload file from disk

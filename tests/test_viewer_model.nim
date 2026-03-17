@@ -1,5 +1,7 @@
 import os, strutils, unittest
 
+import gene/viewer/app
+import gene/viewer/curses_backend
 import gene/viewer/model
 
 suite "Terminal Gene Viewer Model":
@@ -19,6 +21,9 @@ suite "Terminal Gene Viewer Model":
     check doc.root.entries[0].summary.contains("(log")
     check doc.root.entries[1].node.kind == VnkArray
     check doc.root.entries[2].node.kind == VnkMap
+    check classify_entry(doc.root.entries[0]) == VckGene
+    check classify_entry(doc.root.entries[1]) == VckArray
+    check classify_entry(doc.root.entries[2]) == VckMap
 
   test "navigation drills into nested values and restores parent selection":
     let source = """
@@ -88,3 +93,53 @@ suite "Terminal Gene Viewer Model":
     check state.frames.len == 2
     check state.current_frame().node.kind == VnkArray
     check state.selected_path() == "/1/1"
+
+  test "scalar values classify into string literal and other buckets":
+    let source = """
+      ["hello" 42 true symbol #/x/]
+    """
+    let doc = open_viewer_document_from_source(source, "colors.gene")
+    let state = new_viewer_state(doc)
+
+    check state.current_frame().node.entries.len == 5
+    check classify_entry(state.current_frame().node.entries[0]) == VckString
+    check classify_entry(state.current_frame().node.entries[1]) == VckLiteral
+    check classify_entry(state.current_frame().node.entries[2]) == VckLiteral
+    check classify_entry(state.current_frame().node.entries[3]) == VckOther
+    check classify_entry(state.current_frame().node.entries[4]) == VckOther
+
+  test "enter key opens expandable item":
+    let source = """
+      (root [1 2] {^name "Ada"})
+    """
+    let doc = open_viewer_document_from_source(source, "enter.gene")
+    let state = new_viewer_state(doc)
+
+    state.move_selection(1, 10)
+    check state.selected_path() == "/0"
+
+    check state.handle_key(VkEnter, 10)
+    check state.frames.len == 2
+    check state.current_frame().node.kind == VnkArray
+    check state.selected_path() == "/0/0"
+
+  test "page up and down move by the visible body height":
+    var items: seq[string] = @[]
+    for i in 0 .. 19:
+      items.add($i)
+    let source = "[" & items.join(" ") & "]"
+    let doc = open_viewer_document_from_source(source, "paging.gene")
+    let state = new_viewer_state(doc)
+
+    check state.selected_path() == "/0"
+    check state.handle_key(VkPageDown, 5)
+    check state.selected_path() == "/5"
+    check state.current_frame().scroll == 1
+
+    check state.handle_key(VkPageDown, 5)
+    check state.selected_path() == "/10"
+    check state.current_frame().scroll == 6
+
+    check state.handle_key(VkPageUp, 5)
+    check state.selected_path() == "/5"
+    check state.current_frame().scroll == 5
