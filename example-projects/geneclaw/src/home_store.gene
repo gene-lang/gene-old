@@ -112,10 +112,8 @@
   (if (prompt is String)
     prompt
   else
-    (do
-      (gene/serdes/write_tree STATE_SYSTEM_PROMPT_PATH DEFAULT_SYSTEM_PROMPT)
-      DEFAULT_SYSTEM_PROMPT
-    )
+    (gene/serdes/write_tree STATE_SYSTEM_PROMPT_PATH DEFAULT_SYSTEM_PROMPT)
+    DEFAULT_SYSTEM_PROMPT
   )
 )
 

@@ -119,12 +119,10 @@
     (if (index == last_index)
       (current .set key value)
     else
-      (do
-        (if_not ((current .contains key) && ((current .get key) is Map))
-          (current .set key {})
-        )
-        (current = current/<key>)
+      (if_not ((current .contains key) && ((current .get key) is Map))
+        (current .set key {})
       )
+      (current = current/<key>)
     )
     (index += 1)
   )
@@ -209,20 +207,14 @@
   (schema .each (fn [key node]
     (if (leaf_descriptor? node)
       (if (node/kind == "cfg")
-        (do
-          (result .set key (bootstrap_leaf_value node))
-          (included = true)
-        )
+        (result .set key (bootstrap_leaf_value node))
+        (included = true)
       )
     else
-      (do
-        (var child (build_bootstrap_group (ensure_map node)))
-        (if child
-          (do
-            (result .set key child)
-            (included = true)
-          )
-        )
+      (var child (build_bootstrap_group (ensure_map node)))
+      (if child
+        (result .set key child)
+        (included = true)
       )
     )
   ))

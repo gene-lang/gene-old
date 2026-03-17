@@ -21,6 +21,31 @@
   (build_compact_prompt context_text "Continue based on the tool results above. Complete the current request.")
 )
 
+(fn $ns/tool_call_signature [tool_name tool_args_str]
+  #"#{((tool_name || "") .to_s)}|#{((tool_args_str || "") .to_s)}"
+)
+
+(fn $ns/repeated_invalid_tool_state [previous_signature previous_error previous_count tool_name tool_args_str error_message]
+  (var signature (tool_call_signature tool_name tool_args_str))
+  (var message ((error_message || "") .to_s))
+  (var prior_count (if (previous_count is Int) previous_count else 0))
+  (var count
+    (if ((signature == (previous_signature || "")) && (message == (previous_error || "")))
+      (prior_count + 1)
+    else
+      1
+    )
+  )
+  {^signature signature
+   ^error message
+   ^count count
+   ^repeated (count >= 2)}
+)
+
+(fn repeated_invalid_tool_message [tool_name error_message]
+  #"Agent stopped after repeated invalid tool call #{tool_name}: #{error_message}"
+)
+
 (fn $ns/build_session_id [workspace_id channel_id thread_id = ""]
   (var thread_part thread_id/.to_s)
   (if thread_part/.not_empty?
@@ -37,6 +62,9 @@
   (var tool_call_count 0)
   (var final_response "")
   (var text initial_text)
+  (var last_invalid_tool_signature "")
+  (var last_invalid_tool_error "")
+  (var repeated_invalid_tool_count 0)
 
   (loop
     (if (step >= CONFIG/llm/max_steps)
@@ -69,7 +97,8 @@
     # Add assistant message with tool_calls to history
     (history .append {^role "assistant" ^content content ^tool_calls tool_calls})
 
-    (tool_calls .each (fn [tc]
+    (var abort_due_to_repeated_invalid_tool false)
+    (for tc in tool_calls
       (tool_call_count += 1)
       (var fn_info tc/function)
       (var tool_name fn_info/name)
@@ -79,6 +108,7 @@
       # Parse arguments JSON string; coerce to map for tool handlers.
       (var parsed_args (try (gene/json/parse tool_args_str) catch * nil))
       (var tool_args (if (parsed_args is Map) parsed_args else {}))
+      (log .debug #"#{run_id} raw tool args #{tool_name}=#{tool_args_str}")
       (var tool_result (invoke_tool run_id workspace_id user_id channel_id thread_id session_id tool_name tool_args))
 
       # Build result text
@@ -89,9 +119,33 @@
       ))
       (log .debug #"#{run_id} tool result: #{result_text}")
 
+      (if tool_result/ok
+        (last_invalid_tool_signature = "")
+        (last_invalid_tool_error = "")
+        (repeated_invalid_tool_count = 0)
+      else
+        (var repeat_state (repeated_invalid_tool_state last_invalid_tool_signature last_invalid_tool_error repeated_invalid_tool_count tool_name tool_args_str (tool_result/error || "Tool returned an error")))
+        (last_invalid_tool_signature = repeat_state/signature)
+        (last_invalid_tool_error = repeat_state/error)
+        (repeated_invalid_tool_count = repeat_state/count)
+        (if repeat_state/repeated
+          (abort_due_to_repeated_invalid_tool = true)
+          (final_response = (repeated_invalid_tool_message tool_name repeat_state/error))
+          (log .warn #"#{run_id} stopping after repeated invalid tool call #{tool_name}: #{repeat_state/error}")
+        )
+      )
+
       # Add tool result message with tool_call_id (OpenAI format)
-      (history .append {^role "tool" ^tool_call_id tc/id ^content result_text})
-    ))
+      (history .append {^role "tool" ^tool_call_id tc/id ^content result_text ^is_error (tool_result/ok == false)})
+
+      (if abort_due_to_repeated_invalid_tool
+        (break)
+      )
+    )
+
+    (if abort_due_to_repeated_invalid_tool
+      (break)
+    )
 
     # Update text for next iteration context
     (text = (build_tool_followup_text followup_context))

@@ -1,6 +1,6 @@
 #!/usr/bin/env gene run
 
-(import build_session_id build_tool_followup_text from "agent")
+(import build_session_id build_tool_followup_text repeated_invalid_tool_state tool_call_signature from "agent")
 
 (assert ((build_session_id "ws" "chan") == "ws:chan"))
 (assert ((build_session_id "ws" "chan" "") == "ws:chan"))
@@ -9,5 +9,15 @@
 (var followup_text (build_tool_followup_text "Test Project"))
 (assert (followup_text .include? "Context:\nTest Project"))
 (assert (followup_text .include? "Current round:\nContinue based on the tool results above. Complete the current request."))
+
+(assert ((tool_call_signature "write_file" "{\"path\":\"csv-parser/csv_parser.py\"}") == "write_file|{\"path\":\"csv-parser/csv_parser.py\"}"))
+
+(var first_invalid (repeated_invalid_tool_state "" "" 0 "write_file" "{\"path\":\"csv-parser/csv_parser.py\"}" "Missing required arguments for write_file: content"))
+(assert (first_invalid/count == 1))
+(assert (first_invalid/repeated == false))
+
+(var second_invalid (repeated_invalid_tool_state first_invalid/signature first_invalid/error first_invalid/count "write_file" "{\"path\":\"csv-parser/csv_parser.py\"}" "Missing required arguments for write_file: content"))
+(assert (second_invalid/count == 2))
+(assert (second_invalid/repeated == true))
 
 (println "ok")

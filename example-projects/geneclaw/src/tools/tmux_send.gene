@@ -32,11 +32,9 @@
 
         # Optionally press Enter
         (if enter
-          (do
-            (var enter_result (system/shell #"tmux send-keys -t '#{target}' Enter"))
-            (if (enter_result/exit_code != 0)
-              (return {^error #"tmux Enter failed: #{enter_result/output}"})
-            )
+          (var enter_result (system/shell #"tmux send-keys -t '#{target}' Enter"))
+          (if (enter_result/exit_code != 0)
+            (return {^error #"tmux Enter failed: #{enter_result/output}"})
           )
         )
 

@@ -226,9 +226,13 @@
 )
 
 (fn anthropic_tool_result_from_history [entry]
-  {^type "tool_result"
-   ^tool_use_id (entry/tool_call_id || "")
-   ^content (entry/content || "")}
+  (var result {^type "tool_result"
+               ^tool_use_id (entry/tool_call_id || "")
+               ^content (entry/content || "")})
+  (if (entry/is_error == true)
+    (result .set "is_error" true)
+  )
+  result
 )
 
 (fn build_anthropic_messages [history user_text image_attachments]
@@ -237,35 +241,31 @@
 
   (history .each (fn [entry]
     (if (entry/role == "tool")
-      (do
-        (var tool_use_id (entry/tool_call_id || ""))
-        (if tool_use_id/.not_empty?
-          (pending_tool_results .append (anthropic_tool_result_from_history entry))
-        )
+      (var tool_use_id (entry/tool_call_id || ""))
+      (if tool_use_id/.not_empty?
+        (pending_tool_results .append (anthropic_tool_result_from_history entry))
       )
     else
-      (do
-        (if (pending_tool_results/.size > 0)
-          (messages .append {^role "user" ^content pending_tool_results})
-          (pending_tool_results = [])
-        )
+      (if (pending_tool_results/.size > 0)
+        (messages .append {^role "user" ^content pending_tool_results})
+        (pending_tool_results = [])
+      )
 
-        (var blocks [])
-        (var text (entry/content || ""))
-        (if text/.not_empty?
-          (blocks .append {^type "text" ^text text})
-        )
+      (var blocks [])
+      (var text (entry/content || ""))
+      (if text/.not_empty?
+        (blocks .append {^type "text" ^text text})
+      )
 
-        (if (entry/role == "assistant")
-          (var entry_tool_calls (ensure_array (entry/tool_calls || [])))
-          (entry_tool_calls .each (fn [tool_call]
-            (blocks .append (anthropic_tool_use_from_call tool_call))
-          ))
-        )
+      (if (entry/role == "assistant")
+        (var entry_tool_calls (ensure_array (entry/tool_calls || [])))
+        (entry_tool_calls .each (fn [tool_call]
+          (blocks .append (anthropic_tool_use_from_call tool_call))
+        ))
+      )
 
-        (if blocks/.not_empty?
-          (messages .append {^role entry/role ^content blocks})
-        )
+      (if blocks/.not_empty?
+        (messages .append {^role entry/role ^content blocks})
       )
     )
   ))
@@ -332,6 +332,7 @@
       )
     elif (block_type == "tool_use")
       (var input_map (ensure_map (block/input || {})))
+      (log .debug #"Anthropic tool_use id=#{(block/id || "")} name=#{(block/name || "")} input=#{input_map/.to_json}")
       (tool_calls .append {
         ^id (block/id || "")
         ^type "function"
@@ -385,13 +386,11 @@
   (try
     (var message "")
     (if (response is Map)
-      (do
-        (var error_value (response/error || nil))
-        (if (error_value is Map)
-          (message = ((error_value/message || "") .to_s))
-        else
-          (message = ((response/message || "") .to_s))
-        )
+      (var error_value (response/error || nil))
+      (if (error_value is Map)
+        (message = ((error_value/message || "") .to_s))
+      else
+        (message = ((response/message || "") .to_s))
       )
     else
       (message = ((response/message || "") .to_s))

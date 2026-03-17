@@ -40,15 +40,11 @@
           })))
         (var resp (gene/json/parse result))
         (if resp/ok
-          (do
-            (log .info #"send_message success: channel=#{channel}")
-            {^ok true ^ts resp/ts ^channel channel}
-          )
+          (log .info #"send_message success: channel=#{channel}")
+          {^ok true ^ts resp/ts ^channel channel}
         else
-          (do
-            (log .warn #"send_message Slack error: #{resp/error}")
-            {^error #"Slack API error: #{resp/error}"}
-          )
+          (log .warn #"send_message Slack error: #{resp/error}")
+          {^error #"Slack API error: #{resp/error}"}
         )
       catch *
         (log .error #"send_message failed: #{$ex/message}")

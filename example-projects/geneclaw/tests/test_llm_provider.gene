@@ -59,6 +59,7 @@
    ]}
   {^role "tool"
    ^tool_call_id "call_1"
+   ^is_error true
    ^content "{\"files\":[]}"}
 ])
 
@@ -80,6 +81,7 @@
 (assert (request/messages/1/content/.size == 3))
 (assert (request/messages/1/content/0/type == "tool_result"))
 (assert (request/messages/1/content/0/tool_use_id == "call_1"))
+(assert (request/messages/1/content/0/is_error == true))
 (assert (request/messages/1/content/1/type == "text"))
 (assert (request/messages/1/content/1/text == "Continue based on the tool results above."))
 (assert (anthropic_request_json .include? "\"type\":\"image\""))
@@ -99,6 +101,18 @@
 (assert (normalized/tool_calls/0/function/name == "list_files"))
 (var parsed_args (gene/json/parse normalized/tool_calls/0/function/arguments))
 (assert (parsed_args/path == "/tmp"))
+
+(var normalized_with_content (normalize_anthropic_response {
+  ^content [
+    {^type "tool_use" ^id "toolu_write" ^name "write_file" ^input {^path "csv-parser/csv_parser.py" ^content "print(\"hi\")"}}
+  ]
+}))
+
+(assert (normalized_with_content/tool_calls/.size == 1))
+(assert (normalized_with_content/tool_calls/0/function/name == "write_file"))
+(var parsed_write_args (gene/json/parse normalized_with_content/tool_calls/0/function/arguments))
+(assert (parsed_write_args/path == "csv-parser/csv_parser.py"))
+(assert (parsed_write_args/content == "print(\"hi\")"))
 
 (var anthropic_error_message (error_message_from_response {
   ^type "error"
