@@ -34,6 +34,39 @@ The viewer SHALL support arrow-key navigation for browsing nested Gene values.
 - **THEN** the viewer SHALL return to the parent container
 - **AND** restore the prior parent selection
 
+#### Scenario: Jump directly back to the root container
+- **GIVEN** the viewer is currently focused inside a nested container
+- **WHEN** the user presses `Esc`
+- **THEN** the viewer SHALL return to the root container
+- **AND** preserve the current root-level selection
+
+### Requirement: Type-ahead navigation jumps within the current container
+The viewer SHALL support direct type-ahead navigation without entering a separate search mode.
+
+#### Scenario: Numeric typing jumps to an indexed child
+- **GIVEN** the current container has children with numeric indices such as array items, sequence items, or positional Gene children
+- **WHEN** the user types one or more digits that form a non-negative integer
+- **THEN** the viewer SHALL treat the buffered digits as an index query
+- **AND** number indexed children starting at `1` for display and navigation
+- **AND** move the selection to the first child whose displayed logical index equals that integer
+
+#### Scenario: Text typing jumps to the first matching child
+- **GIVEN** the current container has visible children with labels or summaries
+- **WHEN** the user types printable characters and the buffered text is not parseable as a non-negative integer
+- **THEN** the viewer SHALL move the selection to the first child in source order whose label or summary contains that buffered text
+
+#### Scenario: Type-ahead buffer expires after a short idle interval
+- **GIVEN** the user has already typed a partial type-ahead query
+- **WHEN** more than 0.5 seconds elapse before the next printable keypress
+- **THEN** the prior buffered query SHALL be discarded
+- **AND** the next printable keypress SHALL start a new type-ahead query
+
+#### Scenario: Type-ahead buffer extends within the timeout window
+- **GIVEN** the user has already typed a partial type-ahead query
+- **WHEN** another printable keypress arrives within 0.5 seconds
+- **THEN** the viewer SHALL append that keypress to the existing query buffer
+- **AND** apply navigation using the combined query string
+
 ### Requirement: Multi-form log files behave as a browsable root sequence
 The viewer SHALL support append-only Gene logs and other files that contain multiple top-level forms.
 
@@ -70,7 +103,28 @@ The viewer SHALL provide persistent header and footer chrome for navigation cont
 #### Scenario: Footer shows function-key actions
 - **WHEN** the viewer is active
 - **THEN** the bottom of the screen SHALL show supported function keys
-- **AND** the initial version SHALL include `F1` for help, `F5` for reload, and `F10` for quit
+- **AND** the initial version SHALL include `Esc` for root, `F1` for help, `F2` for edit, `F5` for reload, and `F10` for quit
+
+### Requirement: Viewer can hand off editing to an external terminal editor
+The viewer SHALL allow the user to open the current file in an external terminal editor and return to browsing afterward.
+
+#### Scenario: Open the current selection in an editor
+- **GIVEN** the viewer is active on a readable file
+- **AND** an editor is available through `$EDITOR` or a default `nvim` fallback
+- **WHEN** the user presses `F2` or `Ctrl-E`
+- **THEN** the viewer SHALL restore the terminal before launching the editor
+- **AND** SHALL open the same file at or near the currently selected node's source location
+- **WHEN** the editor exits
+- **THEN** the viewer SHALL reopen its terminal UI
+- **AND** reload the file from disk
+- **AND** restore the deepest still-valid logical path
+
+#### Scenario: No external editor is available
+- **GIVEN** the viewer is active
+- **AND** no usable external editor command is configured or installed
+- **WHEN** the user presses `F2` or `Ctrl-E`
+- **THEN** the viewer SHALL remain available after the failed handoff
+- **AND** show a clear status message describing the editor launch failure
 
 ### Requirement: Viewer reload and startup failures are recoverable
 The viewer SHALL fail clearly when startup cannot proceed and SHALL allow a running session to reload the file from disk.
@@ -86,3 +140,11 @@ The viewer SHALL fail clearly when startup cannot proceed and SHALL allow a runn
 - **THEN** the viewer SHALL rebuild its document view from the current file contents
 - **AND** restore the deepest valid logical path it can
 - **AND** fall back to the root view if the previous path no longer exists
+
+#### Scenario: Ctrl-C requires confirmation before exiting
+- **GIVEN** the viewer is active
+- **WHEN** the user presses `Ctrl-C` once
+- **THEN** the viewer SHALL remain active
+- **AND** show a hint that `Ctrl-C` must be pressed again to exit
+- **WHEN** the user presses `Ctrl-C` again without another intervening navigation action
+- **THEN** the viewer SHALL exit

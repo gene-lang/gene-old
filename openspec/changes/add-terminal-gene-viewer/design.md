@@ -9,12 +9,14 @@ The parser already exposes `read_stream`, which makes it possible to consume top
 - Goals:
   - Open large Gene files in a terminal TUI without dumping the full document to stdout.
   - Support arrow-key navigation for moving within a container and drilling into nested values.
+  - Support quick type-ahead navigation within the current container.
+  - Allow the user to hand the current file off to an external terminal editor and return to the viewer afterward.
   - Show the current file path and logical node path at the top of the screen.
   - Show a stable function-key legend at the bottom of the screen.
   - Treat append-only multi-form Gene logs as a browsable root sequence.
   - Avoid recursive eager parsing of unopened descendants.
 - Non-Goals:
-  - Editing or rewriting Gene files
+  - Embedded split-pane editing inside the ncurses layout
   - Live log tailing
   - Search, filtering, or query language support
   - Syntax highlighting or rich text formatting
@@ -38,13 +40,25 @@ The parser already exposes `read_stream`, which makes it possible to consume top
 
 - Decision: keep navigation state as a stack of frames.
   - Rationale: each frame can store the current node reference, scroll offset, and selected row. This makes left/right navigation and path rendering straightforward and allows the viewer to restore the parent selection after backing out of a child node.
+  - Consequence: jumping back to the root container can be implemented by truncating the frame stack to its first frame, which preserves the existing root selection.
+  - Consequence: quit confirmation can live alongside the same view state so the first `Ctrl-C` can update status text without tearing down the session.
+
+- Decision: treat printable typing as a short-lived navigation buffer.
+  - Rationale: the viewer already presents a flat list of children in the current container, so quick jumps should work without introducing a separate search mode.
+  - Consequence: the state model needs a buffered query string plus a recent-input timestamp so typing within a short window extends the same query while idle time starts a new query.
 
 - Decision: reserve footer function keys for stable session controls.
   - Initial legend:
+    - `Esc` root
     - `F1` help
+    - `F2` or `Ctrl-E` edit in external editor
     - `F5` reload from disk
     - `F10` quit
   - Rationale: the user explicitly asked for function keys on the bottom of the screen, and these three actions are the minimum useful stable controls.
+
+- Decision: implement editing as an external-editor handoff instead of embedding a terminal editor in the lower half of the ncurses screen.
+  - Rationale: the current viewer and terminal editors such as `nvim` both need full ownership of the TTY. Closing curses, launching the editor, and reopening the viewer keeps the implementation simple and robust.
+  - Consequence: the first version edits the whole file, not an isolated subtree buffer, and uses the current node only to choose the initial cursor location.
 
 ## Risks / Trade-offs
 
@@ -56,6 +70,12 @@ The parser already exposes `read_stream`, which makes it possible to consume top
 
 - Reloading a file that has changed on disk can invalidate the current path.
   - Mitigation: store path segments semantically and restore the deepest still-valid location after re-indexing; fall back to root if needed.
+
+- External editor availability and cursor placement differ across environments.
+  - Mitigation: prefer `$EDITOR`, fall back to `nvim`, and pass cursor positioning only for supported editor families while treating exact placement as best-effort for others.
+
+- Type-ahead search can be ambiguous when labels and summaries share repeated prefixes.
+  - Mitigation: define deterministic behavior as "jump to the first matching child in current source order" and reset the buffer after a short idle timeout.
 
 ## Migration Plan
 

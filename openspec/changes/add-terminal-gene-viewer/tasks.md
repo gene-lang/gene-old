@@ -10,11 +10,17 @@
 
 ## 3. Terminal UI
 - [x] 3.1 Implement the full-screen layout with header, scrollable body, and footer legend.
-- [x] 3.2 Implement keyboard handling for Up, Down, Left, Right, `F1`, `F5`, and `F10`.
+- [x] 3.2 Implement keyboard handling for Up, Down, Left, Right, `Esc`, `F1`, `F2`, `Ctrl-E`, `F5`, and `F10`.
 - [x] 3.3 Render concise row summaries for scalar values and composite containers, including current selection highlighting.
+- [x] 3.4 Implement external-editor handoff that reopens the file near the selected node and reloads the viewer on return.
+- [x] 3.5 Implement a short-lived type-ahead buffer that accumulates printable keypresses and resets after 0.5 seconds of inactivity.
+- [x] 3.6 Use numeric buffers to jump to indexed children and textual buffers to jump to the first matching child row in the current container.
+- [x] 3.7 Require `Ctrl-C` confirmation in the viewer, showing a hint on the first press and exiting on the second.
 
 ## 4. Validation
 - [x] 4.1 Add tests for top-level streaming/index behavior on multi-form Gene logs.
 - [x] 4.2 Add tests for navigation/path behavior in the non-TTY viewer state machine.
-- [x] 4.3 Add a CLI-level regression test for command startup/help/error handling.
-- [x] 4.4 Run `openspec validate add-terminal-gene-viewer --strict`.
+- [x] 4.3 Add tests for editor target location and editor command shaping.
+- [x] 4.4 Add a CLI-level regression test for command startup/help/error handling.
+- [x] 4.5 Run `openspec validate add-terminal-gene-viewer --strict`.
+- [x] 4.6 Add tests for numeric and textual type-ahead navigation, including timeout-based buffer reset behavior.

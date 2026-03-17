@@ -67,6 +67,9 @@ type
     frames*: seq[ViewerFrame]
     status*: string
     show_help*: bool
+    type_ahead_query: string
+    last_type_ahead_at: float
+    quit_pending: bool
 
 proc open_viewer_document*(file_path: string): ViewerDocument
 proc open_viewer_document_from_source*(source, file_path: string): ViewerDocument
@@ -82,11 +85,18 @@ proc selected_location*(state: ViewerState): ViewerSourceLocation
 proc classify_node*(node: ViewerNode): ViewerColorKind
 proc classify_entry*(entry: ViewerEntry): ViewerColorKind
 proc current_color*(state: ViewerState): ViewerColorKind
+proc clear_type_ahead*(state: ViewerState)
+proc clear_quit_pending*(state: ViewerState)
+proc request_quit*(state: ViewerState): bool
+proc apply_type_ahead*(state: ViewerState, fragment: string, event_time: float, body_height: int)
 proc move_selection*(state: ViewerState, delta: int, body_height: int)
 proc enter_selected*(state: ViewerState)
 proc leave_current*(state: ViewerState)
+proc return_to_root*(state: ViewerState)
 proc reload*(state: ViewerState)
 proc restore_visible_selection*(state: ViewerState, body_height: int)
+
+const TypeAheadResetSeconds = 0.5
 
 func min_int(a, b: int): int {.inline.} =
   if a < b: a else: b
@@ -184,13 +194,16 @@ proc unescape_symbolish(text: string): string =
 proc render_segment(segment: ViewerPathSegment): string =
   case segment.kind
   of VpkIndex:
-    $segment.index
+    $(segment.index + 1)
   of VpkKey:
     segment.name
   of VpkGeneType:
     "type"
   of VpkGeneProp:
     "^" & segment.name
+
+proc display_index(index: int): int {.inline.} =
+  index + 1
 
 proc looks_numeric(text: string): bool =
   if text.len == 0:
@@ -213,6 +226,14 @@ proc looks_numeric(text: string): bool =
       return false
     inc(pos)
   has_digit
+
+proc is_non_negative_int(text: string): bool =
+  if text.len == 0:
+    return false
+  for ch in text:
+    if ch notin {'0'..'9'}:
+      return false
+  true
 
 proc scalar_color_kind(node: ViewerNode): ViewerColorKind =
   let text = collapse_preview(node.span_text(), max_len = 256).strip()
@@ -471,7 +492,11 @@ proc ensure_sequence_entries(node: ViewerNode) =
     return
   let spans = scan_top_level_spans(node.doc.source)
   for idx, child_span in spans:
-    node.add_entry(ViewerPathSegment(kind: VpkIndex, index: idx), "[" & $idx & "]", child_span)
+    node.add_entry(
+      ViewerPathSegment(kind: VpkIndex, index: idx),
+      "[" & $display_index(idx) & "]",
+      child_span
+    )
   node.loaded = true
 
 proc ensure_array_entries(node: ViewerNode) =
@@ -479,7 +504,11 @@ proc ensure_array_entries(node: ViewerNode) =
     return
   let children = direct_children(node.doc.source, node.span)
   for idx, child_span in children:
-    node.add_entry(ViewerPathSegment(kind: VpkIndex, index: idx), "[" & $idx & "]", child_span)
+    node.add_entry(
+      ViewerPathSegment(kind: VpkIndex, index: idx),
+      "[" & $display_index(idx) & "]",
+      child_span
+    )
   node.loaded = true
 
 proc ensure_map_entries(node: ViewerNode) =
@@ -495,7 +524,7 @@ proc ensure_map_entries(node: ViewerNode) =
       let child = new_node(node.doc, kind_from_source(node.doc.source, key_span), key_span)
       node.entries.add(ViewerEntry(
         segment: ViewerPathSegment(kind: VpkIndex, index: node.entries.len),
-        label: "[" & $node.entries.len & "]",
+        label: "[" & $display_index(node.entries.len) & "]",
         summary: entry_summary(node.doc, key_span, child.kind),
         node: child
       ))
@@ -555,7 +584,11 @@ proc ensure_gene_entries(node: ViewerNode) =
       pos += 2
       continue
 
-    node.add_entry(ViewerPathSegment(kind: VpkIndex, index: child_index), "[" & $child_index & "]", item_span)
+    node.add_entry(
+      ViewerPathSegment(kind: VpkIndex, index: child_index),
+      "[" & $display_index(child_index) & "]",
+      item_span
+    )
     inc(child_index)
     inc(pos)
 
@@ -590,7 +623,11 @@ proc open_viewer_document_from_source*(source, file_path: string): ViewerDocumen
   result.root = new_node(result, root_info.kind, root_info.span)
   if root_info.kind == VnkSequence:
     for idx, child_span in spans:
-      result.root.add_entry(ViewerPathSegment(kind: VpkIndex, index: idx), "[" & $idx & "]", child_span)
+      result.root.add_entry(
+        ViewerPathSegment(kind: VpkIndex, index: idx),
+        "[" & $display_index(idx) & "]",
+        child_span
+      )
     result.root.loaded = true
 
 proc open_viewer_document*(file_path: string): ViewerDocument =
@@ -621,7 +658,15 @@ proc restore_visible_selection*(state: ViewerState, body_height: int) =
     frame[].scroll = frame[].selected - body_height + 1
 
 proc new_viewer_state*(doc: ViewerDocument): ViewerState =
-  result = ViewerState(doc: doc, frames: @[new_frame(doc.root)], status: "", show_help: false)
+  result = ViewerState(
+    doc: doc,
+    frames: @[new_frame(doc.root)],
+    status: "",
+    show_help: false,
+    type_ahead_query: "",
+    last_type_ahead_at: 0.0,
+    quit_pending: false
+  )
   if doc.root.kind == VnkScalar:
     result.status = "scalar value"
   elif doc.root.kind == VnkSequence and doc.root.entries.len == 0:
@@ -718,6 +763,70 @@ proc current_color*(state: ViewerState): ViewerColorKind =
     return classify_entry(selected[])
   classify_node(state.current_frame().node)
 
+proc clear_type_ahead*(state: ViewerState) =
+  state.type_ahead_query = ""
+  state.last_type_ahead_at = 0.0
+
+proc clear_quit_pending*(state: ViewerState) =
+  state.quit_pending = false
+
+proc request_quit*(state: ViewerState): bool =
+  if state.quit_pending:
+    state.quit_pending = false
+    return true
+  state.quit_pending = true
+  false
+
+proc find_index_entry(entries: openArray[ViewerEntry], target: int): int =
+  if target <= 0:
+    return -1
+  let internal_target = target - 1
+  for idx, entry in entries:
+    if entry.segment.kind == VpkIndex and entry.segment.index == internal_target:
+      return idx
+  -1
+
+proc find_text_entry(entries: openArray[ViewerEntry], query: string): int =
+  let needle = query.toLowerAscii()
+  for idx, entry in entries:
+    if entry.label.toLowerAscii().contains(needle) or entry.summary.toLowerAscii().contains(needle):
+      return idx
+  -1
+
+proc apply_type_ahead*(state: ViewerState, fragment: string, event_time: float, body_height: int) =
+  if fragment.len == 0:
+    return
+  state.clear_quit_pending()
+
+  let entries = state.current_entries()
+  if entries.len == 0:
+    return
+
+  let expired =
+    state.type_ahead_query.len == 0 or
+    event_time < state.last_type_ahead_at or
+    event_time - state.last_type_ahead_at > TypeAheadResetSeconds
+
+  if expired:
+    state.type_ahead_query = fragment
+  else:
+    state.type_ahead_query.add(fragment)
+  state.last_type_ahead_at = event_time
+
+  let match_index =
+    if is_non_negative_int(state.type_ahead_query):
+      find_index_entry(entries, parseInt(state.type_ahead_query))
+    else:
+      find_text_entry(entries, state.type_ahead_query)
+
+  if match_index < 0:
+    state.status = "no match: " & state.type_ahead_query
+    return
+
+  state.current_frame().selected = match_index
+  restore_visible_selection(state, body_height)
+  state.status = ""
+
 proc move_selection*(state: ViewerState, delta: int, body_height: int) =
   var frame = addr state.current_frame()
   let entries_len = frame[].node.entries.len
@@ -744,6 +853,13 @@ proc leave_current*(state: ViewerState) =
   state.frames.setLen(state.frames.len - 1)
   set_status(state, "")
 
+proc return_to_root*(state: ViewerState) =
+  if state.frames.len <= 1:
+    set_status(state, "")
+    return
+  state.frames.setLen(1)
+  set_status(state, "")
+
 proc find_entry_index(node: ViewerNode, segment: ViewerPathSegment): int =
   node.ensure_entries()
   for idx, entry in node.entries:
@@ -763,6 +879,8 @@ proc find_entry_index(node: ViewerNode, segment: ViewerPathSegment): int =
 proc reload*(state: ViewerState) =
   let path = state.selected_path_segments()
   let bodyless = 1
+  state.clear_type_ahead()
+  state.clear_quit_pending()
   state.doc = open_viewer_document(state.doc.file_path)
   state.frames = @[new_frame(state.doc.root)]
 

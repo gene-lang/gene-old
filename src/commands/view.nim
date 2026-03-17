@@ -15,8 +15,10 @@ Navigation:
   Page Up/Page Down     Move one screen
   Right arrow or Enter  Enter selected container
   Left arrow            Return to parent container
+  Esc                   Return to root container
+  Type digits/text      Jump by index or substring (0.5s buffer)
   F1                    Toggle help
-  F2                    Open file in external editor
+  F2 or Ctrl-E          Open file in external editor
   F5                    Reload file from disk
   F10                   Quit viewer
 

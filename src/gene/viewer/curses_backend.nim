@@ -19,6 +19,7 @@ type
 
   ViewerKey* = enum
     VkNone
+    VkEscape
     VkUp
     VkDown
     VkPageUp
@@ -33,6 +34,10 @@ type
     VkResize
     VkQuit
     VkHelp
+
+  ViewerInput* = object
+    key*: ViewerKey
+    text*: string
 
 const
   NcKeyDown = 258
@@ -190,36 +195,48 @@ proc draw_text*(row, col, width: int, text: string, highlighted = false, color =
   if colors_enabled:
     discard color_set(0, nil)
 
-proc read_key*(): ViewerKey =
-  let key = getch().int
+proc classify_input*(key: int): ViewerInput =
   case key
+  of 27:
+    ViewerInput(key: VkEscape)
   of NcKeyUp:
-    VkUp
+    ViewerInput(key: VkUp)
   of NcKeyDown:
-    VkDown
+    ViewerInput(key: VkDown)
   of NcKeyPageUp:
-    VkPageUp
+    ViewerInput(key: VkPageUp)
   of NcKeyPageDown:
-    VkPageDown
+    ViewerInput(key: VkPageDown)
   of NcKeyLeft:
-    VkLeft
+    ViewerInput(key: VkLeft)
   of NcKeyRight:
-    VkRight
+    ViewerInput(key: VkRight)
   of NcKeyEnter, 10, 13:
-    VkEnter
+    ViewerInput(key: VkEnter)
   of NcKeyResize:
-    VkResize
+    ViewerInput(key: VkResize)
   of NcKeyF0 + 1:
-    VkF1
+    ViewerInput(key: VkF1)
   of NcKeyF0 + 2:
-    VkF2
+    ViewerInput(key: VkF2)
   of NcKeyF0 + 5:
-    VkF5
+    ViewerInput(key: VkF5)
   of NcKeyF0 + 10:
-    VkF10
+    ViewerInput(key: VkF10)
+  of 5:
+    ViewerInput(key: VkF2)
   of 3:
-    VkQuit
+    ViewerInput(key: VkQuit)
   of int('?'):
-    VkHelp
+    ViewerInput(key: VkHelp)
   else:
-    VkNone
+    if key >= 32 and key <= 126:
+      ViewerInput(key: VkNone, text: $char(key))
+    else:
+      ViewerInput(key: VkNone)
+
+proc read_input*(): ViewerInput =
+  classify_input(getch().int)
+
+proc read_key*(): ViewerKey =
+  read_input().key
