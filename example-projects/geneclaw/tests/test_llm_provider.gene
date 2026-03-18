@@ -66,6 +66,11 @@
 (var codex_request_json (gene/json/stringify codex_request))
 
 (assert (codex_request/instructions == "You are GeneClaw, a capable AI agent. You can use tools to complete tasks. After receiving a tool result, provide a natural response. For general conversation, respond normally without tool calls."))
+(assert (codex_request/tools/.size == 1))
+(assert (codex_request/tools/0/type == "function"))
+(assert (codex_request/tools/0/name == "list_files"))
+(assert (codex_request/tools/0/description == "List files in a directory"))
+(assert (codex_request/tools/0/parameters/properties/path/type == "string"))
 (assert (codex_request/input/.size == 4))
 (assert (codex_request/input/0/type == "message"))
 (assert (codex_request/input/0/role == "assistant"))
@@ -85,6 +90,7 @@
 (assert (codex_request/input/3/content/1/type == "input_image"))
 (assert (codex_request/input/3/content/1/source/type == "base64"))
 (assert (codex_request_json .include? "\"type\":\"function_call_output\""))
+(assert (codex_request_json .include? "\"name\":\"list_files\""))
 (assert (codex_request_json .include? "\"type\":\"input_image\""))
 
 (var history [
@@ -166,6 +172,25 @@
 (assert (normalized_openai_codex_text/content == "Created hello.txt"))
 (assert (normalized_openai_codex_text/tool_calls/.size == 0))
 
+(var normalized_openai_codex_output_text (normalize_openai_response {
+  ^output [
+    {^type "reasoning" ^summary []}
+  ]
+  ^output_text "Created hello.txt via output_text"
+}))
+
+(assert (normalized_openai_codex_output_text/content == "Created hello.txt via output_text"))
+(assert (normalized_openai_codex_output_text/tool_calls/.size == 0))
+
+(var normalized_openai_codex_unknown_output (normalize_openai_response {
+  ^output [
+    {^type "reasoning" ^summary []}
+  ]
+}))
+
+(assert (normalized_openai_codex_unknown_output/content == "I could not generate a response."))
+(assert (normalized_openai_codex_unknown_output/tool_calls/.size == 0))
+
 (var normalized_openai_codex_tool (normalize_openai_response {
   ^output [
     {^type "function_call"
@@ -190,5 +215,22 @@
 (assert (anthropic_error_message .include? "Anthropic API Error: Error"))
 (assert (anthropic_error_message .include? "status=401"))
 (assert (anthropic_error_message .include? "body={\"type\":\"error\""))
+
+(var success_openai_message (error_message_from_response {
+  ^id "resp_123"
+  ^status "completed"
+  ^message "Done"
+  ^output_text "Done"
+  ^metadata {^trace_id "abc123"}
+}))
+
+(assert (success_openai_message == ""))
+
+(var failed_openai_message (error_message_from_response {
+  ^id "resp_124"
+  ^status "failed"
+}))
+
+(assert (failed_openai_message .include? "OpenAI response status=failed"))
 
 (println "ok")

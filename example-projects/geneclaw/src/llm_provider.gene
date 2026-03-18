@@ -335,11 +335,23 @@
   input
 )
 
+(fn openai_codex_tool_from_openai [tool_spec]
+  (var fn_def (ensure_map (tool_spec/function || {})))
+  {^type (tool_spec/type || "function")
+   ^name (fn_def/name || "")
+   ^description (fn_def/description || "")
+   ^parameters (fn_def/parameters || {^type "object" ^properties {} ^required []})}
+)
+
 (fn $ns/build_openai_codex_request [history user_text tools_spec image_attachments = []]
+  (var tools [])
+  (tools_spec .each (fn [tool_spec]
+    (tools .append (openai_codex_tool_from_openai tool_spec))
+  ))
   (var request {
     ^instructions get_system_prompt/.call
     ^input (build_openai_codex_input history user_text image_attachments)
-    ^tools tools_spec
+    ^tools tools
   })
   (log_openai_codex_request request history)
   request
@@ -443,6 +455,7 @@
 
 (fn $ns/normalize_openai_response [response]
   (var choices (try (response .get "choices" []) catch * []))
+  (var response_output_text ((try (response .get "output_text" "") catch * "") .to_s))
   (if choices/.not_empty?
     (var first_choice choices/0)
     (var msg first_choice/message)
@@ -459,13 +472,22 @@
     (output .each (fn [item]
       (var item_type (item/type || ""))
       (if (item_type == "message")
-        ((ensure_array (item/content || [])) .each (fn [part]
-          (if (((part/type || "") == "output_text") || ((part/type || "") == "text") || ((part/type || "") == "input_text"))
-            (if part/text
-              (text_parts .append part/text/.to_s)
-            )
+        (var item_content (item/content || []))
+        (if (item_content is String)
+          (if item_content/.not_empty?
+            (text_parts .append item_content)
           )
-        ))
+        else
+          ((ensure_array item_content) .each (fn [part]
+            (if (((part/type || "") == "output_text") || ((part/type || "") == "text") || ((part/type || "") == "input_text"))
+              (if part/text
+                (text_parts .append part/text/.to_s)
+              )
+            )
+          ))
+        )
+      elif (((item_type == "output_text") || (item_type == "text") || (item_type == "input_text")) && item/text)
+        (text_parts .append item/text/.to_s)
       elif (item_type == "function_call")
         (tool_calls .append {
           ^id (item/call_id || item/id || "")
@@ -477,7 +499,18 @@
         })
       )
     ))
-    (return {^content (text_parts .join "\n\n") ^tool_calls tool_calls})
+    (var content (text_parts .join "\n\n"))
+    (if (content/.empty? && response_output_text/.not_empty?)
+      (content = response_output_text)
+    )
+    (if (content/.empty? && (tool_calls/.size == 0))
+      (content = "I could not generate a response.")
+    )
+    (return {^content content ^tool_calls tool_calls})
+  )
+
+  (if response_output_text/.not_empty?
+    (return {^content response_output_text ^tool_calls []})
   )
 
   {^content "I could not generate a response." ^tool_calls []}
@@ -536,11 +569,14 @@
 
 (fn response_error_body_text [response]
   (try
-    (var raw_body ((response/raw_body || "") .to_s))
+    (if_not (response is Map)
+      (return "")
+    )
+    (var raw_body ((response .get "raw_body" "") .to_s))
     (if raw_body/.not_empty?
       (return raw_body)
     )
-    (var metadata (response/metadata || nil))
+    (var metadata ((response .get "metadata" nil) || nil))
     (if metadata
       (return metadata/.to_json)
     )
@@ -552,26 +588,57 @@
 
 (fn $ns/error_message_from_response [response]
   (try
-    (var message "")
-    (if (response is Map)
-      (var error_value (response/error || nil))
-      (if (error_value is Map)
-        (message = ((error_value/message || "") .to_s))
-      else
-        (message = ((response/message || "") .to_s))
-      )
-    else
-      (message = ((response/message || "") .to_s))
+    (if_not (response is Map)
+      (return "")
     )
 
+    (var response_type ((response .get "type" "") .to_s))
+    (var status_value_text ((response .get "status" "") .to_s))
+    (var error_value ((response .get "error" nil) || nil))
+    (var message "")
+    (var has_error false)
+
+    (if (error_value is Map)
+      (has_error = true)
+      (message = ((error_value .get "message" "") .to_s))
+    )
+
+    (if (message/.empty? && ((response_type == "error") || (response_type == "failed")))
+      (message = ((response .get "message" "") .to_s))
+    )
+
+    (var status_code 0)
     (var status_text "")
     (try
-      (var status_value (response/status || nil))
+      (var status_value ((response .get "status" nil) || nil))
       (if (status_value && ((status_value .to_i) > 0))
+        (status_code = (status_value .to_i))
         (status_text = (status_value .to_s))
       )
     catch *
       nil
+    )
+
+    (if ((response_type == "error") || (response_type == "failed"))
+      (has_error = true)
+    )
+
+    (if (status_code >= 400)
+      (has_error = true)
+    )
+
+    (if (["failed" "incomplete" "cancelled" "expired"] .contains status_value_text)
+      (has_error = true)
+      (if message/.empty?
+        (message = #"OpenAI response status=#{status_value_text}")
+      )
+      (if status_text/.empty?
+        (status_text = status_value_text)
+      )
+    )
+
+    (if_not has_error
+      (return "")
     )
 
     (var body_text (response_error_body_text response))
@@ -664,12 +731,28 @@
       (log .debug "LLM chat returned")
       (var duration (gene/now/.call/.to_i - start_ms))
       (var response call_result/response)
-      (var error_message (error_message_from_response response))
+      (log .debug "LLM post-call: checking response for error envelope")
+      (if ((response is OpenAIError) || (response is AnthropicError))
+        (var direct_error ((response .to_s) .to_s))
+        (log .debug #"LLM post-call: direct error object detected len=#{direct_error/.size}")
+        (log .error #"LLM call failed: #{direct_error}")
+        (return {^content #"LLM error: #{direct_error}" ^tool_calls []})
+      )
+      (var error_message "")
+      (if (response is Map)
+        (var response_type ((response .get "type" "") .to_s))
+        (var response_status ((response .get "status" "") .to_s))
+        (if ((response_type == "error") || (response_type == "failed") || (["failed" "incomplete" "cancelled" "expired"] .contains response_status))
+          (error_message = (error_message_from_response response))
+        )
+      )
+      (log .debug #"LLM post-call: error envelope checked len=#{error_message/.size}")
       (if error_message/.not_empty?
         (log .error #"LLM call failed: #{error_message}")
         (return {^content #"LLM error: #{error_message}" ^tool_calls []})
       )
       (var normalized call_result/normalized)
+      (log .debug "LLM post-call: normalized response ready")
       (log .info #"LLM responded in #{duration}ms provider=#{CONFIG/llm/provider} content_len=#{normalized/content/.size} tool_calls=#{normalized/tool_calls/.size}")
       (log .trace #"LLM response: #{normalized/content}")
       normalized
