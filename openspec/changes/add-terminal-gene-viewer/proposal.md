@@ -9,7 +9,7 @@ Large Gene data files and append-only Gene logs are hard to inspect with the cur
 - Add direct type-ahead navigation so digit sequences jump to indexed children and text sequences jump to the first matching child label or summary.
 - Add `Esc` to jump back to the root container and `Ctrl-E` as an edit shortcut alongside `F2`.
 - Require a confirmation press for `Ctrl-C`, showing a hint after the first press and exiting on the second.
-- Add inline editing for simple scalar values so the user can press `Tab` to edit a selected literal/token in place and `Enter` to save it back to the file.
+- Add inline editing for simple scalar values so the user can press `Tab` to edit a selected literal/token in place and `Enter` to save it back to the file, while using the same external-editor handoff as `F2` when `Tab` is pressed on non-scalar values.
 - Make the viewer efficient for large inputs by indexing top-level entries incrementally and loading nested content only when the user drills into it.
 
 ## Impact

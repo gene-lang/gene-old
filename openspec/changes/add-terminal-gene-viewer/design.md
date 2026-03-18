@@ -79,6 +79,7 @@ The parser already exposes `read_stream`, which makes it possible to consume top
 - Decision: use `Tab` to enter inline edit mode, `Enter` to save, and `Esc` to cancel while editing.
   - Rationale: the user explicitly requested `Tab` and `Enter`, and `Esc` is the lowest-friction cancel path in a terminal UI.
   - Consequence: `Esc` has mode-dependent meaning: cancel while editing, otherwise return to root.
+  - Consequence: `Tab` also has mode-dependent meaning: start inline edit for supported scalars, otherwise fall back to the existing external-editor handoff.
 
 ## Risks / Trade-offs
 

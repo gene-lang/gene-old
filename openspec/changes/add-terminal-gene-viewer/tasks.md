@@ -19,7 +19,7 @@
 - [x] 3.7 Require `Ctrl-C` confirmation in the viewer, showing a hint on the first press and exiting on the second.
 - [x] 3.8 Add an inline edit mode entered with `Tab` for supported scalar values, with buffer editing in the TUI.
 - [x] 3.9 Save valid inline edits on `Enter` by rewriting the selected source span, reloading the file, and restoring selection.
-- [x] 3.10 Cancel inline edit mode on `Esc` without writing the file and block inline editing for unsupported nodes with a clear status message.
+- [x] 3.10 Cancel inline edit mode on `Esc` without writing the file and fall back to the external editor when `Tab` is pressed on unsupported nodes.
 
 ## 4. Validation
 - [x] 4.1 Add tests for top-level streaming/index behavior on multi-form Gene logs.

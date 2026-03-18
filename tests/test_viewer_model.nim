@@ -178,22 +178,24 @@ suite "Terminal Gene Viewer Model":
   test "ctrl-e is treated as edit input":
     check classify_input(5).key == VkF2
 
-  test "tab enters inline edit mode for supported scalars":
+  test "tab uses inline edit for supported scalars":
     let doc = open_viewer_document_from_source("[1 true]", "inline_tab.gene")
     let state = new_viewer_state(doc)
 
+    check state.tab_uses_inline_edit()
     check state.handle_key(VkTab, 10)
     check state.is_inline_editing()
     check state.inline_edit_buffer() == "1"
 
-  test "tab rejects inline edit for containers":
+  test "tab falls back to external edit for containers":
     let doc = open_viewer_document_from_source("[1 [2 3]]", "inline_reject.gene")
     let state = new_viewer_state(doc)
     state.move_selection(1, 10)
 
+    check not state.tab_uses_inline_edit()
     check state.handle_key(VkTab, 10)
     check not state.is_inline_editing()
-    check state.status.contains("unavailable")
+    check state.status.len == 0
 
   test "inline edit save rewrites the selected scalar and reloads":
     let source_path = absolutePath("tmp/viewer_inline_save.gene")

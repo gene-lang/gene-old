@@ -136,11 +136,11 @@ The viewer SHALL allow in-place editing of selected simple scalar values without
 - **THEN** the viewer SHALL enter inline edit mode
 - **AND** initialize the edit buffer from the selected value's current source text
 
-#### Scenario: Reject inline edit mode for unsupported nodes
+#### Scenario: Tab falls back to the external editor for unsupported nodes
 - **GIVEN** the current selection is a container or another non-editable node
 - **WHEN** the user presses `Tab`
-- **THEN** the viewer SHALL remain in browse mode
-- **AND** show a clear status message that inline edit is not available for that selection
+- **THEN** the viewer SHALL remain out of inline edit mode
+- **AND** invoke the same external-editor handoff behavior used by `F2`
 
 #### Scenario: Save a valid inline scalar edit
 - **GIVEN** the viewer is in inline edit mode for a supported scalar

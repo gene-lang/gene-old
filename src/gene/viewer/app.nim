@@ -4,7 +4,7 @@ import ./model
 import ./curses_backend
 import ./editor
 
-const FooterLegend = "Esc Root  F1 Help  F2 Edit  F5 Reload  F10 Quit"
+const FooterLegend = "Esc Root  Tab Edit  F1 Help  F2 Edit  F5 Reload  F10 Quit"
 const InlineEditLegend = "Enter Save  Esc Cancel  Backspace Delete"
 
 func entry_is_container(entry: ViewerEntry): bool =
@@ -50,7 +50,7 @@ proc draw_help(height, width: int) =
     "Arrow Right or Enter: enter selected container",
     "Arrow Left: return to parent container",
     "Esc: return to root container",
-    "Tab: edit selected scalar inline",
+    "Tab: edit scalar inline or open external editor",
     "Type digits/text: jump by index or substring",
     "F2 or Ctrl-E: open file in external editor",
     "F5: reload file from disk",
@@ -129,6 +129,21 @@ proc edit_current(state: ViewerState, session: var CursesSession) =
   except CatchableError as e:
     state.status = "reload failed: " & e.msg
 
+proc prepare_edit_request(state: ViewerState) =
+  state.clear_type_ahead()
+  state.clear_quit_pending()
+  state.status = ""
+
+proc tab_uses_inline_edit*(state: ViewerState): bool =
+  state.can_inline_edit()
+
+proc handle_tab(state: ViewerState, session: var CursesSession) =
+  state.prepare_edit_request()
+  if state.tab_uses_inline_edit():
+    discard state.start_inline_edit()
+  else:
+    edit_current(state, session)
+
 proc handle_key*(state: ViewerState, key: ViewerKey, body_height: int): bool =
   if key notin {VkNone, VkResize, VkQuit}:
     state.clear_type_ahead()
@@ -136,7 +151,8 @@ proc handle_key*(state: ViewerState, key: ViewerKey, body_height: int): bool =
     state.status = ""
   case key
   of VkTab:
-    discard state.start_inline_edit()
+    if state.can_inline_edit():
+      discard state.start_inline_edit()
   of VkEscape:
     state.return_to_root()
   of VkUp:
@@ -202,8 +218,10 @@ proc run_viewer*(doc: ViewerDocument) =
         break
     elif input.text.len > 0:
       state.apply_type_ahead(input.text, epochTime(), body_height)
+    elif input.key == VkTab:
+      handle_tab(state, session)
     elif input.key == VkF2:
-      state.clear_type_ahead()
+      state.prepare_edit_request()
       edit_current(state, session)
     elif not state.handle_key(input.key, body_height):
       break
