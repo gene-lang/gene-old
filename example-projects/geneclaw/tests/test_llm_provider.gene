@@ -1,6 +1,6 @@
 #!/usr/bin/env gene run
 
-(import build_openai_request build_anthropic_request error_message_from_response normalize_anthropic_response provider_supports_images? validate_image_inputs from "llm_provider")
+(import build_openai_request build_openai_codex_request build_anthropic_request error_message_from_response normalize_anthropic_response normalize_openai_response provider_supports_images? validate_image_inputs from "llm_provider")
 
 (var tools_spec [
   {^type "function"
@@ -46,6 +46,46 @@
 (assert (openai_request/messages/1/content/1/type == "image_url"))
 (assert (openai_request_json .include? "\"type\":\"image_url\""))
 (assert (openai_request_json .include? "\"data:image/png;base64,"))
+
+(var codex_history [
+  {^role "assistant"
+   ^content "I'll create the file."
+   ^tool_calls [
+     {^id "call_codex_1"
+      ^function {
+        ^name "list_files"
+        ^arguments "{\"path\":\"/tmp\"}"
+      }}
+   ]}
+  {^role "tool"
+   ^tool_call_id "call_codex_1"
+   ^content "{\"files\":[]}"}
+])
+
+(var codex_request (build_openai_codex_request codex_history "Continue based on the tool results above." tools_spec [image_attachment]))
+(var codex_request_json (gene/json/stringify codex_request))
+
+(assert (codex_request/instructions == "You are GeneClaw, a capable AI agent. You can use tools to complete tasks. After receiving a tool result, provide a natural response. For general conversation, respond normally without tool calls."))
+(assert (codex_request/input/.size == 4))
+(assert (codex_request/input/0/type == "message"))
+(assert (codex_request/input/0/role == "assistant"))
+(assert (codex_request/input/0/content == "I'll create the file."))
+(assert (codex_request/input/1/type == "function_call"))
+(assert (codex_request/input/1/call_id == "call_codex_1"))
+(assert (codex_request/input/1/name == "list_files"))
+(assert (codex_request/input/1/arguments == "{\"path\":\"/tmp\"}"))
+(assert (codex_request/input/2/type == "function_call_output"))
+(assert (codex_request/input/2/call_id == "call_codex_1"))
+(assert (codex_request/input/2/output == "{\"files\":[]}"))
+(assert (codex_request/input/3/type == "message"))
+(assert (codex_request/input/3/role == "user"))
+(assert (codex_request/input/3/content/.size == 2))
+(assert (codex_request/input/3/content/0/type == "input_text"))
+(assert (codex_request/input/3/content/0/text == "Continue based on the tool results above."))
+(assert (codex_request/input/3/content/1/type == "input_image"))
+(assert (codex_request/input/3/content/1/source/type == "base64"))
+(assert (codex_request_json .include? "\"type\":\"function_call_output\""))
+(assert (codex_request_json .include? "\"type\":\"input_image\""))
 
 (var history [
   {^role "assistant"
@@ -113,6 +153,32 @@
 (var parsed_write_args (gene/json/parse normalized_with_content/tool_calls/0/function/arguments))
 (assert (parsed_write_args/path == "csv-parser/csv_parser.py"))
 (assert (parsed_write_args/content == "print(\"hi\")"))
+
+(var normalized_openai_codex_text (normalize_openai_response {
+  ^output [
+    {^type "message"
+     ^content [
+       {^type "output_text" ^text "Created hello.txt"}
+     ]}
+  ]
+}))
+
+(assert (normalized_openai_codex_text/content == "Created hello.txt"))
+(assert (normalized_openai_codex_text/tool_calls/.size == 0))
+
+(var normalized_openai_codex_tool (normalize_openai_response {
+  ^output [
+    {^type "function_call"
+     ^call_id "call_live_1"
+     ^name "write_file"
+     ^arguments "{\"path\":\"hello.txt\",\"content\":\"hi\"}"}
+  ]
+}))
+
+(assert (normalized_openai_codex_tool/tool_calls/.size == 1))
+(assert (normalized_openai_codex_tool/tool_calls/0/id == "call_live_1"))
+(assert (normalized_openai_codex_tool/tool_calls/0/function/name == "write_file"))
+(assert (normalized_openai_codex_tool/tool_calls/0/function/arguments == "{\"path\":\"hello.txt\",\"content\":\"hi\"}"))
 
 (var anthropic_error_message (error_message_from_response {
   ^type "error"

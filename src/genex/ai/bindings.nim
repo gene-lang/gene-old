@@ -305,6 +305,25 @@ proc call_openai_endpoint(config: OpenAIConfig, endpoint: string, payload: JsonN
         echo "[genex/ai] call_openai_endpoint error_details status=", e.status, " body=", e.raw_body
     return openai_error_value(e)
 
+proc call_openai_codex_endpoint(config: OpenAIConfig, payload: JsonNode): Value {.gcsafe.} =
+  let ai_debug = getEnvVar("GENE_AI_DEBUG", "") == "1"
+  try:
+    if ai_debug:
+      echo "[genex/ai] call_openai_endpoint start endpoint=", DEFAULT_CODEX_RESPONSES_ENDPOINT
+    let response = performCodexResponsesRequest(config, payload)
+    if ai_debug:
+      echo "[genex/ai] call_openai_endpoint success endpoint=", DEFAULT_CODEX_RESPONSES_ENDPOINT
+    let gene_response = jsonToGeneValue(response)
+    if ai_debug:
+      echo "[genex/ai] call_openai_endpoint converted response"
+    return gene_response
+  except OpenAIError as e:
+    if ai_debug:
+      echo "[genex/ai] call_openai_endpoint caught OpenAIError: ", e.msg
+      if e.status != 0 or e.raw_body.len > 0:
+        echo "[genex/ai] call_openai_endpoint error_details status=", e.status, " body=", e.raw_body
+    return openai_error_value(e)
+
 proc call_anthropic_endpoint(config: AnthropicConfig, endpoint: string, payload: JsonNode): Value {.gcsafe.} =
   let ai_debug = getEnvVar("GENE_AI_DEBUG", "") == "1"
   try:
@@ -419,6 +438,9 @@ proc start_openai_stream(vm: ptr VirtualMachine, config: OpenAIConfig, options: 
   if handler.kind notin {VkNativeFn, VkFunction, VkClass, VkInstance}:
     return new_error("Callback must be callable")
 
+  if isCodexOAuth(config):
+    return new_error("OpenAI Codex OAuth streaming is not supported via .stream; use .chat")
+
   var stream_opts = if options.kind == JNull: %*{} else: options
   stream_opts["stream"] = %*true
   let payload = buildChatPayload(config, stream_opts)
@@ -450,6 +472,9 @@ proc vm_openai_chat*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], ar
     return err
 
   let options = geneValueToJson(options_val)
+  if isCodexOAuth(config):
+    let payload = buildCodexResponsesPayload(config, options)
+    return call_openai_codex_endpoint(config, payload)
   let payload = buildChatPayload(config, options)
   return call_openai_endpoint(config, "/chat/completions", payload)
 
@@ -533,6 +558,9 @@ proc vm_openai_client_chat*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Val
   if get_positional_count(arg_count, has_keyword_args) > 1:
     options = geneValueToJson(get_positional_arg(args, 1, has_keyword_args))
 
+  if isCodexOAuth(config):
+    let payload = buildCodexResponsesPayload(config, options)
+    return call_openai_codex_endpoint(config, payload)
   let payload = buildChatPayload(config, options)
   return call_openai_endpoint(config, "/chat/completions", payload)
 

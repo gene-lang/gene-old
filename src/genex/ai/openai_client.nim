@@ -6,6 +6,8 @@ import json, httpclient, strutils, os, tables, asyncdispatch
 type
   OpenAIConfig* = ref object
     api_key*: string
+    auth_token*: string
+    account_id*: string
     base_url*: string
     model*: string
     organization*: string
@@ -30,8 +32,12 @@ type
 # Constants for OpenAI API endpoints
 const
   DEFAULT_BASE_URL* = "https://api.openai.com/v1"
+  DEFAULT_CODEX_BASE_URL* = "https://chatgpt.com"
+  DEFAULT_CODEX_RESPONSES_ENDPOINT* = "/backend-api/codex/responses"
   DEFAULT_TIMEOUT_MS* = 30000
   DEFAULT_MAX_RETRIES* = 3
+  GENECLAW_CODEX_ORIGINATOR* = "geneclaw"
+  GENECLAW_CODEX_USER_AGENT* = "geneclaw/1.0"
 
 # Helper functions for environment variable reading
 proc getEnvVar*(key: string, default: string = ""): string =
@@ -78,12 +84,40 @@ proc redactHeadersForLog*(headers: Table[string, string]): string =
     pairs.add(key & ": " & redact_header_value(key, value))
   result = "{" & pairs.join(", ") & "}"
 
+proc isCodexOAuth*(config: OpenAIConfig): bool =
+  config != nil and config.auth_token.len > 0
+
+proc resolveCodexBaseUrl(config: OpenAIConfig): string =
+  if config == nil:
+    return DEFAULT_CODEX_BASE_URL
+  if config.base_url.len == 0 or config.base_url == DEFAULT_BASE_URL:
+    return DEFAULT_CODEX_BASE_URL
+  return config.base_url
+
+proc cloneConfigWithBaseUrl(config: OpenAIConfig, base_url: string): OpenAIConfig =
+  result = OpenAIConfig(
+    api_key: config.api_key,
+    auth_token: config.auth_token,
+    account_id: config.account_id,
+    base_url: base_url,
+    model: config.model,
+    organization: config.organization,
+    headers: initTable[string, string](),
+    timeout_ms: config.timeout_ms,
+    max_retries: config.max_retries,
+    extra: config.extra
+  )
+  for key, value in config.headers:
+    result.headers[key] = value
+
 # Config building with precedence: options > env > defaults
 proc buildOpenAIConfig*(options: JsonNode = newJNull()): OpenAIConfig =
   let opts = if options.kind != JNull: options else: %*{}
 
   result = OpenAIConfig(
     api_key: if opts.hasKey("api_key"): opts["api_key"].getStr(getEnvVar("OPENAI_API_KEY")) else: getEnvVar("OPENAI_API_KEY"),
+    auth_token: if opts.hasKey("auth_token"): opts["auth_token"].getStr(getEnvVar("OPENAI_AUTH_TOKEN", getEnvVar("OPENAI_OAUTH_TOKEN"))) else: getEnvVar("OPENAI_AUTH_TOKEN", getEnvVar("OPENAI_OAUTH_TOKEN")),
+    account_id: if opts.hasKey("account_id"): opts["account_id"].getStr(getEnvVar("OPENAI_ACCOUNT_ID", getEnvVar("CHATGPT_ACCOUNT_ID"))) else: getEnvVar("OPENAI_ACCOUNT_ID", getEnvVar("CHATGPT_ACCOUNT_ID")),
     base_url: if opts.hasKey("base_url"): opts["base_url"].getStr(getEnvVar("OPENAI_BASE_URL", DEFAULT_BASE_URL)) else: getEnvVar("OPENAI_BASE_URL", DEFAULT_BASE_URL),
     model: if opts.hasKey("model"): opts["model"].getStr("gpt-3.5-turbo") else: "gpt-3.5-turbo",
     organization: if opts.hasKey("organization"): opts["organization"].getStr(getEnvVar("OPENAI_ORG")) else: getEnvVar("OPENAI_ORG"),
@@ -96,7 +130,13 @@ proc buildOpenAIConfig*(options: JsonNode = newJNull()): OpenAIConfig =
   result.headers["Content-Type"] = "application/json"
   result.headers["User-Agent"] = "gene-openai-client/1.0"
 
-  if result.api_key != "":
+  if result.auth_token != "":
+    result.headers["Authorization"] = "Bearer " & result.auth_token
+    result.headers["originator"] = GENECLAW_CODEX_ORIGINATOR
+    result.headers["User-Agent"] = GENECLAW_CODEX_USER_AGENT
+    if result.account_id != "":
+      result.headers["ChatGPT-Account-Id"] = result.account_id
+  elif result.api_key != "":
     result.headers["Authorization"] = "Bearer " & result.api_key
 
   if result.organization != "":
@@ -138,8 +178,63 @@ proc request_async(url: string, http_method: HttpMethod, body: string, headers: 
       echo "[genex/ai] request_async close client"
     client.close()
 
+proc extractRequestId(headers: HttpHeaders): string =
+  for key in ["x-request-id", "x-oai-request-id"]:
+    if headers.hasKey(key):
+      return headers[key]
+  return ""
+
+proc extractOpenAIErrorDetails(errorBody: JsonNode): tuple[msg: string, errType: string] =
+  if errorBody == nil:
+    return ("", "")
+
+  if errorBody.kind == JObject and errorBody.hasKey("error"):
+    let nested = errorBody["error"]
+    var msg = ""
+    var errType = ""
+    if nested.kind == JObject:
+      if nested.hasKey("message"):
+        msg = nested["message"].getStr()
+      if nested.hasKey("type"):
+        errType = nested["type"].getStr()
+    elif nested.kind == JString:
+      msg = nested.getStr()
+    return (msg, errType)
+
+  if errorBody.kind == JObject:
+    if errorBody.hasKey("message") and errorBody["message"].kind == JString:
+      return (errorBody["message"].getStr(), "")
+    if errorBody.hasKey("detail"):
+      if errorBody["detail"].kind == JString:
+        return (errorBody["detail"].getStr(), "")
+      return ($errorBody["detail"], "")
+
+  if errorBody.kind == JString:
+    return (errorBody.getStr(), "")
+
+  return ($errorBody, "")
+
+proc buildOpenAIHttpError(response: AsyncResponse, statusCode: int, response_body: string): OpenAIError =
+  let errorBody = try: parseJson(response_body) except: %*{"message": response_body}
+  let details = extractOpenAIErrorDetails(errorBody)
+  result = OpenAIError(
+    msg: "OpenAI API Error: " & details.msg,
+    status: statusCode,
+    provider_error: details.errType,
+    metadata: errorBody,
+    raw_body: response_body
+  )
+  result.request_id = extractRequestId(response.headers)
+
+  if statusCode == 429 and response.headers.hasKey("retry-after"):
+    try:
+      result.retry_after = parseInt(response.headers["retry-after"])
+    except:
+      discard
+
 proc performRequest*(config: OpenAIConfig, httpMethod: string, endpoint: string,
-                   payload: JsonNode = newJNull(), streaming: bool = false): JsonNode =
+                   payload: JsonNode = newJNull(), streaming: bool = false,
+                   extra_headers: seq[(string, string)] = @[]): JsonNode =
   try:
     let ai_debug = getEnvVar("GENE_AI_DEBUG", "") == "1"
     let url = config.base_url & endpoint
@@ -149,10 +244,17 @@ proc performRequest*(config: OpenAIConfig, httpMethod: string, endpoint: string,
     var headers = newHttpHeaders()
     for key, value in config.headers:
       headers[key] = value
+    for header in extra_headers:
+      headers[header[0]] = header[1]
 
     when defined(debug):
       echo "DEBUG: OpenAI API Request: ", httpMethod, " ", url
-      echo "DEBUG: Headers: ", redactHeadersForLog(config.headers)
+      var effective_headers = initTable[string, string]()
+      for key, value in config.headers:
+        effective_headers[key] = value
+      for header in extra_headers:
+        effective_headers[header[0]] = header[1]
+      echo "DEBUG: Headers: ", redactHeadersForLog(effective_headers)
       if body != "":
         echo "DEBUG: Body: ", body[0..min(body.len, 200)] & (if body.len > 200: "..." else: "")
     if ai_debug:
@@ -194,39 +296,9 @@ proc performRequest*(config: OpenAIConfig, httpMethod: string, endpoint: string,
       echo "DEBUG: Response status: ", response.status
       echo "DEBUG: Response headers: ", response.headers
 
-    let statusCode = response.status.split()[0]  # Extract just the status code (e.g., "200" from "200 OK")
-    if statusCode != "200":
-      let errorBody = try: parseJson(response_body) except: %*{"message": response_body}
-      var errorMsg = ""
-      var errorType = ""
-      if errorBody.hasKey("error"):
-        if errorBody["error"].hasKey("message"):
-          errorMsg = errorBody["error"]["message"].getStr()
-        if errorBody["error"].hasKey("type"):
-          errorType = errorBody["error"]["type"].getStr()
-      else:
-        errorMsg = errorBody.getStr()
-
-      var error = OpenAIError(
-        msg: "OpenAI API Error: " & errorMsg,
-        status: parseInt(statusCode),
-        provider_error: errorType,
-        metadata: errorBody,
-        raw_body: response_body
-      )
-
-      # Extract request ID if available
-      if response.headers.hasKey("x-request-id"):
-        error.request_id = response.headers["x-request-id"]
-
-      # Extract retry-after for rate limiting
-      if statusCode == "429" and response.headers.hasKey("retry-after"):
-        try:
-          error.retry_after = parseInt(response.headers["retry-after"])
-        except:
-          discard
-
-      raise error
+    let statusCode = parseInt(response.status.split()[0])  # Extract just the status code (e.g., "200" from "200 OK")
+    if statusCode < 200 or statusCode >= 300:
+      raise buildOpenAIHttpError(response, statusCode, response_body)
 
     if not streaming:
       result = parseJson(response_body)
@@ -311,6 +383,175 @@ proc buildResponsesPayload*(config: OpenAIConfig, options: JsonNode): JsonNode =
       payload[key] = value
 
   return payload
+
+proc buildCodexResponsesPayload*(config: OpenAIConfig, options: JsonNode): JsonNode =
+  var payload = %*{
+    "model": if options.hasKey("model"): options["model"].getStr(config.model) else: config.model,
+    "instructions": if options.hasKey("instructions"): options["instructions"] else: %*"",
+    "input": if options.hasKey("input"): options["input"] else: %*[],
+    "store": false,
+    "stream": true
+  }
+
+  if options.hasKey("tools"):
+    payload["tools"] = options["tools"]
+
+  if options.hasKey("tool_choice"):
+    payload["tool_choice"] = options["tool_choice"]
+
+  if config.extra != nil:
+    for key, value in config.extra:
+      payload[key] = value
+
+  return payload
+
+proc parseCodexResponsesSSE*(body: string): JsonNode =
+  var event_name = ""
+  var data_lines: seq[string] = @[]
+  var completed_response: JsonNode = nil
+  var failed_response: JsonNode = nil
+  var stream_error: JsonNode = nil
+
+  proc flush_event() =
+    if data_lines.len == 0:
+      event_name = ""
+      return
+
+    let payload_text = data_lines.join("\n")
+    data_lines.setLen(0)
+
+    if payload_text == "[DONE]":
+      event_name = ""
+      return
+
+    let payload = try: parseJson(payload_text) except: nil
+    if payload == nil:
+      event_name = ""
+      return
+
+    let payload_type =
+      if payload.kind == JObject and payload.hasKey("type"):
+        payload["type"].getStr()
+      else:
+        event_name
+
+    case payload_type
+    of "response.completed":
+      if payload.kind == JObject and payload.hasKey("response"):
+        completed_response = payload["response"]
+    of "response.failed":
+      failed_response =
+        if payload.kind == JObject and payload.hasKey("response"):
+          payload["response"]
+        else:
+          payload
+    of "error":
+      stream_error = payload
+    else:
+      discard
+
+    event_name = ""
+
+  for raw_line in body.splitLines():
+    let line = raw_line.strip(trailing = false)
+    if line.len == 0:
+      flush_event()
+      continue
+    if line.startsWith("event:"):
+      event_name = line[6 .. ^1].strip()
+      continue
+    if line.startsWith("data:"):
+      data_lines.add(line[5 .. ^1].strip())
+      continue
+
+  flush_event()
+
+  if completed_response != nil:
+    return completed_response
+
+  if failed_response != nil:
+    var err_msg = "Codex response failed"
+    var err_type = "response_failed"
+    if failed_response.kind == JObject and failed_response.hasKey("error"):
+      let details = extractOpenAIErrorDetails(failed_response["error"])
+      if details.msg.len > 0:
+        err_msg = details.msg
+      if details.errType.len > 0:
+        err_type = details.errType
+    raise OpenAIError(
+      msg: "OpenAI API Error: " & err_msg,
+      status: 200,
+      provider_error: err_type,
+      metadata: failed_response,
+      raw_body: body
+    )
+
+  if stream_error != nil:
+    let details = extractOpenAIErrorDetails(stream_error)
+    raise OpenAIError(
+      msg: "OpenAI API Error: " & (if details.msg.len > 0: details.msg else: "stream error"),
+      status: 200,
+      provider_error: if details.errType.len > 0: details.errType else: "stream_error",
+      metadata: stream_error,
+      raw_body: body
+    )
+
+  raise OpenAIError(
+    msg: "OpenAI API Error: Codex stream ended without response.completed",
+    status: -1,
+    provider_error: "stream_incomplete",
+    raw_body: body
+  )
+
+proc performCodexResponsesRequest*(config: OpenAIConfig, payload: JsonNode): JsonNode =
+  let codex_config = cloneConfigWithBaseUrl(config, resolveCodexBaseUrl(config))
+  var client = newHttpClient(timeout = codex_config.timeout_ms)
+
+  try:
+    let url = codex_config.base_url & DEFAULT_CODEX_RESPONSES_ENDPOINT
+    let body = $payload
+
+    var headers = newHttpHeaders()
+    for key, value in codex_config.headers:
+      headers[key] = value
+    headers["Accept"] = "text/event-stream"
+
+    when defined(debug):
+      var effective_headers = initTable[string, string]()
+      for key, value in codex_config.headers:
+        effective_headers[key] = value
+      effective_headers["Accept"] = "text/event-stream"
+      echo "DEBUG: OpenAI Codex Request: POST ", url
+      echo "DEBUG: Headers: ", redactHeadersForLog(effective_headers)
+      echo "DEBUG: Body: ", body[0..min(body.len, 200)] & (if body.len > 200: "..." else: "")
+
+    let response = client.request(url, httpMethod = HttpPost, body = body, headers = headers)
+    let response_body = response.body
+    let statusCode = parseInt(response.status.split()[0])
+    if statusCode < 200 or statusCode >= 300:
+      let errorBody = try: parseJson(response_body) except: %*{"message": response_body}
+      let details = extractOpenAIErrorDetails(errorBody)
+      var error = OpenAIError(
+        msg: "OpenAI API Error: " & details.msg,
+        status: statusCode,
+        provider_error: details.errType,
+        metadata: errorBody,
+        raw_body: response_body
+      )
+      error.request_id = extractRequestId(response.headers)
+      raise error
+
+    return parseCodexResponsesSSE(response_body)
+  except OpenAIError:
+    raise
+  except Exception as e:
+    raise OpenAIError(
+      msg: "Network error: " & e.msg,
+      status: -1,
+      provider_error: "network"
+    )
+  finally:
+    client.close()
 
 # Response normalization from JSON to Gene values
 proc normalizeResponse*(response: JsonNode): JsonNode =

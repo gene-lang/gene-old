@@ -19,6 +19,8 @@
 (var env_map {
   ^PORT "5150"
   ^OPENAI_API_KEY "openai-secret"
+  ^OPENAI_OAUTH_TOKEN "openai-oauth-secret"
+  ^CHATGPT_ACCOUNT_ID "chatgpt-account-1"
   ^ANTHROPIC_OAUTH_TOKEN "oauth-secret"
 })
 
@@ -45,12 +47,18 @@
 (assert (resolved/documents/max_inline_chars == 2222))
 (assert (resolved/llm/openai/model == "gpt-5.1-mini"))
 (assert (resolved/llm/openai/api_key == "openai-secret"))
+(assert (resolved/llm/openai/auth_token == "openai-oauth-secret"))
+(assert (resolved/llm/openai/account_id == "chatgpt-account-1"))
 (assert (resolved/llm/anthropic/auth_token == "oauth-secret"))
 
 (assert (public_config/port == 5150))
 (assert (public_config/llm/provider == "anthropic"))
 (assert (public_config/llm/openai/api_key == "hidden"))
 (assert (public_config/llm/openai/api_key_configured == true))
+(assert (public_config/llm/openai/auth_token == "hidden"))
+(assert (public_config/llm/openai/auth_token_configured == true))
+(assert (public_config/llm/openai/account_id == "hidden"))
+(assert (public_config/llm/openai/account_id_configured == true))
 (assert (public_config/llm/anthropic/auth_token == "hidden"))
 (assert (public_config/llm/anthropic/auth_token_configured == true))
 

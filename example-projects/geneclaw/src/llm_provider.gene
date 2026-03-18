@@ -84,6 +84,15 @@
    }}
 )
 
+(fn openai_responses_image_part [image]
+  {^type "input_image"
+   ^source {
+     ^type "base64"
+     ^media_type image/mime_type
+     ^data (read_image_base64 image)
+   }}
+)
+
 (fn anthropic_image_block [image]
   {^type "image"
    ^source {
@@ -109,6 +118,22 @@
   content
 )
 
+(fn build_openai_responses_user_content [user_text image_attachments]
+  (var images (ensure_array image_attachments))
+  (if images/.empty?
+    (return user_text)
+  )
+
+  (var content [])
+  (if user_text/.not_empty?
+    (content .append {^type "input_text" ^text user_text})
+  )
+  (images .each (fn [image]
+    (content .append (openai_responses_image_part image))
+  ))
+  content
+)
+
 (fn build_anthropic_user_blocks [user_text image_attachments]
   (var blocks [])
   (var images (ensure_array image_attachments))
@@ -126,10 +151,12 @@
   (if (content is Array)
     (var parts [])
     (content .each (fn [part]
-      (if ((part is Map) && (part/type == "text"))
+      (if ((part is Map) && ((part/type == "text") || (part/type == "input_text") || (part/type == "output_text")))
         (parts .append #"{type:text,text=#{(part/text || "")}}")
       elif ((part is Map) && (part/type == "image_url"))
         (parts .append #"{type:image_url,url=[image data omitted]}")
+      elif ((part is Map) && (part/type == "input_image"))
+        (parts .append #"{type:input_image,source=[image data omitted]}")
       else
         (parts .append #"{type=#{(part/type || "unknown")}}")
       )
@@ -174,6 +201,33 @@
   (log .info "--- End of messages ---")
 )
 
+(fn openai_input_item_log_text [item]
+  (var item_type (item/type || ""))
+  (if (item_type == "message")
+    (return (openai_message_log_text item))
+  )
+  (if (item_type == "function_call")
+    (return #"{type:function_call,call_id=#{(item/call_id || "")},name=#{(item/name || "")},arguments=#{(item/arguments || "{}")}}")
+  )
+  (if (item_type == "function_call_output")
+    (return #"{type:function_call_output,call_id=#{(item/call_id || "")},output=#{(item/output || "")}}")
+  )
+  (item .to_json)
+)
+
+(fn log_openai_codex_request [request history]
+  (log .info #"Built OpenAI Codex request input=#{request/input/.size} tools=#{request/tools/.size} (#{history/.size} history + current user, system separate)")
+  (log .info "--- Instructions ---")
+  (log .info request/instructions)
+  (var item_idx 0)
+  (request/input .each (fn [item]
+    (log .info #"--- Input #{item_idx} [#{(item/type || "unknown")}] ---")
+    (log .info (openai_input_item_log_text item))
+    (item_idx += 1)
+  ))
+  (log .info "--- End of input ---")
+)
+
 (fn log_anthropic_request [request history]
   (log .info #"Built Anthropic request messages=#{request/messages/.size} tools=#{request/tools/.size} (#{history/.size} history + user, system separate)")
   (log .info "--- System ---")
@@ -208,6 +262,87 @@
   (messages .append {^role "user" ^content (build_openai_user_content user_text image_attachments)})
   (log_openai_messages messages history)
   {^messages messages ^tools tools_spec}
+)
+
+(fn history_content_to_openai_responses [content]
+  (if (content is Array)
+    (var parts [])
+    (content .each (fn [part]
+      (if ((part is Map) && ((part/type == "text") || (part/type == "input_text") || (part/type == "output_text")))
+        (parts .append {^type "input_text" ^text (part/text || "")})
+      elif ((part is Map) && (part/type == "image_url"))
+        (parts .append {^type "input_image" ^source {^type "url" ^url (((part/image_url || {})/url) || "")}})
+      elif ((part is Map) && (part/type == "input_image"))
+        (parts .append part)
+      )
+    ))
+    (if ((parts/.size == 1) && (parts/0/type == "input_text"))
+      (return (parts/0/text || ""))
+    )
+    parts
+  else
+    (content || "")
+  )
+)
+
+(fn openai_codex_function_call_from_history [tool_call]
+  (var fn_info (ensure_map (tool_call/function || {})))
+  {^type "function_call"
+   ^call_id (tool_call/id || "")
+   ^name (fn_info/name || "")
+   ^arguments (fn_info/arguments || "{}")}
+)
+
+(fn openai_codex_tool_output_from_history [entry]
+  {^type "function_call_output"
+   ^call_id (entry/tool_call_id || "")
+   ^output (entry/content || "")}
+)
+
+(fn build_openai_codex_input [history user_text image_attachments]
+  (var input [])
+
+  (history .each (fn [entry]
+    (if (entry/role == "assistant")
+      (var assistant_content (history_content_to_openai_responses (entry/content || "")))
+      (if (if (assistant_content is String) assistant_content/.not_empty? else ((ensure_array assistant_content)/.size > 0))
+        (input .append {^type "message" ^role "assistant" ^content assistant_content})
+      )
+      ((ensure_array (entry/tool_calls || [])) .each (fn [tool_call]
+        (var call_item (openai_codex_function_call_from_history tool_call))
+        (if call_item/call_id/.not_empty?
+          (input .append call_item)
+        )
+      ))
+    elif (entry/role == "tool")
+      (var call_id (entry/tool_call_id || ""))
+      (if call_id/.not_empty?
+        (input .append (openai_codex_tool_output_from_history entry))
+      )
+    elif (entry/role == "user")
+      (var history_content (history_content_to_openai_responses (entry/content || "")))
+      (if (if (history_content is String) history_content/.not_empty? else ((ensure_array history_content)/.size > 0))
+        (input .append {^type "message" ^role "user" ^content history_content})
+      )
+    )
+  ))
+
+  (var current_content (build_openai_responses_user_content user_text image_attachments))
+  (if (if (current_content is String) current_content/.not_empty? else ((ensure_array current_content)/.size > 0))
+    (input .append {^type "message" ^role "user" ^content current_content})
+  )
+
+  input
+)
+
+(fn $ns/build_openai_codex_request [history user_text tools_spec image_attachments = []]
+  (var request {
+    ^instructions get_system_prompt/.call
+    ^input (build_openai_codex_input history user_text image_attachments)
+    ^tools tools_spec
+  })
+  (log_openai_codex_request request history)
+  request
 )
 
 (fn anthropic_tool_from_openai [tool_spec]
@@ -316,6 +451,35 @@
     (if_not tool_calls (tool_calls = []))
     (return {^content content ^tool_calls tool_calls})
   )
+
+  (var output (ensure_array (try (response .get "output" []) catch * [])))
+  (if output/.not_empty?
+    (var text_parts [])
+    (var tool_calls [])
+    (output .each (fn [item]
+      (var item_type (item/type || ""))
+      (if (item_type == "message")
+        ((ensure_array (item/content || [])) .each (fn [part]
+          (if (((part/type || "") == "output_text") || ((part/type || "") == "text") || ((part/type || "") == "input_text"))
+            (if part/text
+              (text_parts .append part/text/.to_s)
+            )
+          )
+        ))
+      elif (item_type == "function_call")
+        (tool_calls .append {
+          ^id (item/call_id || item/id || "")
+          ^type "function"
+          ^function {
+            ^name (item/name || "")
+            ^arguments (item/arguments || "{}")
+          }
+        })
+      )
+    ))
+    (return {^content (text_parts .join "\n\n") ^tool_calls tool_calls})
+  )
+
   {^content "I could not generate a response." ^tool_calls []}
 )
 
@@ -351,17 +515,21 @@
   (if (CONFIG/llm/provider == "anthropic")
     (CONFIG/llm/anthropic/api_key/.not_empty? || CONFIG/llm/anthropic/auth_token/.not_empty?)
   elif (CONFIG/llm/provider == "openai")
-    CONFIG/llm/openai/api_key/.not_empty?
+    (CONFIG/llm/openai/api_key/.not_empty? || CONFIG/llm/openai/auth_token/.not_empty?)
   else
     false
   )
+)
+
+(fn openai_oauth_mode? []
+  CONFIG/llm/openai/auth_token/.not_empty?
 )
 
 (fn mock_mode_response []
   (if (CONFIG/llm/provider == "anthropic")
     (return {^content "I received your message. (Running in mock mode - set CONFIG/llm/anthropic/api_key or CONFIG/llm/anthropic/auth_token to enable LLM)" ^tool_calls []})
   elif (CONFIG/llm/provider == "openai")
-    (return {^content "I received your message. (Running in mock mode - set CONFIG/llm/openai/api_key to enable LLM)" ^tool_calls []})
+    (return {^content "I received your message. (Running in mock mode - set CONFIG/llm/openai/api_key or CONFIG/llm/openai/auth_token to enable LLM)" ^tool_calls []})
   )
   {^content #"Unsupported LLM provider: #{CONFIG/llm/provider}" ^tool_calls []}
 )
@@ -424,9 +592,24 @@
 )
 
 (fn call_openai [history user_text tools_spec image_attachments]
-  (var request (build_openai_request history user_text tools_spec image_attachments))
-  (log .info #"Calling LLM provider=openai model=#{CONFIG/llm/openai/model} messages=#{request/messages/.size} tools=#{request/tools/.size} timeout_ms=#{CONFIG/llm/openai/timeout_ms}")
-  (var client_opts {^api_key CONFIG/llm/openai/api_key ^model CONFIG/llm/openai/model ^timeout_ms CONFIG/llm/openai/timeout_ms})
+  (var oauth_mode (openai_oauth_mode?))
+  (var request (if oauth_mode
+    (build_openai_codex_request history user_text tools_spec image_attachments)
+  else
+    (build_openai_request history user_text tools_spec image_attachments)
+  ))
+  (var request_item_count (if oauth_mode request/input/.size else request/messages/.size))
+  (log .info #"Calling LLM provider=openai mode=#{(if oauth_mode "codex-oauth" else "api-key")} model=#{CONFIG/llm/openai/model} items=#{request_item_count} tools=#{request/tools/.size} timeout_ms=#{CONFIG/llm/openai/timeout_ms}")
+  (var client_opts {^model CONFIG/llm/openai/model ^timeout_ms CONFIG/llm/openai/timeout_ms})
+  (if CONFIG/llm/openai/api_key/.not_empty?
+    (client_opts .set "api_key" CONFIG/llm/openai/api_key)
+  )
+  (if CONFIG/llm/openai/auth_token/.not_empty?
+    (client_opts .set "auth_token" CONFIG/llm/openai/auth_token)
+  )
+  (if CONFIG/llm/openai/account_id/.not_empty?
+    (client_opts .set "account_id" CONFIG/llm/openai/account_id)
+  )
   (if CONFIG/llm/openai/base_url/.not_empty?
     (client_opts .set "base_url" CONFIG/llm/openai/base_url)
   )

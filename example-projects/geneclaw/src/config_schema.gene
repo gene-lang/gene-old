@@ -22,6 +22,8 @@
       ^base_url (cfg_str "" ^bootstrap_env "OPENAI_BASE_URL")
       ^timeout_ms (cfg_int 60000 ^bootstrap_env "OPENAI_TIMEOUT_MS")
       ^api_key (secret "OPENAI_API_KEY")
+      ^auth_token (secret "OPENAI_AUTH_TOKEN" ^fallback_env "OPENAI_OAUTH_TOKEN")
+      ^account_id (secret "OPENAI_ACCOUNT_ID" ^fallback_env "CHATGPT_ACCOUNT_ID")
     }
 
     ^anthropic {

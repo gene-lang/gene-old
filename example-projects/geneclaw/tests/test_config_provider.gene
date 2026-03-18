@@ -26,6 +26,8 @@
 
 (var secret_values [
   ($env/OPENAI_API_KEY || "")
+  ($env/OPENAI_AUTH_TOKEN || $env/OPENAI_OAUTH_TOKEN || "")
+  ($env/OPENAI_ACCOUNT_ID || $env/CHATGPT_ACCOUNT_ID || "")
   ($env/ANTHROPIC_API_KEY || "")
   ($env/ANTHROPIC_AUTH_TOKEN || $env/ANTHROPIC_OAUTH_TOKEN || "")
   ($env/SLACK_SIGNING_SECRET || "")
@@ -44,6 +46,8 @@
 (assert (public_config/assets/uploaded_root == DOCUMENT_ROOT))
 (assert (public_config/assets/generated_root == ARTIFACT_ROOT))
 (assert (public_config/llm/openai/api_key == "hidden"))
+(assert (public_config/llm/openai/auth_token == "hidden"))
+(assert (public_config/llm/openai/account_id == "hidden"))
 (assert (public_config/llm/anthropic/api_key == "hidden"))
 (assert (public_config/llm/anthropic/auth_token == "hidden"))
 (assert (public_config/slack/signing_secret == "hidden"))
@@ -52,6 +56,8 @@
 (assert (public_config/slack/agentx_token == "hidden"))
 (assert (public_config/search/brave_api_key == "hidden"))
 (assert (public_config/llm/openai/api_key_configured == (secret_configured ($env/OPENAI_API_KEY || ""))))
+(assert (public_config/llm/openai/auth_token_configured == (secret_configured ($env/OPENAI_AUTH_TOKEN || $env/OPENAI_OAUTH_TOKEN || ""))))
+(assert (public_config/llm/openai/account_id_configured == (secret_configured ($env/OPENAI_ACCOUNT_ID || $env/CHATGPT_ACCOUNT_ID || ""))))
 (assert (public_config/llm/anthropic/api_key_configured == (secret_configured ($env/ANTHROPIC_API_KEY || ""))))
 (assert (public_config/llm/anthropic/auth_token_configured == (secret_configured ($env/ANTHROPIC_AUTH_TOKEN || $env/ANTHROPIC_OAUTH_TOKEN || ""))))
 (assert (public_config/slack/signing_secret_configured == (secret_configured ($env/SLACK_SIGNING_SECRET || ""))))
