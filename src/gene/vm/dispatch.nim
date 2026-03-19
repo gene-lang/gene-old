@@ -613,7 +613,7 @@ proc call_value_method(self: ptr VirtualMachine, value: Value, method_name: stri
   if value_class == nil:
     when not defined(release):
       if self.trace:
-        echo "call_value_method: no class for ", value.kind, " method ", method_name
+        vm_log(LlDebug, VmDispatchLogger, "call_value_method: no class for " & $value.kind & " method " & method_name)
     return false
 
   if value_class.runtime_type != nil:
@@ -623,7 +623,7 @@ proc call_value_method(self: ptr VirtualMachine, value: Value, method_name: stri
   if meth == nil:
     when not defined(release):
       if self.trace:
-        echo "call_value_method: method ", method_name, " missing on ", value.kind
+        vm_log(LlDebug, VmDispatchLogger, "call_value_method: method " & method_name & " missing on " & $value.kind)
     return self.call_missing_method(value, value_class, method_name, args, kw_pairs)
   self.invoke_method_value(value, meth, args, kw_pairs)
 
@@ -840,10 +840,11 @@ proc resolve_current_instance_and_parent(self: ptr VirtualMachine): tuple[instan
   ## Retrieve the current instance and parent class for super calls.
   let instance = current_self_value(self.frame)
   if instance.kind notin {VkInstance, VkCustom}:
-    when not defined(release):
-      echo "DEBUG super resolve: instance.kind=", instance.kind, " args kind=", self.frame.args.kind
-      if self.frame.args.kind == VkGene:
-        echo "DEBUG super resolve: args children len=", self.frame.args.gene.children.len
+    vm_log(LlWarn, VmDispatchLogger, "super resolve failed: instance.kind=" & $instance.kind &
+           " args kind=" & $self.frame.args.kind)
+    if self.frame.args.kind == VkGene:
+      vm_log(LlWarn, VmDispatchLogger, "super resolve failed: args children len=" &
+             $self.frame.args.gene.children.len)
     not_allowed("super requires an instance context")
 
   let current_class = find_method_class(instance, self.frame.target)

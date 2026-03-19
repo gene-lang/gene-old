@@ -15,6 +15,14 @@ import std/[json, httpclient, strutils]
 import asyncdispatch
 
 import ../websocket
+import ../../gene/logging_core
+import ../../gene/vm/extension_abi
+
+const SlackSocketModeLogger = "genex/ai/slack_socket_mode"
+
+template slack_socket_mode_log(level: LogLevel, message: untyped) =
+  if extension_log_enabled(level, SlackSocketModeLogger):
+    extension_log_message(level, SlackSocketModeLogger, message)
 
 
 type
@@ -172,12 +180,12 @@ proc handle_envelope(client: SlackSocketMode; raw: string) {.async.} =
   try:
     envelope = parse_envelope(raw)
   except CatchableError as e:
-    echo "Socket Mode: failed to parse envelope: ", e.msg
+    slack_socket_mode_log(LlWarn, "Socket Mode: failed to parse envelope: " & e.msg)
     return
 
   # "hello" messages don't need ACK — they confirm the connection is live
   if envelope.envelope_type == "hello":
-    echo "Socket Mode: connected (hello received)"
+    slack_socket_mode_log(LlDebug, "Socket Mode: connected (hello received)")
     return
 
   # ACK immediately
@@ -185,7 +193,7 @@ proc handle_envelope(client: SlackSocketMode; raw: string) {.async.} =
     try:
       await ws_send(client.ws, make_ack(envelope.envelope_id))
     except CatchableError as e:
-      echo "Socket Mode: failed to send ACK: ", e.msg
+      slack_socket_mode_log(LlWarn, "Socket Mode: failed to send ACK: " & e.msg)
 
   # Dispatch events_api envelopes
   if envelope.envelope_type == "events_api":
@@ -194,14 +202,14 @@ proc handle_envelope(client: SlackSocketMode; raw: string) {.async.} =
       try:
         client.event_handler("events_api", payload)
       except CatchableError as e:
-        echo "Socket Mode: event handler error: ", e.msg
+        slack_socket_mode_log(LlError, "Socket Mode: event handler error: " & e.msg)
 
 proc run_loop*(client: SlackSocketMode) {.async.} =
   ## Receive frames until the connection closes.
   while client.running and not client.ws.isNil and not client.ws.closed:
     let frame = await ws_recv(client.ws)
     if frame.opcode == WsOpClose:
-      echo "Socket Mode: connection closed by server"
+      slack_socket_mode_log(LlDebug, "Socket Mode: connection closed by server")
       break
     if frame.opcode == WsOpText and frame.payload.len > 0:
       await handle_envelope(client, frame.payload)
@@ -218,18 +226,18 @@ proc start*(client: SlackSocketMode) {.async.} =
 
   while client.running:
     try:
-      echo "Socket Mode: connecting..."
+      slack_socket_mode_log(LlDebug, "Socket Mode: connecting...")
       await client.connect()
-      echo "Socket Mode: WebSocket connected"
+      slack_socket_mode_log(LlDebug, "Socket Mode: WebSocket connected")
       delay = client.reconnect_delay_ms  # reset backoff on success
       await client.run_loop()
     except CatchableError as e:
-      echo "Socket Mode: error: ", e.msg
+      slack_socket_mode_log(LlWarn, "Socket Mode: error: " & e.msg)
 
     if not client.running:
       break
 
-    echo "Socket Mode: reconnecting in ", delay, "ms..."
+    slack_socket_mode_log(LlDebug, "Socket Mode: reconnecting in " & $delay & "ms...")
     await sleepAsync(delay)
     delay = min(delay * 2, client.max_reconnect_delay_ms)
 

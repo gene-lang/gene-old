@@ -3,7 +3,15 @@
 
 import json, strutils, httpclient, tables, streams
 import ../../gene/types
+import ../../gene/logging_core
+import ../../gene/vm/extension_abi
 import openai_client
+
+const StreamingLogger = "genex/ai/streaming"
+
+template streaming_log(level: LogLevel, message: untyped) =
+  if extension_log_enabled(level, StreamingLogger):
+    extension_log_message(level, StreamingLogger, message)
 
 type
   StreamEvent* = ref object
@@ -47,8 +55,7 @@ proc processStream*(stream: Stream, handler: StreamHandler) =
 
     let event = parseSSELine(line)
 
-    when defined(debug):
-      echo "DEBUG: Stream event: ", event.event, " done: ", event.done
+    streaming_log(LlDebug, "Stream event: " & event.event & " done: " & $event.done)
 
     if event.event in ["data", "done", "error"]:
       handler(event)
@@ -74,17 +81,17 @@ proc performStreamingRequest*(config: OpenAIConfig, endpoint: string,
     for key, value in config.headers:
       headers[key] = value
 
-    when defined(debug):
-      echo "DEBUG: OpenAI Streaming Request: POST ", url
-      echo "DEBUG: Headers: ", redactHeadersForLog(config.headers)
-      echo "DEBUG: Body: ", body[0..min(body.len, 200)] & (if body.len > 200: "..." else: "")
+    if log_enabled(LlDebug, StreamingLogger):
+      streaming_log(LlDebug, "OpenAI Streaming Request: POST " & url)
+      streaming_log(LlDebug, "Headers: " & redactHeadersForLog(config.headers))
+      streaming_log(LlDebug, "Body: " & body[0..min(body.len, 200)] &
+                    (if body.len > 200: "..." else: ""))
 
     # Make streaming request
     let response = client.request(url, httpMethod = HttpPost,
                                  body = body, headers = headers)
 
-    when defined(debug):
-      echo "DEBUG: Streaming response status: ", response.status
+    streaming_log(LlDebug, "Streaming response status: " & response.status)
 
     let statusCode = response.status.split()[0]
     if statusCode != "200":

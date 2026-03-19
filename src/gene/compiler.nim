@@ -18,6 +18,10 @@ proc log_compile_warning(message: string) =
   if message.len > 0:
     log_message(LlWarn, CompilerLogger, message)
 
+template compiler_log(level: LogLevel, message: untyped) =
+  if log_enabled(level, CompilerLogger):
+    log_message(level, CompilerLogger, message)
+
 proc container_key(): Key {.inline.} =
   "container".to_key()
 

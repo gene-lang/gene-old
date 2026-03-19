@@ -146,12 +146,12 @@ proc compile_gene_unknown(self: Compiler, gene: ptr Gene) {.inline.} =
       return
   # Check for selector syntax: (target ./ property) or (target ./property)
   if DEBUG:
-    echo "DEBUG: compile_gene_unknown: gene.type = ", gene.type
-    echo "DEBUG: compile_gene_unknown: gene.children.len = ", gene.children.len
+    compiler_log(LlDebug, "compile_gene_unknown: gene.type = " & $gene.type)
+    compiler_log(LlDebug, "compile_gene_unknown: gene.children.len = " & $gene.children.len)
     if gene.children.len > 0:
-      echo "DEBUG: compile_gene_unknown: first child = ", gene.children[0]
+      compiler_log(LlDebug, "compile_gene_unknown: first child = " & $gene.children[0])
       if gene.children[0].kind == VkComplexSymbol:
-        echo "DEBUG: compile_gene_unknown: first child csymbol = ", gene.children[0].ref.csymbol
+        compiler_log(LlDebug, "compile_gene_unknown: first child csymbol = " & $gene.children[0].ref.csymbol)
   if gene.children.len >= 1:
     let first_child = gene.children[0]
     if first_child.kind == VkSymbol and first_child.str == "./":
@@ -176,7 +176,7 @@ proc compile_gene_unknown(self: Compiler, gene: ptr Gene) {.inline.} =
     elif first_child.kind == VkComplexSymbol and first_child.ref.csymbol.len >= 2 and first_child.ref.csymbol[0] == ".":
       # Syntax: (target ./property) where ./property is a complex symbol
       if DEBUG:
-        echo "DEBUG: Handling selector with complex symbol"
+        compiler_log(LlDebug, "Handling selector with complex symbol")
       # Compile the target
       self.compile(gene.type)
       
@@ -186,11 +186,11 @@ proc compile_gene_unknown(self: Compiler, gene: ptr Gene) {.inline.} =
       try:
         let idx = prop_name.parse_int()
         if DEBUG:
-          echo "DEBUG: Property is numeric: ", idx
+          compiler_log(LlDebug, "Property is numeric: " & $idx)
         self.emit(Instruction(kind: IkPushValue, arg0: idx.to_value()))
       except ValueError:
         if DEBUG:
-          echo "DEBUG: Property is symbolic: ", prop_name
+          compiler_log(LlDebug, "Property is symbolic: " & prop_name)
         self.emit(Instruction(kind: IkPushValue, arg0: prop_name.to_symbol_value()))
       self.emit(Instruction(kind: IkValidateSelectorSegment))
       
@@ -871,11 +871,11 @@ proc compile_gene(self: Compiler, input: Value) =
   # Special case: handle selector operator ./
   if not gene.type.is_nil():
     if DEBUG:
-      echo "DEBUG: compile_gene: gene.type.kind = ", gene.type.kind
+      compiler_log(LlDebug, "compile_gene: gene.type.kind = " & $gene.type.kind)
       if gene.type.kind == VkSymbol:
-        echo "DEBUG: compile_gene: gene.type.str = '", gene.type.str, "'"
+        compiler_log(LlDebug, "compile_gene: gene.type.str = '" & gene.type.str & "'")
       elif gene.type.kind == VkComplexSymbol:
-        echo "DEBUG: compile_gene: gene.type.csymbol = ", gene.type.ref.csymbol
+        compiler_log(LlDebug, "compile_gene: gene.type.csymbol = " & $gene.type.ref.csymbol)
     if gene.type.kind == VkSymbol and gene.type.str == "./":
       self.compile_selector(gene)
       return
@@ -1258,12 +1258,11 @@ proc compile_gene(self: Compiler, input: Value) =
         return
       of "not", "!":
         if gene.children.len != 1:
-          when not defined(release):
-            let trace = self.current_trace()
-            if trace != nil:
-              echo "DEBUG not arity (type): ", trace_location(trace)
-            else:
-              echo "DEBUG not arity (type): <no-trace>"
+          let trace = self.current_trace()
+          if trace != nil:
+            compiler_log(LlWarn, "not arity (type): " & trace_location(trace))
+          else:
+            compiler_log(LlWarn, "not arity (type): <no-trace>")
           not_allowed("not expects exactly 1 argument")
         self.compile_unary_not(gene.children[0])
         return

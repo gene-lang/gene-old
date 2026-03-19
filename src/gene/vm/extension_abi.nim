@@ -4,6 +4,7 @@
 ##   proc gene_init(host: ptr GeneHostAbi): int32 {.cdecl, exportc, dynlib.}
 
 import ../types
+import ../logging_core
 
 const
   GENE_EXT_ABI_VERSION* = 3'u32
@@ -29,6 +30,8 @@ type
 
   GeneExtensionInitFn* = proc(host: ptr GeneHostAbi): int32 {.cdecl.}
 
+var extension_host_log_message_cb: GeneHostLogFn = nil
+
 proc apply_extension_host_context*(host: ptr GeneHostAbi): ptr VirtualMachine =
   ## Synchronize extension-local globals with host runtime state.
   if host == nil:
@@ -39,7 +42,19 @@ proc apply_extension_host_context*(host: ptr GeneHostAbi): ptr VirtualMachine =
     SYMBOLS = SYMBOLS_SHARED[]
   if host.app_value != NIL:
     App = host.app_value
+  extension_host_log_message_cb = host.log_message_fn
   vm
+
+proc extension_log_enabled*(level: LogLevel, logger_name: string): bool {.gcsafe.} =
+  if extension_host_log_message_cb != nil:
+    return true
+  log_enabled(level, logger_name)
+
+proc extension_log_message*(level: LogLevel, logger_name, message: string) {.gcsafe.} =
+  if extension_host_log_message_cb != nil:
+    extension_host_log_message_cb(int32(level), logger_name.cstring, message.cstring)
+  else:
+    log_message(level, logger_name, message)
 
 proc run_extension_vm_created_callbacks*() =
   ## Execute extension-local VM-created callbacks after host context is applied.

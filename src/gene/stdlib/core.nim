@@ -31,8 +31,11 @@ when not defined(gene_wasm):
   when not defined(windows):
     import posix except Key
 
-when not defined(release):
-  const StdlibCoreLogger = "gene/stdlib/core"
+const StdlibCoreLogger = "gene/stdlib/core"
+
+template stdlib_core_log(level: LogLevel, message: untyped) =
+  if log_enabled(level, StdlibCoreLogger):
+    log_message(level, StdlibCoreLogger, message)
 
 # Note: Extensions register their poll handlers via register_scheduler_callback
 # This avoids direct dependency from core to extensions like HTTP
@@ -2364,7 +2367,7 @@ proc core_types_equivalent(vm: ptr VirtualMachine, args: ptr UncheckedArray[Valu
 proc core_debug*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
   for i in 0..<get_positional_count(arg_count, has_keyword_args):
     let val = get_positional_arg(args, i, has_keyword_args)
-    stderr.writeLine("<debug>: " & $val)
+    stdlib_core_log(LlDebug, "<debug>: " & $val)
   return NIL
 
 # Trace control
@@ -2405,8 +2408,7 @@ proc call_scheduler_callbacks(vm: ptr VirtualMachine) {.gcsafe.} =
       try:
         callback(vm)
       except CatchableError as e:
-        when not defined(release):
-          log_message(LlError, StdlibCoreLogger, "Scheduler callback error: " & e.msg)
+        log_message(LlError, StdlibCoreLogger, "Scheduler callback error: " & e.msg)
 
 # Helper to check scheduler_callbacks length
 proc scheduler_callbacks_len(): int {.gcsafe.} =
@@ -2617,11 +2619,11 @@ proc core_vm_print_stack*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value
     if i == vm.frame.stack_index.int:
       s &= "=> "
     s &= $vm.frame.stack[i]
-  echo s
+  stdlib_core_log(LlDebug, s)
   return NIL
 
 proc core_vm_print_instructions*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
-  echo vm.cu
+  stdlib_core_log(LlDebug, $vm.cu)
   return NIL
 
 type RegexCacheKey = tuple[pattern: string, flags: uint8]
@@ -2972,11 +2974,11 @@ proc print_stack(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_co
     if i == vm.frame.stack_index.int:
       s &= "=> "
     s &= $vm.frame.stack[i]
-  echo s
+  stdlib_core_log(LlDebug, s)
   return NIL
 
 proc print_instructions(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
-  echo vm.cu
+  stdlib_core_log(LlDebug, $vm.cu)
   return NIL
 
 proc to_ctor(node: Value): Function =

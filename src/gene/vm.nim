@@ -36,6 +36,12 @@ const
   CATCH_PC_ASYNC_BLOCK = -2
   CATCH_PC_ASYNC_FUNCTION = -3
   EVENT_LOOP_POLL_INTERVAL = 100
+  VmExecLogger = "gene/vm/exec"
+  VmDispatchLogger = "gene/vm/dispatch"
+
+template vm_log(level: LogLevel, logger_name: string, message: untyped) =
+  if log_enabled(level, logger_name):
+    log_message(level, logger_name, message)
 
 template is_method_frame(f: Frame): bool =
   f.kind in {FkMethod, FkMacroMethod}

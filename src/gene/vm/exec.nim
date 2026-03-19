@@ -108,7 +108,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         if inst.kind == IkStart: # This is part of INDENT_LOGIC
           indent &= "  "
         # self.print_stack()
-        echo fmt"{indent}{self.pc:04X} {inst[]}"
+        vm_log(LlDebug, VmExecLogger, fmt"{indent}{self.pc:04X} {inst[]}")
 
     # Instruction profiling - only declare variables when needed
     when not defined(release):
@@ -124,7 +124,7 @@ proc exec*(self: ptr VirtualMachine): Value =
       of IkNoop:
         when not defined(release):
           if self.trace:
-            echo fmt"{indent}     [Noop at PC {self.pc:04X}, label: {inst.label.int:04X}]"
+            vm_log(LlDebug, VmExecLogger, fmt"{indent}     [Noop at PC {self.pc:04X}, label: {inst.label.int:04X}]")
         discard
 
       of IkData:
@@ -132,7 +132,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         # It should not be executed directly - the previous instruction should consume it
         when not defined(release):
           if self.trace:
-            echo fmt"{indent}     [Data at PC {self.pc:04X}, skipping]"
+            vm_log(LlDebug, VmExecLogger, fmt"{indent}     [Data at PC {self.pc:04X}, skipping]")
         discard
 
       of IkStart:
@@ -410,7 +410,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             remaining = 0
         when not defined(release):
           if self.trace:
-            echo "IkRepeatInit remaining=", remaining
+            vm_log(LlDebug, VmExecLogger, "IkRepeatInit remaining=" & $remaining)
         if remaining <= 0:
           self.pc = inst.arg0.int64.int
           if self.pc < self.cu.instructions.len:
@@ -439,7 +439,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         remaining.dec()
         when not defined(release):
           if self.trace:
-            echo "IkRepeatDecCheck remaining=", remaining
+            vm_log(LlDebug, VmExecLogger, "IkRepeatDecCheck remaining=" & $remaining)
         if remaining > 0:
           self.frame.push(remaining.to_value())
           self.pc = inst.arg0.int64.int
@@ -917,8 +917,8 @@ proc exec*(self: ptr VirtualMachine): Value =
             retain(member)
             self.frame.push(member)
           else:
-            when not defined(release):
-              echo "IkGetMember: Attempting to access member '", name, "' on value of type ", value.kind
+            vm_log(LlWarn, VmExecLogger, "IkGetMember: attempting to access member '" &
+                   $name & "' on value of type " & $value.kind)
             not_allowed("Cannot get member '" & $name & "' on value of type: " & $value.kind)
 
       of IkGetMemberOrNil:
@@ -1326,7 +1326,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           else:
             when not defined(release):
               if self.trace:
-                echo fmt"IkSetChild unsupported kind: {target.kind}"
+                vm_log(LlWarn, VmExecLogger, fmt"IkSetChild unsupported kind: {target.kind}")
             not_allowed("Cannot set child on value of type: " & $target.kind)
         self.frame.push(new_value)
 
@@ -1352,7 +1352,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           else:
             when not defined(release):
               if self.trace:
-                echo fmt"IkGetChild unsupported kind: {value.kind}"
+                vm_log(LlWarn, VmExecLogger, fmt"IkGetChild unsupported kind: {value.kind}")
             not_allowed("Cannot get child from value of type: " & $value.kind)
       of IkGetChildDynamic:
         # Get child using index from stack
@@ -1364,7 +1364,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         let i = index.int64.int
         when not defined(release):
           if self.trace:
-            echo fmt"IkGetChildDynamic: collection={collection}, index={index}"
+            vm_log(LlDebug, VmExecLogger, fmt"IkGetChildDynamic: collection={collection}, index={index}")
         case collection.kind:
           of VkArray:
             let arr_len = array_data(collection).len
@@ -1389,7 +1389,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           else:
             when not defined(release):
               if self.trace:
-                echo fmt"IkGetChildDynamic unsupported kind: {collection.kind}"
+                vm_log(LlWarn, VmExecLogger, fmt"IkGetChildDynamic unsupported kind: {collection.kind}")
             not_allowed("Cannot get child from value of type: " & $collection.kind)
 
       of IkJump:
@@ -1507,7 +1507,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         let value = self.frame.current()
         when not defined(release):
           if self.trace:
-            echo fmt"IkDup: duplicating {value}"
+            vm_log(LlDebug, VmExecLogger, fmt"IkDup: duplicating {value}")
         self.frame.push(value)
       of IkDup2:
         # Duplicate top two stack elements
@@ -1524,7 +1524,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         let second = self.frame.pop()
         when not defined(release):
           if self.trace:
-            echo fmt"IkDupSecond: top={top}, second={second}"
+            vm_log(LlDebug, VmExecLogger, fmt"IkDupSecond: top={top}, second={second}")
         self.frame.push(second)  # Put second back
         self.frame.push(top)     # Put top back
         self.frame.push(second)  # Push duplicate of second
@@ -1540,7 +1540,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         let second = self.frame.current()
         when not defined(release):
           if self.trace:
-            echo fmt"IkOver: top={top}, second={second}"
+            vm_log(LlDebug, VmExecLogger, fmt"IkOver: top={top}, second={second}")
         self.frame.push(top)
         self.frame.push(second)
       of IkLen:
@@ -1549,7 +1549,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         let length = value.size()
         when not defined(release):
           if self.trace:
-            echo fmt"IkLen: size({value}) = {length}"
+            vm_log(LlDebug, VmExecLogger, fmt"IkLen: size({value}) = {length}")
         self.frame.push(length.to_value())
 
       of IkArrayStart:
@@ -1923,16 +1923,16 @@ proc exec*(self: ptr VirtualMachine): Value =
         self.frame.pop2(child)
         let v = self.frame.current()
         when DEBUG_VM:
-          echo "IkGeneAddChild: v.kind = ", v.kind, ", child = ", child
+          vm_log(LlDebug, VmExecLogger, "IkGeneAddChild: v.kind = " & $v.kind & ", child = " & $child)
         when not defined(release):
           # Debug: print stack state when error occurs
           if v.kind == VkSymbol:
-            echo "ERROR: IkGeneAddChild with Symbol on stack!"
-            echo "  child = ", child
-            echo "  v (stack top) = ", v
-            echo "  Stack trace:"
+            vm_log(LlError, VmExecLogger, "IkGeneAddChild with Symbol on stack")
+            vm_log(LlError, VmExecLogger, "  child = " & $child)
+            vm_log(LlError, VmExecLogger, "  v (stack top) = " & $v)
+            vm_log(LlError, VmExecLogger, "  Stack trace:")
             for i in 0..<min(5, self.frame.stack_index.int):
-              echo "    [", i, "] = ", self.frame.stack[i]
+              vm_log(LlError, VmExecLogger, "    [" & $i & "] = " & $self.frame.stack[i])
         case v.kind:
           of VkFrame:
             # For function calls, we need to set up the args gene with children
@@ -2076,16 +2076,16 @@ proc exec*(self: ptr VirtualMachine): Value =
           of VkFrame:
             let frame = self.frame.current().ref.frame
             when DEBUG_VM:
-              echo fmt"  Frame kind = {frame.kind}"
+              vm_log(LlDebug, VmExecLogger, fmt"  Frame kind = {frame.kind}")
             case frame.kind:
               of FkFunction, FkMethod, FkMacroMethod:
                 let f = frame.target.ref.fn
                 when DEBUG_VM:
-                  echo fmt"  Function name = {f.name}, has compiled body = {f.body_compiled != nil}"
+                  vm_log(LlDebug, VmExecLogger, fmt"  Function name = {f.name}, has compiled body = {f.body_compiled != nil}")
                 if f.body_compiled == nil:
                   f.compile()
                   when DEBUG_VM:
-                    echo "  After compile, scope_tracker.mappings = ", f.scope_tracker.mappings
+                    vm_log(LlDebug, VmExecLogger, "  After compile, scope_tracker.mappings = " & $f.scope_tracker.mappings)
 
                 self.pc.inc()
                 # Pop the VkFrame value from the stack before switching context
@@ -2106,9 +2106,10 @@ proc exec*(self: ptr VirtualMachine): Value =
 
                 # Process arguments if matcher exists
                 when DEBUG_VM:
-                  echo "  Matcher empty? ", f.matcher.is_empty(), ", matcher.children.len = ", f.matcher.children.len
+                  vm_log(LlDebug, VmExecLogger, "  Matcher empty? " & $f.matcher.is_empty() &
+                         ", matcher.children.len = " & $f.matcher.children.len)
                   if not f.matcher.is_empty():
-                    echo "  frame.args = ", frame.args
+                    vm_log(LlDebug, VmExecLogger, "  frame.args = " & $frame.args)
                 if not f.matcher.is_empty():
                   # For methods, the matcher includes self as a parameter
                   # So we should pass ALL arguments including self
@@ -2149,14 +2150,15 @@ proc exec*(self: ptr VirtualMachine): Value =
                       # Two-argument optimization
                       elif arg_count == 2 and param_count == 2:
                         when DEBUG_VM:
-                          echo "Two-argument optimization: arg_count = ", arg_count, ", param_count = ", param_count
+                          vm_log(LlDebug, VmExecLogger, "Two-argument optimization: arg_count = " &
+                                 $arg_count & ", param_count = " & $param_count)
                         let param1 = f.matcher.children[0]
                         let param2 = f.matcher.children[1]
                         # Check for simple parameter bindings
                         if param1.kind == MatchData and not param1.is_splat and param1.children.len == 0 and
                            param2.kind == MatchData and not param2.is_splat and param2.children.len == 0:
                           when DEBUG_VM:
-                            echo "  Both params are simple bindings"
+                            vm_log(LlDebug, VmExecLogger, "  Both params are simple bindings")
                           # Direct assignment for both parameters
                           var all_mapped = true
                           if f.scope_tracker.mappings.has_key(param1.name_key) and
@@ -2165,11 +2167,13 @@ proc exec*(self: ptr VirtualMachine): Value =
                             let idx2 = f.scope_tracker.mappings[param2.name_key]
                             let max_idx = max(idx1, idx2)
                             when DEBUG_VM:
-                              echo "  idx1 = ", idx1, ", idx2 = ", idx2
+                              vm_log(LlDebug, VmExecLogger, "  idx1 = " & $idx1 & ", idx2 = " & $idx2)
                             while frame.scope.members.len <= max_idx:
                               frame.scope.members.add(NIL)
                             when DEBUG_VM:
-                              echo "  Setting args: [0] = ", frame.args.gene.children[0], " [1] = ", frame.args.gene.children[1]
+                              vm_log(LlDebug, VmExecLogger, "  Setting args: [0] = " &
+                                     $frame.args.gene.children[0] & " [1] = " &
+                                     $frame.args.gene.children[1])
                             frame.scope.members[idx1] = frame.args.gene.children[0]
                             frame.scope.members[idx2] = frame.args.gene.children[1]
                           else:
@@ -2318,7 +2322,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                 let r = add_mixed(second.int64, first.float)
                 when not defined(release):
                   if self.trace:
-                    echo fmt"IkAdd float+int: {first.float} + {second.int64.float64} = {r}"
+                    vm_log(LlDebug, VmExecLogger, fmt"IkAdd float+int: {first.float} + {second.int64.float64} = {r}")
                 self.frame.push(r)
               of VkFloat:
                 self.frame.push(add_float_fast(first.float, second.float))
@@ -3713,7 +3717,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         let finally_pc = if inst.arg1 != 0: inst.arg1.int else: -1
         when not defined(release):
           if self.trace:
-            echo "  TryStart: catch_pc=", catch_pc, ", finally_pc=", finally_pc
+            vm_log(LlDebug, VmExecLogger, "  TryStart: catch_pc=" & $catch_pc & ", finally_pc=" & $finally_pc)
 
         self.exception_handlers.add(ExceptionHandler(
           catch_pc: catch_pc,
@@ -3759,13 +3763,13 @@ proc exec*(self: ptr VirtualMachine): Value =
             self.exception_handlers[^1] = handler
             when not defined(release):
               if self.trace:
-                echo "  Finally: saved value ", handler.saved_value
+                vm_log(LlDebug, VmExecLogger, "  Finally: saved value " & $handler.saved_value)
           else:
             handler.has_saved_value = false
             self.exception_handlers[^1] = handler
         when not defined(release):
           if self.trace:
-            echo "  Finally: starting finally block"
+            vm_log(LlDebug, VmExecLogger, "  Finally: starting finally block")
 
       of IkFinallyEnd:
         # End of finally block
@@ -3782,7 +3786,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             self.frame.push(handler.saved_value)
             when not defined(release):
               if self.trace:
-                echo "  FinallyEnd: restored value ", handler.saved_value
+                vm_log(LlDebug, VmExecLogger, "  FinallyEnd: restored value " & $handler.saved_value)
 
         # Now we can pop the exception handler
         if self.exception_handlers.len > 0:
@@ -3790,7 +3794,7 @@ proc exec*(self: ptr VirtualMachine): Value =
 
         when not defined(release):
           if self.trace:
-            echo "  FinallyEnd: current_exception = ", self.current_exception
+            vm_log(LlDebug, VmExecLogger, "  FinallyEnd: current_exception = " & $self.current_exception)
 
         if self.current_exception != NIL:
           # Re-throw the exception

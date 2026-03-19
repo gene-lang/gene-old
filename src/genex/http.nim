@@ -12,6 +12,7 @@ import websocket as ws_module
 include ../gene/extension/boilerplate
 import ../gene/vm
 import ../gene/vm/extension_abi
+import ../gene/logging_core
 import ../gene/vm/thread as gene_thread
 import ../gene/serdes
 import std/typedthreads
@@ -24,6 +25,11 @@ type
 # ============ Gene Thread Worker Pool for Concurrent HTTP ============
 
 const MAX_HTTP_WORKERS = 8
+const GenexHttpLogger = "genex/http"
+
+template http_log(level: LogLevel, message: untyped) =
+  if extension_log_enabled(level, GenexHttpLogger):
+    extension_log_message(level, GenexHttpLogger, message)
 
 # Gene thread-based worker pool
 var http_gene_workers: array[MAX_HTTP_WORKERS, Value]  # Stores Gene thread references (VkThread)
@@ -943,7 +949,7 @@ proc start_http_thread_poller(vm: ptr VirtualMachine) {.async.} =
       return  # Already running
 
     if vm == nil:
-      echo "Error: Cannot start HTTP poller with nil VM"
+      http_log(LlError, "Cannot start HTTP poller with nil VM")
       return
 
     http_poller_running = true
@@ -953,7 +959,7 @@ proc start_http_thread_poller(vm: ptr VirtualMachine) {.async.} =
         try:
           vm.poll_event_loop()
         except CatchableError as e:
-          echo "Error in poll_event_loop: ", e.msg
+          http_log(LlError, "Error in poll_event_loop: " & e.msg)
       await sleepAsync(1)
 
     http_poller_running = false
@@ -966,15 +972,14 @@ proc init_http_gene_workers(count: int, vm: ptr VirtualMachine) =
       return
 
     let requested_count = min(count, MAX_HTTP_WORKERS)
-    when not defined(release):
-      echo "Initializing ", requested_count, " Gene HTTP worker threads..."
+    http_log(LlDebug, "Initializing " & $requested_count & " Gene HTTP worker threads")
 
     var actual_count = 0
     for i in 0..<requested_count:
       # Get a free thread from the Gene thread pool
       let thread_id = gene_thread.get_free_thread()
       if thread_id == -1:
-        echo "Warning: Could not allocate Gene thread for HTTP worker ", i
+        http_log(LlWarn, "Could not allocate Gene thread for HTTP worker " & $i)
         continue
 
       # Initialize the thread
@@ -996,13 +1001,13 @@ proc init_http_gene_workers(count: int, vm: ptr VirtualMachine) =
     http_gene_worker_count = actual_count
 
     if actual_count == 0:
-      echo "Error: No HTTP worker threads could be initialized"
+      http_log(LlError, "No HTTP worker threads could be initialized")
       return
 
     http_gene_workers_initialized = true
     next_http_worker_idx.store(0)
-    when not defined(release):
-      echo "Gene HTTP worker threads initialized: ", actual_count, " of ", requested_count, " requested"
+    http_log(LlDebug, "Gene HTTP worker threads initialized: " & $actual_count &
+             " of " & $requested_count & " requested")
 
     # Start background poller to process thread replies
     asyncCheck start_http_thread_poller(vm)
@@ -1019,8 +1024,7 @@ proc shutdown_http_gene_workers() =
     if not http_gene_workers_initialized:
       return
 
-    when not defined(release):
-      echo "Shutting down Gene HTTP worker threads..."
+    http_log(LlDebug, "Shutting down Gene HTTP worker threads")
     for i in 0..<http_gene_worker_count:
       let worker = http_gene_workers[i]
       if worker.kind == VkThread:
@@ -1043,8 +1047,7 @@ proc shutdown_http_gene_workers() =
         http_gene_workers[i] = NIL
 
     http_gene_workers_initialized = false
-    when not defined(release):
-      echo "Gene HTTP worker threads shutdown complete"
+    http_log(LlDebug, "Gene HTTP worker threads shutdown complete")
 
 # Dispatch a request to a Gene worker thread using send_expect_reply
 # Returns a future that will be completed with the response
@@ -1157,8 +1160,7 @@ proc http_worker_handle_request(vm: ptr VirtualMachine, args: ptr UncheckedArray
         return literal_error_response("Internal Server Error: response is not literal")
       return literal_result
     except CatchableError as e:
-      when not defined(release):
-        echo "Worker handler error: ", e.msg
+      http_log(LlError, "Worker handler error: " & e.msg)
       return literal_error_response("Internal Server Error: " & e.msg)
 
 # HTTP Server implementation
@@ -1391,8 +1393,7 @@ proc handle_request(req: asynchttpserver.Request) {.async, gcsafe.} =
           # Call the Gene WebSocket handler with the connection
           discard execute_gene_function(gene_vm_global, ws_handler_global, @[ws_instance])
         except CatchableError as e:
-          when not defined(release):
-            echo "WebSocket upgrade error: ", e.msg
+          http_log(LlError, "WebSocket upgrade error: " & e.msg)
         return
       else:
         # Path doesn't match — fall through to normal request handling
@@ -1448,8 +1449,7 @@ proc handle_request(req: asynchttpserver.Request) {.async, gcsafe.} =
             response = literal_to_server_response(response)
         except CatchableError as e:
           # Future was rejected
-          when not defined(release):
-            echo "Worker error: ", e.msg
+          http_log(LlError, "Worker error: " & e.msg)
           await req.respond(Http500, "Worker error: " & e.msg)
           return
       else:
@@ -1543,8 +1543,7 @@ proc vm_start_server(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], ar
       let workers_val = if has_keyword_args: get_keyword_arg(args, "workers") else: NIL
       let worker_count = if workers_val.kind == VkInt: workers_val.int64.int else: 4
 
-      when not defined(release):
-        echo "Concurrent mode enabled with ", worker_count, " Gene worker threads"
+      http_log(LlDebug, "Concurrent mode enabled with " & $worker_count & " Gene worker threads")
       init_http_gene_workers(worker_count, vm)
 
   # Store the handler
@@ -1582,7 +1581,7 @@ proc vm_start_server(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], ar
     except ValueError:
       discard
 
-  echo "HTTP server started on port ", port
+  http_log(LlDebug, "HTTP server started on port " & $port)
   return NIL
 
 # Create a response

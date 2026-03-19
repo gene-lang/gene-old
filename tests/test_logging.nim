@@ -1,4 +1,4 @@
-import unittest, os, strutils, tables
+import unittest, os, strutils, tables, streams
 
 import ../src/gene/vm
 import ../src/gene/logging_core
@@ -7,6 +7,7 @@ import ../src/commands/base
 import ../src/gene/parser
 import ../src/gene/types except Exception
 import ../src/genex/ai/openai_client
+import ../src/genex/ai/streaming
 import ./helpers
 
 test "Logging defaults when config missing":
@@ -282,6 +283,41 @@ test "Parser debug output uses shared logger":
     parser.close()
     check last_log_line.contains(" gene/parser ")
   finally:
+    current_thread_id = saved_thread_id
+
+test "Stdlib debug output uses shared logger":
+  init_all_with_extensions()
+  reset_logging_config()
+  set_default_root_level(LlDebug)
+  load_logging_config(joinPath(getTempDir(), "missing_logging.gene"))
+  let saved_thread_id = current_thread_id
+  try:
+    current_thread_id = 0
+    last_log_line = ""
+    discard VM.exec("""
+    (debug 42)
+    """, "test_code.gene")
+    check last_log_line.contains(" gene/stdlib/core ")
+    check last_log_line.endsWith(" <debug>: 42")
+  finally:
+    current_thread_id = saved_thread_id
+
+test "Genex streaming debug output uses shared logger":
+  reset_logging_config()
+  set_default_root_level(LlDebug)
+  load_logging_config(joinPath(getTempDir(), "missing_logging.gene"))
+  let saved_thread_id = current_thread_id
+  let input = newStringStream("data: [DONE]\n")
+  try:
+    current_thread_id = 0
+    last_log_line = ""
+    processStream(input, proc(event: StreamEvent) {.gcsafe.} =
+      discard event
+    )
+    check last_log_line.contains(" genex/ai/streaming ")
+    check last_log_line.endsWith(" Stream event: done done: true")
+  finally:
+    input.close()
     current_thread_id = saved_thread_id
 
 test "OpenAI debug header logging redacts secrets":

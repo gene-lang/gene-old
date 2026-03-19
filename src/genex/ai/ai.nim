@@ -1,8 +1,15 @@
 ## Main module for genex/ai provider wrappers
 ## Exports OpenAI/Anthropic functionality to Gene
 
+import ../../gene/logging_core
 import bindings, openai_client, anthropic_client, streaming
 import documents, vectordb, conversation, tools, rag, utils, control_slack, agent_runtime, scheduler, provider_router, slack_ingress, slack_socket_mode, memory_store, workspace_policy
+
+const GenexAiLogger = "genex/ai"
+
+template genex_ai_log(level: LogLevel, message: untyped) =
+  if log_enabled(level, GenexAiLogger):
+    log_message(level, GenexAiLogger, message)
 
 # Export the native functions that will be registered with the VM
 export vm_openai_new_client
@@ -31,4 +38,4 @@ proc init_ai_module*() =
 
 when isMainModule:
   # Test the module directly if run as a script
-  echo "OpenAI API module loaded successfully"
+  genex_ai_log(LlDebug, "OpenAI API module loaded successfully")

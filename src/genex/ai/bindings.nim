@@ -6,8 +6,15 @@ import asyncdispatch
 import ../../gene/types
 import ../../gene/vm
 import ../../gene/vm/extension_abi
+import ../../gene/logging_core
 import openai_client, anthropic_client, streaming, documents
 import slack_socket_mode, control_slack, utils as ai_utils
+
+const AiBindingsLogger = "genex/ai/bindings"
+
+template ai_bindings_log(level: LogLevel, message: untyped) =
+  if extension_log_enabled(level, AiBindingsLogger):
+    extension_log_message(level, AiBindingsLogger, message)
 
 var openai_client_class*: Class
 var openai_error_class*: Class
@@ -287,57 +294,46 @@ proc openai_error_result(err: OpenAIError): Value =
   return openai_error_value(err)
 
 proc call_openai_endpoint(config: OpenAIConfig, endpoint: string, payload: JsonNode): Value {.gcsafe.} =
-  let ai_debug = getEnvVar("GENE_AI_DEBUG", "") == "1"
   try:
-    if ai_debug:
-      echo "[genex/ai] call_openai_endpoint start endpoint=", endpoint
+    ai_bindings_log(LlDebug, "call_openai_endpoint start endpoint=" & endpoint)
     let response = performRequest(config, "POST", endpoint, payload)
-    if ai_debug:
-      echo "[genex/ai] call_openai_endpoint success endpoint=", endpoint
+    ai_bindings_log(LlDebug, "call_openai_endpoint success endpoint=" & endpoint)
     let gene_response = jsonToGeneValue(response)
-    if ai_debug:
-      echo "[genex/ai] call_openai_endpoint converted response"
+    ai_bindings_log(LlDebug, "call_openai_endpoint converted response")
     return gene_response
   except OpenAIError as e:
-    if ai_debug:
-      echo "[genex/ai] call_openai_endpoint caught OpenAIError: ", e.msg
-      if e.status != 0 or e.raw_body.len > 0:
-        echo "[genex/ai] call_openai_endpoint error_details status=", e.status, " body=", e.raw_body
+    ai_bindings_log(LlDebug, "call_openai_endpoint caught OpenAIError: " & e.msg)
+    if e.status != 0 or e.raw_body.len > 0:
+      ai_bindings_log(LlDebug, "call_openai_endpoint error_details status=" &
+                      $e.status & " body=" & e.raw_body)
     return openai_error_value(e)
 
 proc call_openai_codex_endpoint(config: OpenAIConfig, payload: JsonNode): Value {.gcsafe.} =
-  let ai_debug = getEnvVar("GENE_AI_DEBUG", "") == "1"
   try:
-    if ai_debug:
-      echo "[genex/ai] call_openai_endpoint start endpoint=", DEFAULT_CODEX_RESPONSES_ENDPOINT
+    ai_bindings_log(LlDebug, "call_openai_endpoint start endpoint=" & DEFAULT_CODEX_RESPONSES_ENDPOINT)
     let response = performCodexResponsesRequest(config, payload)
-    if ai_debug:
-      echo "[genex/ai] call_openai_endpoint success endpoint=", DEFAULT_CODEX_RESPONSES_ENDPOINT
+    ai_bindings_log(LlDebug, "call_openai_endpoint success endpoint=" & DEFAULT_CODEX_RESPONSES_ENDPOINT)
     let gene_response = jsonToGeneValue(response)
-    if ai_debug:
-      echo "[genex/ai] call_openai_endpoint converted response"
+    ai_bindings_log(LlDebug, "call_openai_endpoint converted response")
     return gene_response
   except OpenAIError as e:
-    if ai_debug:
-      echo "[genex/ai] call_openai_endpoint caught OpenAIError: ", e.msg
-      if e.status != 0 or e.raw_body.len > 0:
-        echo "[genex/ai] call_openai_endpoint error_details status=", e.status, " body=", e.raw_body
+    ai_bindings_log(LlDebug, "call_openai_endpoint caught OpenAIError: " & e.msg)
+    if e.status != 0 or e.raw_body.len > 0:
+      ai_bindings_log(LlDebug, "call_openai_endpoint error_details status=" &
+                      $e.status & " body=" & e.raw_body)
     return openai_error_value(e)
 
 proc call_anthropic_endpoint(config: AnthropicConfig, endpoint: string, payload: JsonNode): Value {.gcsafe.} =
-  let ai_debug = getEnvVar("GENE_AI_DEBUG", "") == "1"
   try:
-    if ai_debug:
-      echo "[genex/ai] call_anthropic_endpoint start endpoint=", endpoint
+    ai_bindings_log(LlDebug, "call_anthropic_endpoint start endpoint=" & endpoint)
     let response = performAnthropicRequest(config, "POST", endpoint, payload)
-    if ai_debug:
-      echo "[genex/ai] call_anthropic_endpoint success endpoint=", endpoint
+    ai_bindings_log(LlDebug, "call_anthropic_endpoint success endpoint=" & endpoint)
     return jsonToGeneValue(response)
   except AnthropicError as e:
-    if ai_debug:
-      echo "[genex/ai] call_anthropic_endpoint caught AnthropicError: ", e.msg
-      if e.status != 0 or e.raw_body.len > 0:
-        echo "[genex/ai] call_anthropic_endpoint error_details status=", e.status, " body=", e.raw_body
+    ai_bindings_log(LlDebug, "call_anthropic_endpoint caught AnthropicError: " & e.msg)
+    if e.status != 0 or e.raw_body.len > 0:
+      ai_bindings_log(LlDebug, "call_anthropic_endpoint error_details status=" &
+                      $e.status & " body=" & e.raw_body)
     return anthropic_error_value(e)
 
 proc call_gene_callable(vm: ptr VirtualMachine, callable: Value, args: seq[Value]) {.gcsafe.} =
@@ -376,8 +372,7 @@ proc createGeneStreamHandler(vm: ptr VirtualMachine, callback: Value): StreamHan
       let event_value = new_map_value(map)
       call_gene_callable(vm, callback, @[event_value])
     except system.Exception as e:
-      when defined(debug):
-        echo "DEBUG: Stream handler error: ", e.msg
+      ai_bindings_log(LlError, "Stream handler error: " & e.msg)
   return handler
 
 proc openai_error_to_s(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
@@ -676,7 +671,7 @@ proc execute_gene_callback(vm: ptr VirtualMachine, fn: Value, args: seq[Value]):
     of VkFunction:
       return vm.exec_function(fn, args)
     else:
-      echo "start_slack_socket_mode: callback is not callable (kind=", fn.kind, ")"
+      ai_bindings_log(LlError, "start_slack_socket_mode: callback is not callable (kind=" & $fn.kind & ")")
       return NIL
 
 proc vm_start_slack_socket_mode*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
@@ -712,7 +707,7 @@ proc vm_start_slack_socket_mode*(vm: ptr VirtualMachine, args: ptr UncheckedArra
     try:
       envelope = slack_event_to_command(payload)
     except CatchableError as e:
-      echo "Socket Mode: skipping event: ", e.msg
+      ai_bindings_log(LlWarn, "Socket Mode: skipping event: " & e.msg)
       return
 
     # Queue command and execute it from scheduler tick to avoid running Gene VM
@@ -720,7 +715,7 @@ proc vm_start_slack_socket_mode*(vm: ptr VirtualMachine, args: ptr UncheckedArra
     {.cast(gcsafe).}:
       if slack_pending_commands.len >= max_pending_slack_commands:
         discard slack_pending_commands.popFirst()
-        echo "Socket Mode: pending queue full, dropping oldest event"
+        ai_bindings_log(LlWarn, "Socket Mode: pending queue full, dropping oldest event")
       slack_pending_commands.addLast(PendingSlackCommand(envelope: envelope))
 
   let client = new_slack_socket_mode(app_token, bot_token, event_handler)
@@ -734,7 +729,7 @@ proc vm_start_slack_socket_mode*(vm: ptr VirtualMachine, args: ptr UncheckedArra
     except ValueError:
       discard
 
-  echo "Slack Socket Mode client started"
+  ai_bindings_log(LlDebug, "Slack Socket Mode client started")
   return NIL
 
 proc vm_slack_file_info*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
@@ -953,17 +948,17 @@ proc drain_slack_command_queue() {.gcsafe.} =
       let stored_vm = slack_vm_global
       let stored_cb = slack_callback_global
       if stored_vm.isNil or stored_cb == NIL:
-        echo "Socket Mode: callback context is not initialized"
+        ai_bindings_log(LlError, "Socket Mode: callback context is not initialized")
         continue
       try:
         result = execute_gene_callback(stored_vm, stored_cb, @[
           jsonToGeneValue(command_to_json(pending.envelope))
         ])
       except CatchableError as e:
-        echo "Socket Mode: agent error: ", e.msg
+        ai_bindings_log(LlError, "Socket Mode: agent error: " & e.msg)
         continue
       except system.Exception as e:
-        echo "Socket Mode: agent error: ", e.msg
+        ai_bindings_log(LlError, "Socket Mode: agent error: " & e.msg)
         continue
 
     if result.kind == VkMap:
@@ -976,11 +971,11 @@ proc drain_slack_command_queue() {.gcsafe.} =
             {.cast(gcsafe).}:
               slack_reply_client_global
           if client.isNil:
-            echo "Socket Mode: Slack reply skipped: missing client"
+            ai_bindings_log(LlWarn, "Socket Mode: Slack reply skipped: missing client")
           else:
             let reply_result = client.slack_reply(target, response_val.str)
             if not reply_result.ok:
-              echo "Socket Mode: Slack reply failed: ", reply_result.error
+              ai_bindings_log(LlWarn, "Socket Mode: Slack reply failed: " & reply_result.error)
 
 proc ai_scheduler_tick(vm_user_data: pointer, callback_user_data: pointer) {.cdecl, gcsafe.} =
   ## Called by the host's run_forever loop to pump the extension's async dispatcher.

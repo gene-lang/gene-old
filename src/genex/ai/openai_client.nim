@@ -2,6 +2,14 @@
 ## Implements the OpenAIClient class with support for chat completions, responses, embeddings, and streaming
 
 import json, httpclient, strutils, os, tables, asyncdispatch
+import ../../gene/logging_core
+import ../../gene/vm/extension_abi
+
+const OpenAIClientLogger = "genex/ai/openai_client"
+
+template openai_client_log(level: LogLevel, message: untyped) =
+  if extension_log_enabled(level, OpenAIClientLogger):
+    extension_log_message(level, OpenAIClientLogger, message)
 
 type
   OpenAIConfig* = ref object
@@ -171,16 +179,13 @@ proc to_http_method(http_method: string): HttpMethod =
   else: HttpPost
 
 proc request_async(url: string, http_method: HttpMethod, body: string, headers: HttpHeaders): Future[tuple[client: AsyncHttpClient, response: AsyncResponse]] {.async.} =
-  let ai_debug = getEnvVar("GENE_AI_DEBUG", "") == "1"
-  if ai_debug:
-    echo "[genex/ai] request_async start ", $http_method, " ", url
+  openai_client_log(LlDebug, "request_async start " & $http_method & " " & url)
   let client = newAsyncHttpClient()
   try:
     let response = await client.request(url, httpMethod = http_method, body = body, headers = headers)
     return (client: client, response: response)
   except:
-    if ai_debug:
-      echo "[genex/ai] request_async close client"
+    openai_client_log(LlDebug, "request_async close client")
     client.close()
     raise
 
@@ -242,7 +247,6 @@ proc performRequest*(config: OpenAIConfig, httpMethod: string, endpoint: string,
                    payload: JsonNode = newJNull(), streaming: bool = false,
                    extra_headers: seq[(string, string)] = @[]): JsonNode =
   try:
-    let ai_debug = getEnvVar("GENE_AI_DEBUG", "") == "1"
     let url = config.base_url & endpoint
     let body = if payload.kind != JNull: $payload else: ""
     let request_method = to_http_method(httpMethod)
@@ -253,28 +257,26 @@ proc performRequest*(config: OpenAIConfig, httpMethod: string, endpoint: string,
     for header in extra_headers:
       headers[header[0]] = header[1]
 
-    when defined(debug):
-      echo "DEBUG: OpenAI API Request: ", httpMethod, " ", url
+    if log_enabled(LlDebug, OpenAIClientLogger):
       var effective_headers = initTable[string, string]()
       for key, value in config.headers:
         effective_headers[key] = value
       for header in extra_headers:
         effective_headers[header[0]] = header[1]
-      echo "DEBUG: Headers: ", redactHeadersForLog(effective_headers)
+      openai_client_log(LlDebug, "OpenAI API Request: " & httpMethod & " " & url)
+      openai_client_log(LlDebug, "Headers: " & redactHeadersForLog(effective_headers))
       if body != "":
-        echo "DEBUG: Body: ", body[0..min(body.len, 200)] & (if body.len > 200: "..." else: "")
-    if ai_debug:
-      echo "[genex/ai] performRequest start method=", httpMethod, " url=", url, " timeout_ms=", $config.timeout_ms
+        openai_client_log(LlDebug, "Body: " & body[0..min(body.len, 200)] &
+                          (if body.len > 200: "..." else: ""))
+    openai_client_log(LlDebug, "performRequest start method=" & httpMethod &
+                      " url=" & url & " timeout_ms=" & $config.timeout_ms)
 
     let request_future = request_async(url, request_method, body, headers)
-    if ai_debug:
-      echo "[genex/ai] waiting request future"
+    openai_client_log(LlDebug, "waiting request future")
     let request_done = waitFor(request_future.withTimeout(config.timeout_ms))
-    if ai_debug:
-      echo "[genex/ai] request_done=", $request_done
+    openai_client_log(LlDebug, "request_done=" & $request_done)
     if not request_done:
-      if ai_debug:
-        echo "[genex/ai] timeout branch raising OpenAIError"
+      openai_client_log(LlDebug, "timeout branch raising OpenAIError")
       raise OpenAIError(
         msg: "Network error: request timed out after " & $config.timeout_ms & "ms",
         status: -1,
@@ -285,15 +287,12 @@ proc performRequest*(config: OpenAIConfig, httpMethod: string, endpoint: string,
     let response = request_result.response
     var response_body = ""
     try:
-      if ai_debug:
-        echo "[genex/ai] response received status=", response.status
+      openai_client_log(LlDebug, "response received status=" & response.status)
 
       let body_future = response.body()
-      if ai_debug:
-        echo "[genex/ai] waiting body future"
+      openai_client_log(LlDebug, "waiting body future")
       let body_done = waitFor(body_future.withTimeout(config.timeout_ms))
-      if ai_debug:
-        echo "[genex/ai] body_done=", $body_done
+      openai_client_log(LlDebug, "body_done=" & $body_done)
       if not body_done:
         raise OpenAIError(
           msg: "Network error: response body timed out after " & $config.timeout_ms & "ms",
@@ -302,13 +301,11 @@ proc performRequest*(config: OpenAIConfig, httpMethod: string, endpoint: string,
         )
       response_body = body_future.read()
     finally:
-      if ai_debug:
-        echo "[genex/ai] request_async close client"
+      openai_client_log(LlDebug, "request_async close client")
       client.close()
 
-    when defined(debug):
-      echo "DEBUG: Response status: ", response.status
-      echo "DEBUG: Response headers: ", response.headers
+    openai_client_log(LlDebug, "Response status: " & response.status)
+    openai_client_log(LlDebug, "Response headers: " & $response.headers)
 
     let statusCode = parseInt(response.status.split()[0])  # Extract just the status code (e.g., "200" from "200 OK")
     if statusCode < 200 or statusCode >= 300:
@@ -321,12 +318,10 @@ proc performRequest*(config: OpenAIConfig, httpMethod: string, endpoint: string,
       result = %*{"streaming": true, "body": response_body}
 
   except OpenAIError:
-    if getEnvVar("GENE_AI_DEBUG", "") == "1":
-      echo "[genex/ai] performRequest rethrow OpenAIError"
+    openai_client_log(LlDebug, "performRequest rethrow OpenAIError")
     raise
   except Exception as e:
-    if getEnvVar("GENE_AI_DEBUG", "") == "1":
-      echo "[genex/ai] performRequest wrapping exception: ", e.msg
+    openai_client_log(LlWarn, "performRequest wrapping exception: " & e.msg)
     raise OpenAIError(
       msg: "Network error: " & e.msg,
       status: -1,
@@ -530,14 +525,15 @@ proc performCodexResponsesRequest*(config: OpenAIConfig, payload: JsonNode): Jso
       headers[key] = value
     headers["Accept"] = "text/event-stream"
 
-    when defined(debug):
+    if log_enabled(LlDebug, OpenAIClientLogger):
       var effective_headers = initTable[string, string]()
       for key, value in codex_config.headers:
         effective_headers[key] = value
       effective_headers["Accept"] = "text/event-stream"
-      echo "DEBUG: OpenAI Codex Request: POST ", url
-      echo "DEBUG: Headers: ", redactHeadersForLog(effective_headers)
-      echo "DEBUG: Body: ", body[0..min(body.len, 200)] & (if body.len > 200: "..." else: "")
+      openai_client_log(LlDebug, "OpenAI Codex Request: POST " & url)
+      openai_client_log(LlDebug, "Headers: " & redactHeadersForLog(effective_headers))
+      openai_client_log(LlDebug, "Body: " & body[0..min(body.len, 200)] &
+                        (if body.len > 200: "..." else: ""))
 
     let response = client.request(url, httpMethod = HttpPost, body = body, headers = headers)
     let response_body = response.body
