@@ -15,6 +15,8 @@ Navigation:
   Page Up/Page Down     Move one screen
   Right arrow or Enter  Enter selected container
   Left arrow            Return to parent container
+  Ctrl-F                Enter search / first match / next match
+  Ctrl-Shift-F or Ctrl-R Previous search match
   Esc                   Return to root container
   Tab                   Edit scalar inline or open external editor
   Type digits/text      Jump by index or substring (0.5s buffer)

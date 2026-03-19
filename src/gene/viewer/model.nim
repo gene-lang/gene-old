@@ -81,6 +81,12 @@ type
     quit_pending: bool
     inline_editing: bool
     inline_edit_buffer: string
+    search_mode: bool
+    search_query: string
+    search_cursor: int
+    search_matches: seq[seq[ViewerPathSegment]]
+    search_match_index: int
+    search_results_valid: bool
 
 proc open_viewer_document*(file_path: string): ViewerDocument
 proc open_viewer_document_from_source*(source, file_path: string): ViewerDocument
@@ -107,6 +113,19 @@ proc cancel_inline_edit*(state: ViewerState)
 proc append_inline_edit*(state: ViewerState, text: string)
 proc backspace_inline_edit*(state: ViewerState)
 proc save_inline_edit*(state: ViewerState): bool
+proc is_searching*(state: ViewerState): bool
+proc search_query*(state: ViewerState): string
+proc search_cursor*(state: ViewerState): int
+proc enter_search*(state: ViewerState)
+proc exit_search*(state: ViewerState)
+proc insert_search_text*(state: ViewerState, text: string)
+proc backspace_search*(state: ViewerState)
+proc delete_search*(state: ViewerState)
+proc move_search_cursor*(state: ViewerState, delta: int)
+proc move_search_cursor_home*(state: ViewerState)
+proc move_search_cursor_end*(state: ViewerState)
+proc search_forward*(state: ViewerState, body_height: int)
+proc search_backward*(state: ViewerState, body_height: int)
 proc clear_type_ahead*(state: ViewerState)
 proc clear_quit_pending*(state: ViewerState)
 proc request_quit*(state: ViewerState): bool
@@ -716,7 +735,13 @@ proc new_viewer_state*(doc: ViewerDocument): ViewerState =
     last_type_ahead_at: 0.0,
     quit_pending: false,
     inline_editing: false,
-    inline_edit_buffer: ""
+    inline_edit_buffer: "",
+    search_mode: false,
+    search_query: "",
+    search_cursor: 0,
+    search_matches: @[],
+    search_match_index: -1,
+    search_results_valid: false
   )
   if doc.root.kind == VnkScalar:
     result.status = "scalar value"
@@ -833,9 +858,26 @@ proc clear_inline_edit(state: ViewerState) =
   state.inline_editing = false
   state.inline_edit_buffer = ""
 
+proc clear_search_results(state: ViewerState) =
+  state.search_matches.setLen(0)
+  state.search_match_index = -1
+  state.search_results_valid = false
+
+proc clear_search_state(state: ViewerState) =
+  state.search_mode = false
+  state.search_query = ""
+  state.search_cursor = 0
+  state.clear_search_results()
+
+proc invalidate_search_results(state: ViewerState) =
+  state.search_match_index = -1
+  state.search_matches.setLen(0)
+  state.search_results_valid = false
+
 proc start_inline_edit*(state: ViewerState): bool =
   state.clear_type_ahead()
   state.clear_quit_pending()
+  state.clear_search_state()
   let node = state.current_target_node()
   if not is_editable_scalar(node):
     state.status = "inline edit unavailable for this value"
@@ -865,6 +907,90 @@ proc backspace_inline_edit*(state: ViewerState) =
   if state.inline_edit_buffer.len > 0:
     state.inline_edit_buffer.setLen(state.inline_edit_buffer.len - 1)
   state.status = ""
+
+proc is_searching*(state: ViewerState): bool =
+  state.search_mode
+
+proc search_query*(state: ViewerState): string =
+  state.search_query
+
+proc search_cursor*(state: ViewerState): int =
+  state.search_cursor
+
+proc clamp_search_cursor(state: ViewerState) =
+  state.search_cursor = max_int(0, min_int(state.search_query.len, state.search_cursor))
+
+proc enter_search*(state: ViewerState) =
+  state.clear_type_ahead()
+  state.clear_quit_pending()
+  state.clear_inline_edit()
+  if state.search_mode:
+    return
+  state.search_mode = true
+  state.search_query = ""
+  state.search_cursor = 0
+  state.clear_search_results()
+  state.status = ""
+
+proc exit_search*(state: ViewerState) =
+  if not state.search_mode:
+    return
+  state.clear_search_state()
+  state.status = ""
+
+proc replace_search_text(state: ViewerState, start_idx, stop_idx: int, text: string) =
+  var updated = newStringOfCap(state.search_query.len - (stop_idx - start_idx) + text.len)
+  if start_idx > 0:
+    updated.add(state.search_query[0 ..< start_idx])
+  updated.add(text)
+  if stop_idx < state.search_query.len:
+    updated.add(state.search_query[stop_idx ..< state.search_query.len])
+  state.search_query = updated
+  state.clamp_search_cursor()
+  state.invalidate_search_results()
+
+proc insert_search_text*(state: ViewerState, text: string) =
+  if not state.search_mode or text.len == 0:
+    return
+  state.clear_quit_pending()
+  let cursor = state.search_cursor
+  state.replace_search_text(cursor, cursor, text)
+  state.search_cursor = cursor + text.len
+  state.status = ""
+
+proc backspace_search*(state: ViewerState) =
+  if not state.search_mode or state.search_cursor <= 0:
+    return
+  state.clear_quit_pending()
+  let cursor = state.search_cursor
+  state.replace_search_text(cursor - 1, cursor, "")
+  state.search_cursor = cursor - 1
+  state.status = ""
+
+proc delete_search*(state: ViewerState) =
+  if not state.search_mode or state.search_cursor >= state.search_query.len:
+    return
+  state.clear_quit_pending()
+  let cursor = state.search_cursor
+  state.replace_search_text(cursor, cursor + 1, "")
+  state.search_cursor = cursor
+  state.status = ""
+
+proc move_search_cursor*(state: ViewerState, delta: int) =
+  if not state.search_mode:
+    return
+  state.search_cursor = state.search_cursor + delta
+  state.clamp_search_cursor()
+
+proc move_search_cursor_home*(state: ViewerState) =
+  if not state.search_mode:
+    return
+  state.search_cursor = 0
+
+proc move_search_cursor_end*(state: ViewerState) =
+  if not state.search_mode:
+    return
+  state.search_cursor = state.search_query.len
 
 proc clear_type_ahead*(state: ViewerState) =
   state.type_ahead_query = ""
@@ -979,12 +1105,129 @@ proc find_entry_index(node: ViewerNode, segment: ViewerPathSegment): int =
       return idx
   -1
 
+proc entry_matches_query(entry: ViewerEntry, needle: string): bool =
+  entry.label.toLowerAscii().contains(needle) or entry.summary.toLowerAscii().contains(needle)
+
+proc root_matches_query(node: ViewerNode, needle: string): bool =
+  collapse_preview(node.span_text()).toLowerAscii().contains(needle)
+
+proc collect_search_matches(node: ViewerNode, path_prefix: seq[ViewerPathSegment], needle: string, matches: var seq[seq[ViewerPathSegment]]) =
+  node.ensure_entries()
+  for entry in node.entries:
+    var path = path_prefix
+    path.add(entry.segment)
+    if entry.entry_matches_query(needle):
+      matches.add(path)
+    if is_container(entry.node.kind):
+      collect_search_matches(entry.node, path, needle, matches)
+
+proc build_search_matches(state: ViewerState, query: string): seq[seq[ViewerPathSegment]] =
+  let needle = query.toLowerAscii()
+  if needle.len == 0:
+    return @[]
+  if state.doc.root.kind == VnkScalar:
+    if state.doc.root.root_matches_query(needle):
+      result.add(@[])
+    return
+  collect_search_matches(state.doc.root, @[], needle, result)
+
+proc select_path(state: ViewerState, path: seq[ViewerPathSegment], body_height: int): bool =
+  state.frames = @[new_frame(state.doc.root)]
+  if path.len == 0:
+    restore_visible_selection(state, body_height)
+    return true
+
+  for idx, segment in path:
+    let node = state.current_frame().node
+    let entry_index = find_entry_index(node, segment)
+    if entry_index < 0:
+      return false
+    state.current_frame().selected = entry_index
+    if idx < path.high:
+      let child = node.entries[entry_index].node
+      if not is_container(child.kind):
+        return false
+      state.frames.add(new_frame(child))
+
+  restore_visible_selection(state, body_height)
+  true
+
+proc activate_search_match(state: ViewerState, body_height: int): bool =
+  if state.search_match_index < 0 or state.search_match_index >= state.search_matches.len:
+    return false
+  let path = state.search_matches[state.search_match_index]
+  if not state.select_path(path, body_height):
+    state.invalidate_search_results()
+    state.status = "search result no longer available"
+    return false
+  state.status = "match " & $(state.search_match_index + 1) & "/" & $(state.search_matches.len)
+  true
+
+proc search_forward*(state: ViewerState, body_height: int) =
+  if not state.search_mode:
+    state.enter_search()
+    return
+  state.clear_quit_pending()
+  if state.search_query.len == 0:
+    state.status = "type a search query"
+    return
+
+  if not state.search_results_valid:
+    state.search_matches = state.build_search_matches(state.search_query)
+    state.search_results_valid = true
+    if state.search_matches.len == 0:
+      state.status = "no match: " & state.search_query
+      return
+    state.search_match_index = 0
+    discard state.activate_search_match(body_height)
+    return
+
+  if state.search_matches.len == 0:
+    state.status = "no match: " & state.search_query
+    return
+  if state.search_match_index + 1 >= state.search_matches.len:
+    state.status = "no further match"
+    return
+
+  inc(state.search_match_index)
+  discard state.activate_search_match(body_height)
+
+proc search_backward*(state: ViewerState, body_height: int) =
+  if not state.search_mode:
+    state.enter_search()
+    return
+  state.clear_quit_pending()
+  if state.search_query.len == 0:
+    state.status = "type a search query"
+    return
+
+  if not state.search_results_valid:
+    state.search_matches = state.build_search_matches(state.search_query)
+    state.search_results_valid = true
+    if state.search_matches.len == 0:
+      state.status = "no match: " & state.search_query
+      return
+    state.search_match_index = state.search_matches.high
+    discard state.activate_search_match(body_height)
+    return
+
+  if state.search_matches.len == 0:
+    state.status = "no match: " & state.search_query
+    return
+  if state.search_match_index <= 0:
+    state.status = "no previous match"
+    return
+
+  dec(state.search_match_index)
+  discard state.activate_search_match(body_height)
+
 proc reload*(state: ViewerState) =
   let path = state.selected_path_segments()
   let bodyless = 1
   state.clear_type_ahead()
   state.clear_quit_pending()
   state.clear_inline_edit()
+  state.clear_search_state()
   state.doc = open_viewer_document(state.doc.file_path)
   state.frames = @[new_frame(state.doc.root)]
 

@@ -21,6 +21,7 @@ type
     VkNone
     VkTab
     VkBackspace
+    VkDelete
     VkEscape
     VkUp
     VkDown
@@ -28,11 +29,15 @@ type
     VkPageDown
     VkLeft
     VkRight
+    VkHome
+    VkEnd
     VkEnter
     VkF1
     VkF2
     VkF5
     VkF10
+    VkSearchForward
+    VkSearchBackward
     VkResize
     VkQuit
     VkHelp
@@ -49,6 +54,9 @@ const
   NcKeyPageDown = 338
   NcKeyPageUp = 339
   NcKeyBackspace = 263
+  NcKeyHome = 262
+  NcKeyDelete = 330
+  NcKeyEnd = 360
   NcKeyEnter = 343
   NcKeyF0 = 264
   NcKeyResize = 410
@@ -63,6 +71,7 @@ proc curs_set(visibility: cint): cint {.importc, header: "<curses.h>".}
 proc erase(): cint {.importc, header: "<curses.h>".}
 proc refresh(): cint {.importc, header: "<curses.h>".}
 proc getch(): cint {.importc, header: "<curses.h>".}
+proc move(y, x: cint): cint {.importc, header: "<curses.h>".}
 proc mvaddnstr(y, x: cint, text: cstring, n: cint): cint {.importc, header: "<curses.h>".}
 proc attron(attrs: uint32): cint {.importc, header: "<curses.h>".}
 proc attroff(attrs: uint32): cint {.importc, header: "<curses.h>".}
@@ -177,6 +186,15 @@ proc clear_screen*() =
 proc present*() =
   discard refresh()
 
+proc show_cursor*() =
+  discard curs_set(1)
+
+proc hide_cursor*() =
+  discard curs_set(0)
+
+proc set_cursor_position*(row, col: int) =
+  discard move(row.cint, col.cint)
+
 proc crop_line(text: string, width: int): string =
   if width <= 0:
     return ""
@@ -204,6 +222,8 @@ proc classify_input*(key: int): ViewerInput =
     ViewerInput(key: VkTab)
   of NcKeyBackspace, 8, 127:
     ViewerInput(key: VkBackspace)
+  of NcKeyDelete:
+    ViewerInput(key: VkDelete)
   of 27:
     ViewerInput(key: VkEscape)
   of NcKeyUp:
@@ -218,6 +238,10 @@ proc classify_input*(key: int): ViewerInput =
     ViewerInput(key: VkLeft)
   of NcKeyRight:
     ViewerInput(key: VkRight)
+  of NcKeyHome:
+    ViewerInput(key: VkHome)
+  of NcKeyEnd:
+    ViewerInput(key: VkEnd)
   of NcKeyEnter, 10, 13:
     ViewerInput(key: VkEnter)
   of NcKeyResize:
@@ -230,6 +254,10 @@ proc classify_input*(key: int): ViewerInput =
     ViewerInput(key: VkF5)
   of NcKeyF0 + 10:
     ViewerInput(key: VkF10)
+  of 6:
+    ViewerInput(key: VkSearchForward)
+  of 18:
+    ViewerInput(key: VkSearchBackward)
   of 5:
     ViewerInput(key: VkF2)
   of 3:

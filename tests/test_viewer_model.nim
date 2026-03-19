@@ -177,6 +177,121 @@ suite "Terminal Gene Viewer Model":
 
   test "ctrl-e is treated as edit input":
     check classify_input(5).key == VkF2
+    check classify_input(6).key == VkSearchForward
+    check classify_input(18).key == VkSearchBackward
+
+  test "whole-tree search walks matches forward and backward":
+    let source = """
+      (root
+        [1 {^value "first"}]
+        {^value "second"}
+      )
+    """
+    let doc = open_viewer_document_from_source(source, "search_tree.gene")
+    let state = new_viewer_state(doc)
+
+    state.enter_search()
+    state.insert_search_text("first")
+    state.search_forward(10)
+    check state.selected_path() == "/1"
+
+    state.search_forward(10)
+    check state.selected_path() == "/1/2"
+
+    state.search_forward(10)
+    check state.selected_path() == "/1/2/value"
+
+    state.search_backward(10)
+    check state.selected_path() == "/1/2"
+
+  test "search query editing resets result position":
+    let source = """
+      (root
+        [1 {^value "first"}]
+        {^value "second"}
+      )
+    """
+    let doc = open_viewer_document_from_source(source, "search_reset.gene")
+    let state = new_viewer_state(doc)
+
+    state.enter_search()
+    state.insert_search_text("first")
+    state.search_forward(10)
+    state.search_forward(10)
+    check state.selected_path() == "/1/2"
+
+    state.move_search_cursor_home()
+    state.delete_search()
+    state.delete_search()
+    state.delete_search()
+    state.delete_search()
+    state.delete_search()
+    check state.search_query() == ""
+
+    state.insert_search_text("second")
+    check state.search_query() == "second"
+
+    state.search_forward(10)
+    check state.selected_path() == "/2"
+
+  test "search prompt editing supports insertion deletion and cursor movement":
+    let doc = open_viewer_document_from_source("[1 2]", "search_edit.gene")
+    let state = new_viewer_state(doc)
+
+    state.enter_search()
+    state.insert_search_text("abcd")
+    state.move_search_cursor(-2)
+    state.insert_search_text("X")
+    check state.search_query() == "abXcd"
+    check state.search_cursor() == 3
+
+    state.backspace_search()
+    check state.search_query() == "abcd"
+    check state.search_cursor() == 2
+
+    state.move_search_cursor_home()
+    state.delete_search()
+    check state.search_query() == "bcd"
+    check state.search_cursor() == 0
+
+    state.move_search_cursor_end()
+    check state.search_cursor() == 3
+
+  test "empty and failed searches keep search mode active":
+    let doc = open_viewer_document_from_source("[1 2 3]", "search_empty.gene")
+    let state = new_viewer_state(doc)
+
+    let initial_path = state.selected_path()
+    state.enter_search()
+    state.search_forward(10)
+    check state.is_searching()
+    check state.selected_path() == initial_path
+    check state.status.contains("type a search query")
+
+    state.insert_search_text("zzz")
+    state.search_forward(10)
+    check state.is_searching()
+    check state.selected_path() == initial_path
+    check state.status.contains("no match")
+
+  test "escape exits search mode before root navigation":
+    let source = """
+      (root
+        [1 {^value "first"}]
+        {^value "second"}
+      )
+    """
+    let doc = open_viewer_document_from_source(source, "search_escape.gene")
+    let state = new_viewer_state(doc)
+
+    state.enter_search()
+    state.insert_search_text("second")
+    state.search_forward(10)
+    check state.selected_path() == "/2"
+
+    check state.handle_search_input(ViewerInput(key: VkEscape), 10)
+    check not state.is_searching()
+    check state.selected_path() == "/2"
 
   test "tab uses inline edit for supported scalars":
     let doc = open_viewer_document_from_source("[1 true]", "inline_tab.gene")

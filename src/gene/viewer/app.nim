@@ -4,8 +4,9 @@ import ./model
 import ./curses_backend
 import ./editor
 
-const FooterLegend = "Esc Root  Tab Edit  F1 Help  F2 Edit  F5 Reload  F10 Quit"
+const FooterLegend = "Ctrl-F Search  Esc Root  Tab Edit  F1 Help  F2 Edit  F5 Reload  F10 Quit"
 const InlineEditLegend = "Enter Save  Esc Cancel  Backspace Delete"
+const SearchLegend = "Ctrl-F Next  Ctrl-Shift-F/Ctrl-R Prev  Esc Done"
 
 func entry_is_container(entry: ViewerEntry): bool =
   entry.node.kind in {VnkSequence, VnkArray, VnkMap, VnkGene}
@@ -29,6 +30,30 @@ proc draw_header(state: ViewerState, width: int) =
   draw_text(0, 0, width, "File: " & state.doc.file_path)
   draw_text(1, 0, width, "Path: " & state.selected_path())
 
+proc search_prompt_window(query: string, cursor, available: int): tuple[text: string, cursor_col: int] =
+  if available <= 0:
+    return ("", 0)
+  var start_idx = 0
+  if cursor > available - 1:
+    start_idx = cursor - (available - 1)
+  let stop_idx = min(query.len, start_idx + available)
+  result.text =
+    if start_idx < stop_idx:
+      query[start_idx ..< stop_idx]
+    else:
+      ""
+  result.cursor_col = max(0, min(cursor - start_idx, available))
+
+proc draw_search_prompt(state: ViewerState, width: int) =
+  if not state.is_searching():
+    return
+  const Prefix = "Search> "
+  let available = max(0, width - Prefix.len)
+  let prompt = search_prompt_window(state.search_query(), state.search_cursor(), available)
+  draw_text(2, 0, width, Prefix & prompt.text)
+  show_cursor()
+  set_cursor_position(2, min(width - 1, Prefix.len + prompt.cursor_col))
+
 proc draw_footer(state: ViewerState, height, width: int) =
   if state.is_inline_editing():
     draw_text(height - 2, 0, width, "Edit> " & state.inline_edit_buffer())
@@ -39,6 +64,8 @@ proc draw_footer(state: ViewerState, height, width: int) =
       state.status
     elif state.is_inline_editing():
       InlineEditLegend
+    elif state.is_searching():
+      SearchLegend
     else:
       FooterLegend
   draw_text(height - 1, 0, width, status_text)
@@ -52,6 +79,8 @@ proc draw_help(height, width: int) =
     "Esc: return to root container",
     "Tab: edit scalar inline or open external editor",
     "Type digits/text: jump by index or substring",
+    "Ctrl-F: enter search, find first, or find next",
+    "Ctrl-Shift-F or Ctrl-R: find previous search match",
     "F2 or Ctrl-E: open file in external editor",
     "F5: reload file from disk",
     "F10: quit viewer",
@@ -93,7 +122,9 @@ proc render(state: ViewerState) =
   let height = terminal_height()
   let width = terminal_width()
   clear_screen()
+  hide_cursor()
   draw_header(state, width)
+  draw_search_prompt(state, width)
   if state.show_help:
     draw_help(height, width)
   elif state.current_frame().node.entries.len == 0:
@@ -132,6 +163,7 @@ proc edit_current(state: ViewerState, session: var CursesSession) =
 proc prepare_edit_request(state: ViewerState) =
   state.clear_type_ahead()
   state.clear_quit_pending()
+  state.exit_search()
   state.status = ""
 
 proc tab_uses_inline_edit*(state: ViewerState): bool =
@@ -145,7 +177,7 @@ proc handle_tab(state: ViewerState, session: var CursesSession) =
     edit_current(state, session)
 
 proc handle_key*(state: ViewerState, key: ViewerKey, body_height: int): bool =
-  if key notin {VkNone, VkResize, VkQuit}:
+  if key notin {VkNone, VkResize, VkQuit, VkSearchForward, VkSearchBackward}:
     state.clear_type_ahead()
     state.clear_quit_pending()
     state.status = ""
@@ -181,7 +213,7 @@ proc handle_key*(state: ViewerState, key: ViewerKey, body_height: int): bool =
     if state.request_quit():
       return false
     state.status = "Press Ctrl-C again to exit"
-  of VkBackspace, VkResize, VkNone:
+  of VkBackspace, VkDelete, VkHome, VkEnd, VkResize, VkNone, VkSearchForward, VkSearchBackward:
     discard
   true
 
@@ -203,6 +235,41 @@ proc handle_inline_edit_input(state: ViewerState, input: ViewerInput, body_heigh
     discard
   true
 
+proc handle_search_input*(state: ViewerState, input: ViewerInput, body_height: int): bool =
+  if input.text.len > 0:
+    state.insert_search_text(input.text)
+    return true
+
+  case input.key
+  of VkBackspace:
+    state.backspace_search()
+  of VkDelete:
+    state.delete_search()
+  of VkLeft:
+    state.move_search_cursor(-1)
+  of VkRight:
+    state.move_search_cursor(1)
+  of VkHome:
+    state.move_search_cursor_home()
+  of VkEnd:
+    state.move_search_cursor_end()
+  of VkEscape:
+    state.exit_search()
+  of VkSearchForward:
+    state.search_forward(body_height)
+  of VkSearchBackward:
+    state.search_backward(body_height)
+  of VkF1, VkHelp:
+    state.show_help = not state.show_help
+    state.status = ""
+  of VkF5:
+    state.reload()
+  of VkQuit, VkF10:
+    return state.handle_key(input.key, body_height)
+  else:
+    discard
+  true
+
 proc run_viewer*(doc: ViewerDocument) =
   var session = open_session()
   defer:
@@ -216,6 +283,13 @@ proc run_viewer*(doc: ViewerDocument) =
     if state.is_inline_editing():
       if not handle_inline_edit_input(state, input, body_height):
         break
+    elif state.is_searching():
+      if not handle_search_input(state, input, body_height):
+        break
+    elif input.key == VkSearchForward:
+      state.enter_search()
+    elif input.key == VkSearchBackward:
+      state.enter_search()
     elif input.text.len > 0:
       state.apply_type_ahead(input.text, epochTime(), body_height)
     elif input.key == VkTab:
