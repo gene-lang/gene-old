@@ -44,11 +44,11 @@ An actor processes one message at a time. User code does not manage threads dire
 
 ### Spawning
 
-`spawn_actor` has one shape:
+`gene/actor/spawn` has one shape:
 
 ```gene
 # ^state is optional; default is nil
-(spawn_actor
+(gene/actor/spawn
   ^state initial_state
   handler)
 ```
@@ -69,7 +69,7 @@ Example:
 
 ```gene
 (var counter
-  (spawn_actor
+  (gene/actor/spawn
     ^state {^count 0}
     (fn [ctx msg state]
       (case msg/kind
@@ -129,6 +129,7 @@ This proposal uses one request/reply model only:
 - `send` is fire-and-forget
 - `send_expect_reply` creates a pending reply slot
 - the handler answers with `(ctx .reply value)`
+- if the handler raises before replying, the reply future fails with that exception and `await` propagates it back to the sender
 
 If a handler calls `(ctx .reply ...)` for a message that was not sent with `send_expect_reply`, the runtime should raise an error.
 
@@ -146,7 +147,7 @@ Example:
 
 ```gene
 (var logger
-  (spawn_actor
+  (gene/actor/spawn
     (fn [ctx msg state]
       (println msg)
       state)))
@@ -168,7 +169,7 @@ The exact implementation can reuse the same serialization strategy already used 
 When a handler raises an unhandled exception:
 - The actor **does not stop** — it continues processing the next message
 - The runtime logs the exception at error level
-- If the current message was sent via `send_expect_reply`, the pending reply future transitions to `failure` with the exception
+- If the current message was sent via `send_expect_reply`, the pending reply future transitions to `failure` with the same exception, and `await` on the sender side re-raises it
 - Fire-and-forget messages (`send`) have no sender notification
 
 When `ctx/.stop` is called or `actor/.stop` is called externally:
@@ -193,6 +194,38 @@ For the MVP, the runtime should stay conservative:
 - each scheduled turn processes one message
 
 This avoids the complexity of moving live actor state across worker VMs in the first version.
+
+## Configuration
+
+The actor system is a global runtime subsystem.
+
+For the MVP:
+- it is **disabled by default**
+- it is enabled programmatically by application code
+- worker threads are created only when the actor system is enabled
+
+If the actor system is disabled, calling `gene/actor/spawn` raises a runtime error.
+
+Proposed startup API:
+
+```gene
+(gene/actor/enable)
+(gene/actor/enable ^workers 4)
+```
+
+Rules:
+- `gene/actor/enable` is called once during application startup, before any `gene/actor/spawn`
+- `^workers` is optional; if omitted, it defaults to the number of CPU cores
+- calling `gene/actor/enable` after actors have already been spawned raises a runtime error
+- calling `gene/actor/enable` more than once raises a runtime error
+
+Out of scope for the MVP:
+- per-actor worker selection
+- global actor count limits
+- mailbox limit configuration
+- config-file based actor runtime setup
+
+The mailbox limit remains a fixed runtime default of `10,000` messages in the MVP.
 
 ## Deferred Features
 
@@ -244,8 +277,9 @@ The proposed actor model is callback-driven: one delivered message invokes one h
 
 ### Phase 1: Minimal Actor Runtime
 
+- Global actor runtime enable API with `(gene/actor/enable ^workers ...)`
 - Actor handle type
-- `spawn_actor`
+- `gene/actor/spawn`
 - `send`
 - `send_expect_reply`
 - `stop`
@@ -279,7 +313,7 @@ The proposed actor model is callback-driven: one delivered message invokes one h
 1. **Mailbox size**: bounded FIFO with a default limit of 10,000 messages.
 2. **Mailbox full behavior**: block the sender until capacity is available.
 3. **Send to dead actor**: raises a runtime error.
-4. **Unhandled exception in handler**: the actor continues processing the next message. The runtime logs the exception at error level. Pending reply futures transition to `failure` with the exception.
+4. **Unhandled exception in handler**: the actor continues processing the next message. The runtime logs the exception at error level. If the sender used `send_expect_reply`, the reply future fails with the same exception and `await` re-raises it on the sender side.
 5. **`ctx/.stop` behavior**: the actor stops after the current message. Remaining mailbox messages are dropped. Pending reply futures transition to `failure`.
 6. **Message schemas**: no runtime enforcement. Message structure is a user-level concern following normal Gene semantics.
-7. **`counter/.stop` vs `(counter .stop)`**: equivalent. The property-access form (`counter/.stop`) is idiomatic Gene.
+7. **Actor system configuration**: global runtime activation only. The actor system is disabled by default and must be enabled programmatically with `(gene/actor/enable ...)`. Worker count is configurable. The mailbox limit stays fixed at `10,000` in the MVP.
