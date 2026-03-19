@@ -44,12 +44,12 @@
   )
 
   (register_tool "memory_search"
-    "Search the GeneClaw long-term memory store by semantic similarity."
+    "Search the GeneClaw long-term memory store using keyword relevance or embeddings when available."
     {^type "object"
      ^properties {
        ^query {^type "string" ^description "Search query"}
        ^limit {^type "integer" ^description "Maximum number of results to return"}
-       ^threshold {^type "number" ^description "Minimum cosine similarity score"}
+       ^threshold {^type "number" ^description "Minimum result score"}
      }
      ^required ["query"]}
     (fn [args]

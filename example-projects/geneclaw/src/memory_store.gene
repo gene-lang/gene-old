@@ -8,18 +8,21 @@
 ($ns/EMBEDDING_MODEL = "text-embedding-3-small")
 ($ns/DEFAULT_SEARCH_LIMIT = 5)
 ($ns/DEFAULT_SEARCH_THRESHOLD = 0.3)
+(var TOKEN_SPLIT_PATTERN #/[^a-z0-9]+/)
+(var STOPWORDS {
+  ^the true ^a true ^an true ^is true ^are true ^was true ^were true
+  ^be true ^been true ^being true ^has true ^have true ^had true
+  ^do true ^does true ^did true ^will true ^would true ^can true
+  ^could true ^should true ^may true ^might true ^must true ^shall true
+  ^to true ^of true ^in true ^for true ^on true ^with true ^at true
+  ^by true ^from true ^and true ^or true ^not true ^but true ^if true
+  ^then true ^so true ^that true ^this true ^it true ^its true ^i true
+  ^my true ^me true ^we true ^our true ^you true ^your true ^he true
+  ^she true ^they true ^them true ^his true ^her true ^their true
+})
 (var MEMORY_BUSY false)
 
-(fn record_value [record key fallback]
-  (if record
-    (record .get key fallback)
-  else
-    fallback
-  )
-)
-
-(fn record_text [record key fallback = ""]
-  (var value (record_value record key fallback))
+(fn value_text [value fallback = ""]
   (if (value == nil)
     fallback
   elif (value is String)
@@ -33,6 +36,18 @@
   )
 )
 
+(fn record_value [record key fallback]
+  (if record
+    (record .get key fallback)
+  else
+    fallback
+  )
+)
+
+(fn record_text [record key fallback = ""]
+  (value_text (record_value record key fallback) fallback)
+)
+
 (fn record_bool [record key fallback = false]
   (var value (record_value record key fallback))
   (if (value == nil)
@@ -41,6 +56,20 @@
     value
   else
     fallback
+  )
+)
+
+(fn merge_warning_messages [left right]
+  (var left_text ((value_text left "") .trim))
+  (var right_text ((value_text right "") .trim))
+  (if left_text/.empty?
+    right_text
+  elif right_text/.empty?
+    left_text
+  elif (text_equals? left_text right_text)
+    left_text
+  else
+    #"#{left_text}; #{right_text}"
   )
 )
 
@@ -426,22 +455,164 @@
   reuse
 )
 
+(fn tokenize [text]
+  (var words ((((text || "") .to_s) .downcase) .split TOKEN_SPLIT_PATTERN))
+  (var tokens [])
+  (for raw_word in words
+    (var word (((raw_word || "") .to_s) .trim))
+    (if ((word/.length > 2) && (not (STOPWORDS .get word false)))
+      (tokens .append word)
+    )
+  )
+  tokens
+)
+
+(fn count_tokens [tokens]
+  (var counts {})
+  (for token in (ensure_array tokens)
+    (var key (((token || "") .to_s) .trim))
+    (if key/.not_empty?
+      (counts .set key ((counts .get key 0) + 1))
+    )
+  )
+  counts
+)
+
+(fn unique_tokens [tokens]
+  (var seen {})
+  (var result [])
+  (for token in (ensure_array tokens)
+    (var key (((token || "") .to_s) .trim))
+    (if (key/.not_empty? && (not (seen .get key false)))
+      (seen .set key true)
+      (result .append key)
+    )
+  )
+  result
+)
+
+(fn keyword_coverage [query_terms token_counts]
+  (var terms (ensure_array query_terms))
+  (if terms/.empty?
+    (return 0.0)
+  )
+  (var matched 0.0)
+  (var counts (ensure_map (if token_counts token_counts else {})))
+  (for term in terms
+    (var token_name (((term || "") .to_s) .trim))
+    (if (((counts .get token_name 0) .to_f) > 0.0)
+      (matched += 1.0)
+    )
+  )
+  (matched / terms/.size/.to_f)
+)
+
+(fn bm25_score [query_terms chunk doc_freq total_chunks avg_doc_len]
+  (var terms (ensure_array query_terms))
+  (if (terms/.empty? || (total_chunks <= 0))
+    (return 0.0)
+  )
+
+  (var normalized_chunk (ensure_map (if chunk chunk else {})))
+  (var token_counts (ensure_map (record_value normalized_chunk "token_counts" {})))
+  (var doc_len (record_value normalized_chunk "token_count" 0))
+  (var safe_avg_doc_len (if (avg_doc_len > 0.0) avg_doc_len else 1.0))
+  (var score 0.0)
+
+  (for term in terms
+    (var token_name (((term || "") .to_s) .trim))
+    (var tf ((token_counts .get token_name 0) .to_f))
+    (if (tf > 0.0)
+      (var df ((doc_freq .get token_name 0) .to_f))
+      (var numerator ((total_chunks/.to_f - df) + 0.5))
+      (var denominator (df + 0.5))
+      (var idf_input ((numerator / denominator) + 1.0))
+      (var idf (math/log idf_input))
+      (var doc_ratio (doc_len/.to_f / safe_avg_doc_len))
+      (var tf_denom (tf + (1.2 * (0.25 + (0.75 * doc_ratio)))))
+      (var tf_norm ((tf * 2.2) / tf_denom))
+      (score += (* idf tf_norm))
+    )
+  )
+
+  (if (score <= 0.0)
+    0.0
+  else
+    (score * (1.0 + (keyword_coverage terms token_counts)))
+  )
+)
+
+(fn keyword_index_ready? [index]
+  (if_not index
+    (return false)
+  )
+  (var current (ensure_map index))
+  (if ((record_value current "doc_freq" nil) == nil)
+    (return false)
+  )
+  (if ((record_value current "total_chunks" nil) == nil)
+    (return false)
+  )
+  (var chunks (ensure_array (current/chunks || [])))
+  (if chunks/.empty?
+    true
+  else
+    (var first_chunk (ensure_map (chunks .get 0)))
+    (not (((record_value first_chunk "tokens" nil) == nil) || ((record_value first_chunk "token_counts" nil) == nil)))
+  )
+)
+
+(fn index_has_embeddings? [index]
+  (if_not index
+    (return false)
+  )
+  (var current (ensure_map index))
+  (if_not (text_equals? (record_text current "model" "") EMBEDDING_MODEL)
+    (return false)
+  )
+  (for chunk in (ensure_array (current/chunks || []))
+    (var vector (ensure_array ((ensure_map chunk)/vector || [])))
+    (if vector/.not_empty?
+      (return true)
+    )
+  )
+  false
+)
+
 (fn build_index_for_text [text old_index = nil]
   (var source ((text || "") .to_s))
   (var chunks (chunk_markdown source))
   (var reuse_vectors (build_reuse_map old_index))
   (var indexed_chunks [])
+  (var doc_freq {})
+  (var total_token_count 0)
   (var dimensions 0)
+  (var embedding_warning "")
+  (var stop_embedding false)
+  (var want_embeddings (embedding_credentials_available?))
 
   (for chunk in chunks
     (var normalized (ensure_map chunk))
-    (var vector (reuse_vectors .get (normalized/hash || "") nil))
-    (if (vector == nil)
-      (var embedding (embed_text normalized/text))
-      (if_not embedding/ok
-        (return embedding)
+    (var tokens (tokenize (normalized/text || "")))
+    (var token_counts (count_tokens tokens))
+    (total_token_count += tokens/.size)
+    (for token in token_counts/.keys
+      (var token_name (((token || "") .to_s) .trim))
+      (if token_name/.not_empty?
+        (doc_freq .set token_name ((doc_freq .get token_name 0) + 1))
       )
-      (vector = embedding/vector)
+    )
+
+    (var vector (reuse_vectors .get (normalized/hash || "") nil))
+    (if (want_embeddings && (vector == nil) && (stop_embedding == false))
+      (var embedding (embed_text normalized/text))
+      (if embedding/ok
+        (vector = embedding/vector)
+      else
+        (stop_embedding = true)
+        (embedding_warning = (embedding/error || "Embedding index build failed"))
+        (log .warn #"memory index embedding refresh skipped: #{embedding_warning}")
+      )
     )
     (if ((dimensions == 0) && (vector is Array))
       (dimensions = vector/.size)
@@ -451,18 +622,25 @@
       ^heading (normalized/heading || "")
       ^text (normalized/text || "")
       ^hash (normalized/hash || "")
+      ^tokens tokens
+      ^token_counts token_counts
+      ^token_count tokens/.size
       ^vector vector
       ^offset (normalized/offset || 0)
       ^length (normalized/length || 0)
     })
   )
 
+  (var avg_doc_len (if indexed_chunks/.not_empty? (/ total_token_count/.to_f indexed_chunks/.size) else 0.0))
   {^ok true ^index {
     ^file_hash (text_sha256 source)
-    ^model EMBEDDING_MODEL
+    ^model (if (dimensions > 0) EMBEDDING_MODEL else "")
     ^dimensions dimensions
+    ^doc_freq doc_freq
+    ^total_chunks indexed_chunks/.size
+    ^avg_doc_len avg_doc_len
     ^chunks indexed_chunks
-  }}
+  } ^warning embedding_warning}
 )
 
 (fn commit_markdown_and_index [markdown_text index]
@@ -496,31 +674,35 @@
   (var markdown_text (read_memory_markdown_text))
   (var markdown_hash (text_sha256 markdown_text))
   (var index (read_index_record))
-  (if (index && (text_equals? (record_text index "file_hash" "") markdown_hash))
+  (var want_embeddings (embedding_credentials_available?))
+  (if (index &&
+       (text_equals? (record_text index "file_hash" "") markdown_hash) &&
+       (keyword_index_ready? index) &&
+       ((not want_embeddings) || (index_has_embeddings? index)))
     (return {^ok true ^index index ^rebuilt false})
-  )
-
-  (if_not (embedding_credentials_available?)
-    (return {^ok false ^error "memory_search unavailable: OpenAI credentials not configured"})
   )
 
   (with_memory_lock (fn []
     (var latest_text (read_memory_markdown_text))
     (var latest_hash (text_sha256 latest_text))
     (var latest_index (read_index_record))
-    (if (latest_index && (text_equals? (record_text latest_index "file_hash" "") latest_hash))
+    (var latest_want_embeddings (embedding_credentials_available?))
+    (if (latest_index &&
+         (text_equals? (record_text latest_index "file_hash" "") latest_hash) &&
+         (keyword_index_ready? latest_index) &&
+         ((not latest_want_embeddings) || (index_has_embeddings? latest_index)))
       (return {^ok true ^index latest_index ^rebuilt false})
     )
 
     (var built (build_index_for_text latest_text latest_index))
-    (if_not built/ok
-      (return built)
-    )
     (var commit (commit_markdown_and_index latest_text built/index))
     (if_not commit/ok
       (return commit)
     )
-    {^ok true ^index built/index ^rebuilt commit/reindexed ^warning commit/warning}
+    {^ok true
+     ^index built/index
+     ^rebuilt commit/reindexed
+     ^warning (merge_warning_messages (built/warning || "") (commit/warning || ""))}
   ))
 )
 
@@ -590,6 +772,65 @@
   )
 )
 
+(fn search_embedding [query_vector index limit threshold]
+  (var ensured_index (ensure_map (if index index else {})))
+  (var indexed_chunks (ensure_array (ensured_index .get "chunks" [])))
+  (var results [])
+  (for chunk in indexed_chunks
+    (var normalized (ensure_map chunk))
+    (var vector (ensure_array (normalized/vector || [])))
+    (if vector/.not_empty?
+      (var score (cosine_similarity query_vector vector))
+      (if (score >= threshold)
+        (results .append {
+          ^heading (normalized/heading || "")
+          ^text (normalized/text || "")
+          ^score score
+        })
+      )
+    )
+  )
+  (results = (sort_results_by_score results))
+  (limit_results results limit)
+)
+
+(fn search_keyword [query index limit threshold]
+  (var ensured_index (ensure_map (if index index else {})))
+  (var query_terms (unique_tokens (tokenize query)))
+  (if query_terms/.empty?
+    (return [])
+  )
+
+  (var indexed_chunks (ensure_array (ensured_index .get "chunks" [])))
+  (var doc_freq (ensure_map (ensured_index .get "doc_freq" {})))
+  (var total_chunks (ensured_index .get "total_chunks" indexed_chunks/.size))
+  (var avg_doc_len ((ensured_index .get "avg_doc_len" 0.0) .to_f))
+  (if (avg_doc_len <= 0.0)
+    (var total_token_count 0)
+    (for chunk in indexed_chunks
+      (var normalized (ensure_map chunk))
+      (total_token_count += (record_value normalized "token_count" 0))
+    )
+    (avg_doc_len = (if (total_chunks > 0) (/ total_token_count/.to_f total_chunks) else 0.0))
+  )
+
+  (var results [])
+  (for chunk in indexed_chunks
+    (var normalized (ensure_map chunk))
+    (var score (bm25_score query_terms normalized doc_freq total_chunks avg_doc_len))
+    (if (score >= threshold)
+      (results .append {
+        ^heading (normalized/heading || "")
+        ^text (normalized/text || "")
+        ^score score
+      })
+    )
+  )
+
+  (results = (sort_results_by_score results))
+  (limit_results results limit)
+)
+
 (fn $ns/memory_read [section = nil]
   (var markdown_text (read_memory_markdown_text))
   (var requested (((section || "") .to_s) .trim))
@@ -621,15 +862,8 @@
       (return updated)
     )
 
-    (var built_index nil)
-    (if (embedding_credentials_available?)
-      (var build_result (build_index_for_text updated/text (read_index_record)))
-      (if build_result/ok
-        (built_index = build_result/index)
-      else
-        (log .warn #"memory_write index build skipped: #{build_result/error}")
-      )
-    )
+    (var build_result (build_index_for_text updated/text (read_index_record)))
+    (var built_index build_result/index)
 
     (var committed (commit_markdown_and_index updated/text built_index))
     (if_not committed/ok
@@ -641,7 +875,7 @@
       ^mode resolved_mode
       ^file_hash committed/file_hash
       ^reindexed committed/reindexed
-      ^warning (committed/warning || "")
+      ^warning (merge_warning_messages (build_result/warning || "") (committed/warning || ""))
     }
   ))
 )
@@ -662,27 +896,25 @@
     (return ensured)
   )
 
-  (var embedded_query (embed_text query_text))
-  (if_not embedded_query/ok
-    (return embedded_query)
+  (var ensured_index (ensure_map (ensured .get "index" {})))
+  (var warning_text ((ensured/warning || "") .to_s))
+  (if warning_text/.not_empty?
+    (log .warn #"memory_search index warning: #{warning_text}")
   )
 
-  (var ensured_index (ensure_map (ensured .get "index" {})))
-  (var indexed_chunks (ensure_array (ensured_index .get "chunks" [])))
   (var results [])
-  (for chunk in indexed_chunks
-    (var normalized (ensure_map chunk))
-    (var score (cosine_similarity embedded_query/vector (ensure_array (normalized/vector || []))))
-    (if (score >= threshold)
-      (results .append {
-        ^heading (normalized/heading || "")
-        ^text (normalized/text || "")
-        ^score score
-      })
+  (if (embedding_credentials_available? && (index_has_embeddings? ensured_index))
+    (var embedded_query (embed_text query_text))
+    (if embedded_query/ok
+      (results = (search_embedding embedded_query/vector ensured_index limit threshold))
+    else
+      (log .warn #"memory_search embedding query failed, falling back to keyword search: #{embedded_query/error}")
     )
   )
 
-  (results = (sort_results_by_score results))
-  (results = (limit_results results limit))
+  (if results/.empty?
+    (results = (search_keyword query_text ensured_index limit threshold))
+  )
+
   {^ok true ^results results ^count results/.size ^rebuilt (record_bool ensured "rebuilt" false)}
 )

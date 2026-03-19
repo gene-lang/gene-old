@@ -1,12 +1,18 @@
 #!/usr/bin/env gene run
 
+(import MEMORY_ROOT from "config")
 (import memory_write memory_search from "memory_store")
+
+(system/shell #"rm -rf '#{MEMORY_ROOT}'")
 
 (var write_result (memory_write "OAuth Only" "- this store should not use oauth for embeddings" "append"))
 (assert (write_result/ok == true))
 
 (var search_result (memory_search "oauth" 3 0.3))
-(assert (search_result/ok == false))
-(assert (search_result/error == "memory_search unavailable: OpenAI credentials not configured"))
+(assert (search_result/ok == true))
+(assert (search_result/count == 1))
+(var top_result ((search_result/results || []) .get 0))
+(assert (top_result/heading == "OAuth Only"))
+(assert ((top_result/text || "") .include? "oauth"))
 
 (println "ok")

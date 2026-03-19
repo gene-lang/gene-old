@@ -4,6 +4,8 @@
 (import file_exists? from "home_store")
 (import memory_read memory_write memory_search sort_results_by_score cosine_similarity from "memory_store")
 
+(system/shell #"rm -rf '#{MEMORY_ROOT}'")
+
 (assert (MEMORY_ROOT == #"#{($env/GENECLAW_HOME || "")}/memory"))
 
 (var full_initial (memory_read))
@@ -12,8 +14,9 @@
 
 (var first_write (memory_write "User Preferences" "- Prefers concise responses" "append"))
 (assert (first_write/ok == true))
-(assert (first_write/reindexed == false))
+(assert (first_write/reindexed == true))
 (assert ((gene/io/read MEMORY_MARKDOWN_PATH) == "## User Preferences\n- Prefers concise responses"))
+(assert ((file_exists? #"#{MEMORY_INDEX_PATH}.gene") == true))
 
 (var section_read (memory_read "User Preferences"))
 (assert (section_read/ok == true))
@@ -21,10 +24,12 @@
 
 (var second_write (memory_write "User Preferences" "- Likes explicit file references" "append"))
 (assert (second_write/ok == true))
+(assert (second_write/reindexed == true))
 (assert ((gene/io/read MEMORY_MARKDOWN_PATH) == "## User Preferences\n- Prefers concise responses\n- Likes explicit file references"))
 
 (var replace_write (memory_write "User Preferences" "- Prefers concise responses\n- Wants direct answers" "replace"))
 (assert (replace_write/ok == true))
+(assert (replace_write/reindexed == true))
 (assert ((gene/io/read MEMORY_MARKDOWN_PATH) == "## User Preferences\n- Prefers concise responses\n- Wants direct answers"))
 
 (var create_existing (memory_write "User Preferences" "- duplicate" "create"))
@@ -36,11 +41,25 @@
 (assert (full_after/content == "## User Preferences\n- Prefers concise responses\n- Wants direct answers"))
 
 (assert ((file_exists? MEMORY_MARKDOWN_PATH) == true))
-(assert ((file_exists? #"#{MEMORY_INDEX_PATH}.gene") == false))
+(assert ((file_exists? #"#{MEMORY_INDEX_PATH}.gene") == true))
 
 (var search_result (memory_search "concise" 3 0.3))
-(assert (search_result/ok == false))
-(assert (search_result/error == "memory_search unavailable: OpenAI credentials not configured"))
+(assert (search_result/ok == true))
+(assert (search_result/rebuilt == false))
+(assert (search_result/count == 1))
+(var top_search_result ((search_result/results || []) .get 0))
+(assert (top_search_result/heading == "User Preferences"))
+(assert ((top_search_result/text || "") .include? "Prefers concise responses"))
+(assert ((top_search_result/score || 0.0) >= 0.3))
+
+(gene/io/write MEMORY_MARKDOWN_PATH "## Decisions\n- Durable memory matters")
+(var rebuilt_search (memory_search "durable" 3 0.3))
+(assert (rebuilt_search/ok == true))
+(assert (rebuilt_search/rebuilt == true))
+(assert (rebuilt_search/count == 1))
+(var rebuilt_top_result ((rebuilt_search/results || []) .get 0))
+(assert (rebuilt_top_result/heading == "Decisions"))
+(assert ((rebuilt_top_result/text || "") .include? "Durable memory matters"))
 
 (var sorted (sort_results_by_score [
   {^heading "low" ^score 0.2}
