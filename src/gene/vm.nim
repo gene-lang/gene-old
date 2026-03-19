@@ -5,6 +5,7 @@ import times, os
 import asyncdispatch  # For event loop polling in async support
 
 import ./types
+import ./logging_core
 from ./types/runtime_types import
   validate_type,
   validate_or_coerce_type,

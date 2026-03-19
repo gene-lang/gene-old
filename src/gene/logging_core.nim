@@ -1,41 +1,68 @@
 import os, times, strutils, strformat, tables, locks, terminal
 
 import ./types
-import ./parser
 
-type LogLevel* = enum
-  LlError
-  LlWarn
-  LlInfo
-  LlDebug
-  LlTrace
+type
+  LogLevel* = enum
+    LlError
+    LlWarn
+    LlInfo
+    LlDebug
+    LlTrace
 
-const DefaultRootLevel = LlInfo
+  ConsoleStream* = enum
+    CsStdout
+    CsStderr
+
+  LogSinkKind* = enum
+    LskConsole
+    LskFile
+
+  LogSink* = ref object
+    name*: string
+    case kind*: LogSinkKind
+    of LskConsole:
+      stream*: ConsoleStream
+      color*: bool
+    of LskFile:
+      path*: string
+      file*: File
+
+  LogRoute* = object
+    level*: LogLevel
+    targets*: seq[string]
+
+  LogRouteOverride* = object
+    has_level*: bool
+    level*: LogLevel
+    has_targets*: bool
+    targets*: seq[string]
+
+  LoggingState* = ref object
+    root_route*: LogRoute
+    logger_overrides*: Table[string, LogRouteOverride]
+    route_cache*: Table[string, LogRoute]
+    sinks*: Table[string, LogSink]
+
+  LoggingLoaderHook* = proc() {.gcsafe.}
+
+const
+  DefaultRootLevel* = LlInfo
+  DefaultConsoleSinkName* = "console"
+  UnknownLoggerName = "unknown"
 
 var logging_loaded* = false
-var root_level* = DefaultRootLevel
-var logger_levels* = initTable[string, LogLevel]()
 var last_log_line* = ""
 
-var config_lock: Lock  # Protects logging_loaded, root_level, logger_levels
-var log_lock: Lock     # Protects echo and last_log_line
+var active_logging_state: LoggingState = nil
+var default_root_level_override = DefaultRootLevel
+var logging_loader_hook: LoggingLoaderHook = nil
+var logging_load_in_progress = false
+
+var config_lock: Lock
+var log_lock: Lock
 initLock(config_lock)
 initLock(log_lock)
-
-proc reset_logging_config*() =
-  acquire(config_lock)
-  try:
-    root_level = DefaultRootLevel
-    logger_levels = initTable[string, LogLevel]()
-    logging_loaded = false
-  finally:
-    release(config_lock)
-  # last_log_line is protected by log_lock, not config_lock
-  acquire(log_lock)
-  try:
-    last_log_line = ""
-  finally:
-    release(log_lock)
 
 proc level_rank(level: LogLevel): int =
   case level
@@ -53,7 +80,7 @@ proc level_to_string*(level: LogLevel): string =
   of LlDebug: "DEBUG"
   of LlTrace: "TRACE"
 
-proc parse_log_level(name: string, out_level: var LogLevel): bool =
+proc parse_log_level*(name: string, out_level: var LogLevel): bool =
   case name.toUpperAscii()
   of "ERROR":
     out_level = LlError
@@ -73,122 +100,222 @@ proc parse_log_level(name: string, out_level: var LogLevel): bool =
   else:
     false
 
-proc log_level_from_value(val: Value, fallback: LogLevel): LogLevel =
-  case val.kind
-  of VkString, VkSymbol:
-    var parsed: LogLevel
-    if parse_log_level(val.str, parsed):
-      return parsed
-  else:
-    discard
-  fallback
-
-proc key_to_string(key: Key): string =
-  let symbol_value = cast[Value](key)
-  let symbol_index = cast[uint64](symbol_value) and PAYLOAD_MASK
-  get_symbol(symbol_index.int)
-
-proc load_logging_config*(config_path: string = "") =
-  let path =
-    if config_path.len > 0:
-      config_path
-    else:
-      joinPath(getCurrentDir(), "config", "logging.gene")
-
-  acquire(config_lock)
-  try:
-    root_level = DefaultRootLevel
-    logger_levels = initTable[string, LogLevel]()
-    logging_loaded = true
-  finally:
-    release(config_lock)
-
-  if not fileExists(path):
-    # Silent if using default path, warning if explicit path provided
-    if config_path.len > 0:
-      stderr.writeLine("Warning: Logging config file not found: " & path)
-    return
-
-  let content = readFile(path)
-  var nodes: seq[Value]
-  try:
-    nodes = read_all(content)
-  except CatchableError as e:
-    stderr.writeLine("Warning: Failed to parse logging config: " & path & " - " & e.msg)
-    return
-  if nodes.len == 0:
-    stderr.writeLine("Warning: Empty logging config: " & path)
-    return
-  let config_val = nodes[0]
-  if config_val.kind != VkMap:
-    stderr.writeLine("Warning: Logging config must be a map: " & path)
-    return
-
-  let config_map = map_data(config_val)
-  var new_root_level = DefaultRootLevel
-  var new_logger_levels = initTable[string, LogLevel]()
-
-  new_root_level = log_level_from_value(config_map.getOrDefault("level".to_key(), NIL), new_root_level)
-
-  let loggers_val = config_map.getOrDefault("loggers".to_key(), NIL)
-  if loggers_val.kind == VkMap:
-    for key, entry in map_data(loggers_val):
-      let logger_name = key_to_string(key)
-      var level = new_root_level
-      case entry.kind
-      of VkMap:
-        let entry_level = map_data(entry).getOrDefault("level".to_key(), NIL)
-        level = log_level_from_value(entry_level, new_root_level)
-      of VkString, VkSymbol:
-        level = log_level_from_value(entry, new_root_level)
-      else:
-        discard
-      new_logger_levels[logger_name] = level
-
-  # Update globals atomically under lock
-  acquire(config_lock)
-  try:
-    root_level = new_root_level
-    logger_levels = new_logger_levels
-  finally:
-    release(config_lock)
-
-proc ensure_logging_loaded() =
-  acquire(config_lock)
-  let loaded = logging_loaded
-  release(config_lock)
-  if not loaded:
-    load_logging_config()
-
-proc effective_level*(logger_name: string): LogLevel =
-  ensure_logging_loaded()
-  acquire(config_lock)
-  defer: release(config_lock)
-
+proc normalize_logger_name(logger_name: string): string =
   if logger_name.len == 0:
-    return root_level
+    return ""
+  logger_name.replace('\\', '/')
 
-  var name = logger_name
-  while true:
-    if logger_levels.hasKey(name):
-      return logger_levels[name]
-    let idx = name.rfind("/")
-    if idx < 0:
-      break
-    name = name[0..<idx]
+proc new_console_sink*(name = DefaultConsoleSinkName, stream = CsStderr, color = true): LogSink =
+  LogSink(name: name, kind: LskConsole, stream: stream, color: color)
 
-  root_level
+proc new_file_sink*(name, path: string): LogSink =
+  proc try_open(handle: var File, sink_path: string, mode: FileMode): bool =
+    try:
+      open(handle, sink_path, mode)
+    except CatchableError:
+      false
 
-proc log_enabled*(level: LogLevel, logger_name: string): bool =
-  let effective = effective_level(logger_name)
-  level_rank(level) <= level_rank(effective)
+  let expanded_path = absolutePath(path)
+  let dir = parentDir(expanded_path)
+  if dir.len > 0 and not dirExists(dir):
+    createDir(dir)
+
+  var handle: File
+  if not try_open(handle, expanded_path, fmAppend):
+    if try_open(handle, expanded_path, fmWrite):
+      close(handle)
+    if not try_open(handle, expanded_path, fmAppend):
+      raise newException(IOError, "Failed to open log file sink: " & expanded_path)
+
+  LogSink(name: name, kind: LskFile, path: expanded_path, file: handle)
+
+proc default_targets_for_sinks*(sinks: Table[string, LogSink]): seq[string] =
+  if sinks.hasKey(DefaultConsoleSinkName):
+    return @[DefaultConsoleSinkName]
+  result = @[]
+  for name in sinks.keys:
+    result.add(name)
+
+proc default_logging_state*(root_level = DefaultRootLevel): LoggingState =
+  result = LoggingState(
+    root_route: LogRoute(level: root_level, targets: @[DefaultConsoleSinkName]),
+    logger_overrides: initTable[string, LogRouteOverride](),
+    route_cache: initTable[string, LogRoute](),
+    sinks: initTable[string, LogSink]()
+  )
+  result.sinks[DefaultConsoleSinkName] = new_console_sink()
+
+proc close_logging_state(state: LoggingState) =
+  if state == nil:
+    return
+  for sink in state.sinks.values:
+    if sink == nil:
+      continue
+    case sink.kind
+    of LskConsole:
+      discard
+    of LskFile:
+      if sink.file != nil:
+        try:
+          close(sink.file)
+        except CatchableError:
+          discard
+
+proc install_logging_state*(state: LoggingState) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    var previous_state: LoggingState = nil
+    acquire(config_lock)
+    try:
+      previous_state = active_logging_state
+      active_logging_state = state
+      logging_loaded = state != nil
+      logging_load_in_progress = false
+    finally:
+      release(config_lock)
+    close_logging_state(previous_state)
+
+proc set_logging_loader_hook*(hook: LoggingLoaderHook) =
+  acquire(config_lock)
+  try:
+    logging_loader_hook = hook
+  finally:
+    release(config_lock)
+
+proc begin_logging_load*(): bool =
+  acquire(config_lock)
+  try:
+    if logging_load_in_progress:
+      return false
+    logging_load_in_progress = true
+    true
+  finally:
+    release(config_lock)
+
+proc finish_logging_load*() =
+  acquire(config_lock)
+  try:
+    logging_load_in_progress = false
+  finally:
+    release(config_lock)
+
+proc set_default_root_level*(level: LogLevel) =
+  acquire(config_lock)
+  try:
+    default_root_level_override = level
+  finally:
+    release(config_lock)
+
+proc current_default_root_level*(): LogLevel =
+  acquire(config_lock)
+  try:
+    default_root_level_override
+  finally:
+    release(config_lock)
+
+proc initialize_default_logging*(root_level: LogLevel = DefaultRootLevel) =
+  install_logging_state(default_logging_state(root_level))
+
+proc reset_logging_config*() =
+  var previous_state: LoggingState = nil
+  acquire(config_lock)
+  try:
+    previous_state = active_logging_state
+    active_logging_state = nil
+    logging_loaded = false
+    logging_load_in_progress = false
+    default_root_level_override = DefaultRootLevel
+  finally:
+    release(config_lock)
+  close_logging_state(previous_state)
+
+  acquire(log_lock)
+  try:
+    last_log_line = ""
+  finally:
+    release(log_lock)
+
+proc apply_override(route: var LogRoute, override: LogRouteOverride) =
+  if override.has_level:
+    route.level = override.level
+  if override.has_targets:
+    route.targets = override.targets
+
+proc resolve_route_locked(state: LoggingState, logger_name: string): LogRoute =
+  result = state.root_route
+  if logger_name.len == 0:
+    return
+
+  if state.route_cache.hasKey(logger_name):
+    return state.route_cache[logger_name]
+
+  for i, ch in logger_name:
+    if ch == '/':
+      let prefix = logger_name[0..<i]
+      if state.logger_overrides.hasKey(prefix):
+        result.apply_override(state.logger_overrides[prefix])
+
+  if state.logger_overrides.hasKey(logger_name):
+    result.apply_override(state.logger_overrides[logger_name])
+
+  state.route_cache[logger_name] = result
+
+proc ensure_logging_loaded*() =
+  var should_load = false
+  var hook: LoggingLoaderHook = nil
+  var root_level = DefaultRootLevel
+
+  acquire(config_lock)
+  try:
+    should_load = not logging_loaded and not logging_load_in_progress
+    hook = logging_loader_hook
+    root_level = default_root_level_override
+  finally:
+    release(config_lock)
+
+  if not should_load:
+    return
+
+  if hook != nil:
+    hook()
+
+  acquire(config_lock)
+  try:
+    if logging_loaded or logging_load_in_progress:
+      return
+    root_level = default_root_level_override
+  finally:
+    release(config_lock)
+
+  initialize_default_logging(root_level)
+
+proc route_for*(logger_name: string): LogRoute {.gcsafe.} =
+  {.cast(gcsafe).}:
+    ensure_logging_loaded()
+    let normalized = normalize_logger_name(logger_name)
+
+    acquire(config_lock)
+    try:
+      if active_logging_state == nil:
+        return LogRoute(level: default_root_level_override, targets: @[DefaultConsoleSinkName])
+      active_logging_state.resolve_route_locked(normalized)
+    finally:
+      release(config_lock)
+
+proc effective_level*(logger_name: string): LogLevel {.gcsafe.} =
+  route_for(logger_name).level
+
+proc effective_targets*(logger_name: string): seq[string] {.gcsafe.} =
+  route_for(logger_name).targets
+
+proc log_enabled*(level: LogLevel, logger_name: string): bool {.gcsafe.} =
+  level_rank(level) <= level_rank(effective_level(logger_name))
 
 proc format_log_line*(level: LogLevel, logger_name: string, message: string, timestamp: DateTime): string {.gcsafe.} =
   let thread_label = fmt"T{current_thread_id:02d}"
   let level_label = level_to_string(level)
   let time_format = init_time_format("yy-MM-dd ddd HH:mm:ss'.'fff")
   let time_label = timestamp.format(time_format)
-  let name = if logger_name.len > 0: logger_name else: "unknown"
+  let name = if logger_name.len > 0: logger_name else: UnknownLoggerName
   result = thread_label & " " & level_label & " " & time_label & " " & name
   if message.len > 0:
     result &= " " & message
@@ -196,14 +323,17 @@ proc format_log_line*(level: LogLevel, logger_name: string, message: string, tim
 proc format_log_line*(level: LogLevel, logger_name: string, message: string): string {.gcsafe.} =
   format_log_line(level, logger_name, message, now())
 
-proc log_color_enabled(): bool =
+proc log_color_enabled(sink: LogSink): bool =
+  if sink == nil or sink.kind != LskConsole or not sink.color:
+    return false
   if existsEnv("NO_COLOR"):
     return false
   let term_name = getEnv("TERM", "")
   if term_name.len == 0 or term_name.toLowerAscii() == "dumb":
     return false
   try:
-    isatty(stdout)
+    let handle = if sink.stream == CsStdout: stdout else: stderr
+    isatty(handle)
   except CatchableError:
     false
 
@@ -215,22 +345,56 @@ proc log_color_prefix(level: LogLevel): string =
   of LlDebug: "\e[36m"
   of LlTrace: "\e[90m"
 
-proc colorize_log_line(level: LogLevel, line: string): string =
-  if line.len == 0 or not log_color_enabled():
+proc colorize_log_line(sink: LogSink, level: LogLevel, line: string): string =
+  if line.len == 0 or not log_color_enabled(sink):
     return line
   log_color_prefix(level) & line & "\e[0m"
 
+proc write_to_sink(sink: LogSink, level: LogLevel, line: string) =
+  if sink == nil:
+    return
+  case sink.kind
+  of LskConsole:
+    let rendered = colorize_log_line(sink, level, line)
+    if sink.stream == CsStdout:
+      stdout.writeLine(rendered)
+      stdout.flushFile()
+    else:
+      stderr.writeLine(rendered)
+      stderr.flushFile()
+  of LskFile:
+    if sink.file == nil:
+      return
+    sink.file.writeLine(line)
+    sink.file.flushFile()
+
 proc log_message*(level: LogLevel, logger_name: string, message: string) {.gcsafe.} =
-  # log_enabled() internally acquires config_lock, so it's thread-safe
   {.cast(gcsafe).}:
-    if not log_enabled(level, logger_name):
+    ensure_logging_loaded()
+    let normalized_name = normalize_logger_name(logger_name)
+    let route = route_for(normalized_name)
+    if level_rank(level) > level_rank(route.level):
       return
 
-  let line = format_log_line(level, logger_name, message)
-  acquire(log_lock)
-  try:
-    {.cast(gcsafe).}:
+    var sinks: seq[LogSink] = @[]
+    acquire(config_lock)
+    try:
+      if active_logging_state == nil:
+        return
+      for target in route.targets:
+        if active_logging_state.sinks.hasKey(target):
+          sinks.add(active_logging_state.sinks[target])
+    finally:
+      release(config_lock)
+
+    if sinks.len == 0:
+      return
+
+    let line = format_log_line(level, normalized_name, message)
+    acquire(log_lock)
+    try:
       last_log_line = line
-    echo colorize_log_line(level, line)
-  finally:
-    release(log_lock)
+      for sink in sinks:
+        write_to_sink(sink, level, line)
+    finally:
+      release(log_lock)

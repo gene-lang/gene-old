@@ -1,4 +1,4 @@
-import tables, strutils, os, algorithm
+import tables, strutils, os
 
 import ../gene/types
 import ../gene/logging_core
@@ -33,7 +33,7 @@ proc logger_log(level: LogLevel, vm: ptr VirtualMachine, args: ptr UncheckedArra
   let name_key = "name".to_key()
   let name_val = instance_props(self_val).getOrDefault(name_key, NIL)
   let logger_name =
-    if name_val.kind == VkString or name_val.kind == VkSymbol:
+    if name_val.kind in {VkString, VkSymbol}:
       name_val.str
     else:
       "unknown"
@@ -59,50 +59,26 @@ proc logger_debug(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_c
 proc logger_trace(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
   logger_log(LlTrace, vm, args, arg_count, has_keyword_args)
 
-proc namespace_segments(ns: Namespace): seq[string] =
-  result = @[]
-  var current = ns
-  while current != nil:
-    if current.name.len > 0 and current.name != "<root>":
-      result.add(current.name)
-    current = current.parent
-  result.reverse()
-
 proc looks_like_module_path(name: string): bool =
-  # More conservative detection: only treat as module path if it has file extensions
-  # or is explicitly marked with __module_name__. Namespace segments can contain
-  # "/" (e.g., "path/to" is valid), so we can't rely solely on slash detection.
   if name.len == 0:
     return false
   let lower = name.toLowerAscii()
-  # Explicit module file extensions
   if lower.endsWith(".gene") or lower.endsWith(".gir"):
     return true
-  # Absolute paths are likely module paths
   if name.isAbsolute:
     return true
-  # Conservative: don't treat arbitrary slash-containing strings as modules
   false
 
-proc normalize_module_path(path: string): string =
+proc normalize_logger_path(path: string): string =
   if path.len == 0:
-    return "unknown"
-  var normalized = path
+    return ""
+  var normalized = path.replace('\\', '/')
   if normalized.isAbsolute:
     try:
       normalized = relativePath(normalized, getCurrentDir())
     except OSError:
       discard
-  normalized = normalized.replace('\\', '/')
   normalized
-
-proc split_module_segments(segments: seq[string]): tuple[module_path: string, ns_parts: seq[string]] =
-  for i, segment in segments:
-    if looks_like_module_path(segment):
-      let module_path = normalize_module_path(segment)
-      let ns_parts = if i + 1 < segments.len: segments[i + 1 .. ^1] else: @[]
-      return (module_path, ns_parts)
-  ("unknown", segments)
 
 proc join_logger_parts(parts: seq[string]): string =
   var trimmed: seq[string] = @[]
@@ -126,31 +102,6 @@ proc module_path_from_namespace(ns: Namespace): string =
     current = current.parent
   ""
 
-proc logger_name_from_namespace(ns: Namespace, fallback_module: string = ""): string =
-  let segments = namespace_segments(ns)
-  var (module_path, ns_parts) = split_module_segments(segments)
-  if (module_path == "unknown" or module_path.len == 0) and fallback_module.len > 0:
-    module_path = normalize_module_path(fallback_module)
-  join_logger_parts(@[module_path] & ns_parts)
-
-proc logger_name_from_class(cls: Class, parent_ns: Namespace = nil, fallback_module: string = ""): string =
-  if cls.is_nil:
-    return "unknown"
-  var module_path = ""
-  var ns_parts: seq[string] = @[]
-
-  # Use provided parent_ns if available, otherwise check cls.ns.parent
-  let effective_parent = if parent_ns != nil: parent_ns elif cls.ns != nil: cls.ns.parent else: nil
-
-  if effective_parent != nil:
-    let segments = namespace_segments(effective_parent)
-    var (module_candidate, parts) = split_module_segments(segments)
-    module_path = module_candidate
-    ns_parts = parts
-  if (module_path == "unknown" or module_path.len == 0) and fallback_module.len > 0:
-    module_path = normalize_module_path(fallback_module)
-  join_logger_parts(@[module_path] & ns_parts & @[cls.name])
-
 proc fallback_module_path(vm: ptr VirtualMachine): string =
   if vm == nil or vm.frame == nil:
     return ""
@@ -170,40 +121,58 @@ proc fallback_module_path(vm: ptr VirtualMachine): string =
         return value.str
   ""
 
-proc logger_constructor(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
-  if get_positional_count(arg_count, has_keyword_args) < 1:
-    raise new_exception(types.Exception, "Logger requires a class or namespace")
-  let target = get_positional_arg(args, 0, has_keyword_args)
-  if target.kind == VkInstance:
-    raise new_exception(types.Exception, "Logger requires a class or namespace, not an instance")
-  let fallback_module = fallback_module_path(vm)
-  var logger_name =
-    case target.kind
-    of VkClass:
-      let cls = target.ref.class
-      # Determine parent namespace without mutating the class
-      var parent_ns: Namespace = nil
-      if not cls.is_nil and cls.ns != nil and cls.ns.parent.is_nil and vm != nil and vm.frame != nil:
-        # Class has no parent, infer from calling context
-        if vm.frame.caller_frame != nil and vm.frame.caller_frame.ns != nil:
-          parent_ns = vm.frame.caller_frame.ns
-        elif vm.frame.ns != nil and vm.frame.ns.parent != nil:
-          parent_ns = vm.frame.ns.parent
-      logger_name_from_class(cls, parent_ns, fallback_module)
-    of VkNamespace:
-      logger_name_from_namespace(target.ref.ns, fallback_module)
-    else:
-      raise new_exception(types.Exception, "Logger requires a class or namespace")
-  if fallback_module.len > 0:
-    let normalized_fallback = normalize_module_path(fallback_module)
-    if not logger_name.startsWith(normalized_fallback & "/") and logger_name != normalized_fallback:
-      logger_name = join_logger_parts(@[normalized_fallback, logger_name])
-  var instance: Value
+proc derive_logger_name(vm: ptr VirtualMachine, target: Value): string {.gcsafe.} =
   {.cast(gcsafe).}:
-    instance = new_instance_value(logger_class_global)
-  let name_key = "name".to_key()
-  instance_props(instance)[name_key] = logger_name.to_value()
-  instance
+    case target.kind
+    of VkString, VkSymbol:
+      return target.str
+    else:
+      discard
+
+    if vm != nil and App != NIL and App.kind == VkApplication:
+      let target_class = get_class(target)
+      if target_class != nil:
+        let to_s_method = target_class.get_method("to_s")
+        if to_s_method != nil and to_s_method.callable.kind == VkNativeFn:
+          let rendered = call_native_fn(to_s_method.callable.ref.native_fn, vm, @[target])
+          case rendered.kind
+          of VkString, VkSymbol:
+            return rendered.str
+          else:
+            return rendered.str_no_quotes()
+
+    return target.str_no_quotes()
+
+proc should_prefix_logger_name(name: string): bool =
+  if name.len == 0:
+    return true
+  if name.contains("/"):
+    return false
+  if looks_like_module_path(name):
+    return false
+  true
+
+proc finalize_logger_name(name: string, fallback_module: string): string =
+  let normalized_name = normalize_logger_path(name)
+  let normalized_fallback = normalize_logger_path(fallback_module)
+  if normalized_name.len == 0:
+    if normalized_fallback.len > 0:
+      return normalized_fallback
+    return "unknown"
+  if normalized_fallback.len > 0 and should_prefix_logger_name(normalized_name):
+    return join_logger_parts(@[normalized_fallback, normalized_name])
+  normalized_name
+
+proc logger_constructor(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  {.cast(gcsafe).}:
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      raise new_exception(types.Exception, "Logger requires a value")
+    let target = get_positional_arg(args, 0, has_keyword_args)
+    let logger_name = finalize_logger_name(derive_logger_name(vm, target), fallback_module_path(vm))
+    let instance = new_instance_value(logger_class_global)
+    let name_key = "name".to_key()
+    instance_props(instance)[name_key] = logger_name.to_value()
+    return instance
 
 proc init_logging_module*() =
   VmCreatedCallbacks.add proc() =

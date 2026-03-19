@@ -30,6 +30,9 @@ when not defined(gene_wasm):
   when not defined(windows):
     import posix except Key
 
+when not defined(release):
+  const StdlibCoreLogger = "gene/stdlib/core"
+
 # Note: Extensions register their poll handlers via register_scheduler_callback
 # This avoids direct dependency from core to extensions like HTTP
 
@@ -2402,7 +2405,7 @@ proc call_scheduler_callbacks(vm: ptr VirtualMachine) {.gcsafe.} =
         callback(vm)
       except CatchableError as e:
         when not defined(release):
-          stderr.writeLine("Scheduler callback error: " & e.msg)
+          log_message(LlError, StdlibCoreLogger, "Scheduler callback error: " & e.msg)
 
 # Helper to check scheduler_callbacks length
 proc scheduler_callbacks_len(): int {.gcsafe.} =
@@ -4100,8 +4103,6 @@ proc init_stdlib*() =
   
   stdlib_aspects.init_aspect_support()
 
-  load_logging_config()
-
-  load_logging_config()
+  ensure_logging_loaded()
 
 {.pop.}

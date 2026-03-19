@@ -1,5 +1,7 @@
 # ========== Threading Support ==========
 
+const VmThreadLogger = "gene/vm/thread"
+
 proc current_trace(self: ptr VirtualMachine): SourceTrace =
   if self.cu.is_nil:
     return nil
@@ -105,7 +107,7 @@ when not defined(gene_wasm):
 
         # Message loop
         when DEBUG_VM:
-          echo "DEBUG thread_handler: Starting message loop for thread ", thread_id
+          log_message(LlDebug, VmThreadLogger, "Starting message loop for thread " & $thread_id)
         while true:
           # Receive message (blocking)
           let msg = THREAD_DATA[thread_id].channel.recv()
@@ -123,7 +125,7 @@ when not defined(gene_wasm):
             try:
               # Compile the Gene AST locally (thread-safe, no shared refs)
               when DEBUG_VM:
-                echo "DEBUG thread_handler: Compiling code: ", msg.code
+                log_message(LlDebug, VmThreadLogger, "Compiling code: " & $msg.code)
               let cu = compile_init(msg.code)
 
               # Set up VM with scope tracker
@@ -154,8 +156,8 @@ when not defined(gene_wasm):
                 THREAD_DATA[msg.from_thread_id].channel.send(reply)
             except CatchableError as e:
               when not defined(release):
-                echo "Thread ", thread_id, " handler error: ", e.msg
-                echo e.getStackTrace()
+                log_message(LlError, VmThreadLogger, "Thread " & $thread_id & " handler error: " & e.msg)
+                log_message(LlDebug, VmThreadLogger, e.getStackTrace())
               if msg.msg_type == MtRunExpectReply:
                 let error_payload = new_map_value()
                 map_data(error_payload)["__thread_error__".to_key()] = true.to_value()
@@ -221,9 +223,9 @@ when not defined(gene_wasm):
             break
 
       except CatchableError as e:
-        echo "Thread ", thread_id, " crashed: ", e.msg
+        log_message(LlError, VmThreadLogger, "Thread " & $thread_id & " crashed: " & e.msg)
         when not defined(release):
-          echo e.getStackTrace()
+          log_message(LlDebug, VmThreadLogger, e.getStackTrace())
       finally:
         if VM != nil:
           free_vm_ptr(VM)

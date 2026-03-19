@@ -649,3 +649,12 @@ proc init_gene_and_meta_classes*(object_class: Class) =
     ns_val.ref.ns.name.to_value()
 
   namespace_class.def_native_method("name", ns_name_method)
+  namespace_class.def_native_method("to_s", proc(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) < 1:
+      not_allowed("Namespace.to_s requires self")
+    let ns_val = get_positional_arg(args, 0, has_keyword_args)
+    if ns_val.kind != VkNamespace:
+      not_allowed("Namespace.to_s must be called on a namespace")
+    let name = ns_val.ref.ns.name
+    (if name.len > 0: name else: "<root>").to_value()
+  )

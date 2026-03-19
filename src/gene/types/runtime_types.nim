@@ -6,6 +6,9 @@
 import tables, strutils, math
 import ./type_defs
 import ./core
+import ../logging_core
+
+const RuntimeTypesLogger = "gene/runtime_types"
 
 type
   RtTypeKind = enum
@@ -563,7 +566,7 @@ proc coerce_value_to_type*(value: Value, expected_type_id: TypeId, type_descs: s
 
 proc emit_type_warning*(warning: string) =
   if warning.len > 0:
-    stderr.writeLine("Warning: " & warning)
+    log_message(LlWarn, RuntimeTypesLogger, warning)
 
 const
   TYPE_DIAG_MISMATCH_CODE* = "GENE_TYPE_MISMATCH"

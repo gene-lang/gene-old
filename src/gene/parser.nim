@@ -6,6 +6,9 @@
 import lexbase, streams, strutils, unicode, tables, sets, times, nre, base64
 
 import ./types
+import ./logging_core
+
+const ParserLogger = "gene/parser"
 
 type
   ParseError* = object of CatchableError
@@ -925,13 +928,15 @@ proc read_delimited_list(self: var Parser, delimiter: char, is_recursive: bool):
       let node = m(self)
       if node != PARSER_IGNORE:
         inc(count)
-        if self.options["debug"]: echo $node, "\n"
+        if self.options["debug"] and log_enabled(LlDebug, ParserLogger):
+          log_message(LlDebug, ParserLogger, $node)
         segments[^1].add(node)
     else:
       let node = self.read()
       if node != PARSER_IGNORE:
         inc(count)
-        if self.options["debug"]: echo $node, "\n"
+        if self.options["debug"] and log_enabled(LlDebug, ParserLogger):
+          log_message(LlDebug, ParserLogger, $node)
         segments[^1].add(node)
 
   # Return segments for semicolon chains, let caller handle chaining
@@ -1412,7 +1417,8 @@ proc parse_base64(self: var Parser): Value =
     self.bufpos += 1
     ch = self.buf[self.bufpos]
     if s.len == 4:
-      echo s
+      if log_enabled(LlTrace, ParserLogger):
+        log_message(LlTrace, ParserLogger, "base64 chunk " & s)
       bytes.add(decode(s))
       s = ""
 

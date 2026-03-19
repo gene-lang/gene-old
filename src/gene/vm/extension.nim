@@ -10,6 +10,8 @@ when not defined(gene_wasm):
   import dynlib
   import ./extension_abi
 
+  const VmExtensionLogger = "gene/vm/extension"
+
   when defined(posix):
     # Use dlopen with RTLD_GLOBAL on POSIX systems
     # This makes symbols from the main executable available to the loaded library
@@ -34,7 +36,7 @@ when not defined(gene_wasm):
       let handle = dlopen(path, RTLD_NOW or RTLD_GLOBAL)
       if handle == nil:
         let err = dlerror()
-        echo "DEBUG: dlopen error: ", if err != nil: $err else: "unknown"
+        log_message(LlDebug, VmExtensionLogger, "dlopen error: " & (if err != nil: $err else: "unknown"))
         return nil
       return cast[LibHandle](handle)
 

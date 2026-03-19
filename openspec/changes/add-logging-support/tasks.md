@@ -1,19 +1,21 @@
-# Implementation Tasks: Logging Support
+# Implementation Tasks: Unified Runtime Logging
 
-## 1. Core Logging Backend
-- [x] 1.1 Add logging module with log levels, logger registry, and console sink.
-- [x] 1.2 Implement hierarchical level resolution with longest-prefix matching.
-- [x] 1.3 Implement fixed-format formatter with thread id and logger name.
+## 1. Backend And Routing
+- [ ] 1.1 Refactor `logging_core` to store immutable routing config with root route, per-logger overrides, sink registry, and route cache.
+- [ ] 1.2 Implement sink backends for `console` and append-only `file`, with fan-out to multiple targets from one event.
+- [ ] 1.3 Ensure disabled logs return before message formatting and that formatted lines are reused across selected text sinks.
 
 ## 2. Configuration
-- [x] 2.1 Load `config/logging.gene` at startup when present.
-- [x] 2.2 Parse Gene config into root level + per-logger settings.
+- [ ] 2.1 Extend `config/logging.gene` parsing to support `sinks` and `targets`.
+- [ ] 2.2 Preserve backward compatibility with the existing root `level` + `loggers` config shape.
+- [ ] 2.3 Emit clear warnings for invalid sink definitions without breaking valid sinks.
 
-## 3. APIs
-- [x] 3.1 Expose Nim helper API for logging from VM/stdlib/extension code.
-- [x] 3.2 Expose `genex/logging` with a `Logger` class and level methods.
+## 3. APIs And Adoption
+- [ ] 3.1 Keep `genex/logging/Logger` on the shared backend, make it accept any value via `.to_s`, and add Nim-facing helpers for cheap runtime call sites.
+- [ ] 3.2 Replace CLI bootstrap in `src/commands/base.nim` so commands initialize the unified backend instead of Nim stdlib logging.
+- [ ] 3.3 Convert parser, compiler, VM, stdlib, and extension-host diagnostic call sites to stable named loggers on the shared backend.
 
 ## 4. Tests & Validation
-- [x] 4.1 Add Nim tests for config parsing and level inheritance.
-- [x] 4.2 Add Gene tests for log output formatting and level filtering.
-- [x] 4.3 Run `nimble test` and `./testsuite/run_tests.sh`.
+- [ ] 4.1 Add Nim tests for sink parsing, multi-target routing, append-only file behavior, legacy config compatibility, and logger `.to_s` construction.
+- [ ] 4.2 Add runtime tests that exercise parser/compiler/vm/stdlib log call sites through the shared backend.
+- [ ] 4.3 Run `nimble test` and focused runtime checks for representative logging paths.

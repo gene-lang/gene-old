@@ -4,6 +4,10 @@
 
 import ../types
 
+when not defined(release):
+  import ../logging_core
+  const CompilerOptimizeLogger = "gene/compiler/optimize"
+
 proc update_jumps*(self: CompilationUnit) =
   # echo "update_jumps called, instruction count: ", self.instructions.len
   for i in 0..<self.instructions.len:
@@ -21,7 +25,12 @@ proc update_jumps*(self: CompilationUnit) =
           # The label was stored as int16, so we need to extract just the low 16 bits
           when not defined(release):
             if inst.arg0.kind != VkInt:
-              echo "ERROR: inst ", i, " (", inst.kind, ") arg0 is not an int: ", inst.arg0, " kind: ", inst.arg0.kind
+              log_message(
+                LlError,
+                CompilerOptimizeLogger,
+                "inst " & $i & " (" & $inst.kind & ") arg0 is not an int: " &
+                  $inst.arg0 & " kind: " & $inst.arg0.kind
+              )
           let label = (inst.arg0.int64.int and 0xFFFF).int16.Label
           let new_pc = self.find_label(label)
           # if inst.kind == IkGeneStartDefault:
@@ -31,7 +40,12 @@ proc update_jumps*(self: CompilationUnit) =
         # IkTryStart has arg0 for catch PC and optional arg1 for finally PC
         when not defined(release):
           if inst.arg0.kind != VkInt:
-            echo "ERROR: inst ", i, " (", inst.kind, ") arg0 is not an int: ", inst.arg0, " kind: ", inst.arg0.kind
+            log_message(
+              LlError,
+              CompilerOptimizeLogger,
+              "inst " & $i & " (" & $inst.kind & ") arg0 is not an int: " &
+                $inst.arg0 & " kind: " & $inst.arg0.kind
+            )
         let catch_label = (inst.arg0.int64.int and 0xFFFF).int16.Label
         let catch_pc = self.find_label(catch_label)
         self.instructions[i].arg0 = catch_pc.to_value()

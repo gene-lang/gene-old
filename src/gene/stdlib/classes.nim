@@ -489,6 +489,13 @@ proc init_class_class*(object_class: Class) =
     if self_arg.kind != VkClass:
       not_allowed("Class.name must be called on a class")
     self_arg.ref.class.name.to_value()
+  class.def_native_method "to_s", proc(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    if get_positional_count(arg_count, has_keyword_args) == 0:
+      return "".to_value()
+    let self_arg = get_positional_arg(args, 0, has_keyword_args)
+    if self_arg.kind != VkClass:
+      not_allowed("Class.to_s must be called on a class")
+    self_arg.ref.class.name.to_value()
   class.def_native_method "method_intent", proc(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 2:
       not_allowed("Class.method_intent requires class and method name")

@@ -2,6 +2,8 @@ import unittest, os, strutils, tables
 
 import ../src/gene/vm
 import ../src/gene/logging_core
+import ../src/gene/logging_config
+import ../src/gene/parser
 import ../src/gene/types except Exception
 import ../src/genex/ai/openai_client
 import ./helpers
@@ -68,6 +70,66 @@ test "Gene Logger emits log line":
     check last_log_line.contains(" INFO ")
     check last_log_line.contains("test_code.gene/A")
     check last_log_line.endsWith(" hello")
+  finally:
+    current_thread_id = saved_thread_id
+
+test "Gene Logger accepts string names":
+  init_all_with_extensions()
+  reset_logging_config()
+  load_logging_config(joinPath(getTempDir(), "missing_logging.gene"))
+  let saved_thread_id = current_thread_id
+  try:
+    current_thread_id = 0
+    last_log_line = ""
+    discard VM.exec("""
+    (var logger (new genex/logging/Logger "gene/custom"))
+    (logger .info "hello")
+    """, "test_code.gene")
+    check last_log_line.contains(" gene/custom ")
+    check last_log_line.endsWith(" hello")
+  finally:
+    current_thread_id = saved_thread_id
+
+test "Logging file sink appends across reloads":
+  let dir = joinPath(getTempDir(), "gene_logging_file_sink")
+  createDir(dir)
+  let log_path = joinPath(dir, "gene.log")
+  let config_path = joinPath(dir, "logging.gene")
+  if fileExists(log_path):
+    removeFile(log_path)
+  writeFile(config_path, """
+{^sinks {
+   ^file {^type "file" ^path "$1"}
+ }
+ ^targets ["file"]}
+""" % [log_path])
+
+  reset_logging_config()
+  load_logging_config(config_path)
+  log_message(LlInfo, "tests/file", "first")
+
+  reset_logging_config()
+  load_logging_config(config_path)
+  log_message(LlInfo, "tests/file", "second")
+
+  let content = readFile(log_path)
+  check content.contains(" tests/file first")
+  check content.contains(" tests/file second")
+
+test "Parser debug output uses shared logger":
+  reset_logging_config()
+  set_default_root_level(LlDebug)
+  load_logging_config(joinPath(getTempDir(), "missing_logging.gene"))
+  let saved_thread_id = current_thread_id
+  try:
+    current_thread_id = 0
+    last_log_line = ""
+    var parser = new_parser()
+    parser.options["debug"] = TRUE
+    parser.open("(foo 1)", "parser_test.gene")
+    discard parser.read()
+    parser.close()
+    check last_log_line.contains(" gene/parser ")
   finally:
     current_thread_id = saved_thread_id
 

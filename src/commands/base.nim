@@ -1,4 +1,6 @@
-import tables, logging
+import tables
+
+import ../gene/logging_core
 
 type
   CommandResult* = object
@@ -13,11 +15,9 @@ type
   Command* = proc(cmd: string, args: seq[string]): CommandResult
 
 proc setup_logger*(debugging: bool) =
-  var console_logger = new_console_logger()
-  add_handler(console_logger)
-  console_logger.level_threshold = Level.lvlInfo
-  if debugging:
-    console_logger.level_threshold = Level.lvlDebug
+  reset_logging_config()
+  set_default_root_level(if debugging: LlDebug else: LlInfo)
+  ensure_logging_loaded()
 
 proc success*(output: string = ""): CommandResult =
   ## Creates a successful command result with optional output

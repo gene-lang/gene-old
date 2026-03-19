@@ -2,6 +2,7 @@ import tables, strutils, streams
 
 import ./types
 import ./parser
+import ./logging_core
 import ./type_checker
 import "./compiler/if"
 import "./compiler/case"
@@ -11,6 +12,11 @@ export comptime
 export optimize
 
 const DEBUG = false
+const CompilerLogger = "gene/compiler"
+
+proc log_compile_warning(message: string) =
+  if message.len > 0:
+    log_message(LlWarn, CompilerLogger, message)
 
 proc container_key(): Key {.inline.} =
   "container".to_key()
