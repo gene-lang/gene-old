@@ -7,6 +7,7 @@
 (import init_db from "db")
 (import init_tools from "tools")
 (import run_agent run_agent_envelope from "agent")
+(import maybe_run_cli from "cli")
 (import start_scheduler from "scheduler")
 (import is_paused check_pause_timeout get_pause_status start_pause_watchdog from "hotswap_state")
 (import build_post_message_payload from "slack")
@@ -288,22 +289,26 @@
 # ============================================================
 # Startup
 # ============================================================
-(log .info "=== GeneClaw Agent Platform ===")
-(init_db)
-(init_tools)
-(start_pause_watchdog)
-(start_scheduler)
+(if_not (maybe_run_cli $args)
+  (do
+    (log .info "=== GeneClaw Agent Platform ===")
+    (init_db)
+    (init_tools)
+    (start_pause_watchdog)
+    (start_scheduler)
 
-(if CONFIG/slack/app_token
-  # Socket Mode: connect to Slack via outbound WebSocket (no public URL needed)
-  (log .info #"Starting Slack Socket Mode on http://localhost:#{CONFIG/port}")
-  (log .info "Endpoints: GET /health, GET /api/config, POST /api/chat, POST /slack/events (disabled)")
-  (genex/http/start_server CONFIG/port handle_request)
-  (genex/ai/start_slack_socket_mode CONFIG/slack/app_token CONFIG/slack/bot_token handle_socket_slack_command)
-else
-  # Webhook mode: Slack sends events via HTTP POST
-  (log .info #"Starting server on http://localhost:#{CONFIG/port}")
-  (log .info "Endpoints: GET /health, GET /api/config, POST /api/chat, POST /slack/events")
-  (genex/http/start_server CONFIG/port handle_request)
+    (if CONFIG/slack/app_token
+      # Socket Mode: connect to Slack via outbound WebSocket (no public URL needed)
+      (log .info #"Starting Slack Socket Mode on http://localhost:#{CONFIG/port}")
+      (log .info "Endpoints: GET /health, GET /api/config, POST /api/chat, POST /slack/events (disabled)")
+      (genex/http/start_server CONFIG/port handle_request)
+      (genex/ai/start_slack_socket_mode CONFIG/slack/app_token CONFIG/slack/bot_token handle_socket_slack_command)
+    else
+      # Webhook mode: Slack sends events via HTTP POST
+      (log .info #"Starting server on http://localhost:#{CONFIG/port}")
+      (log .info "Endpoints: GET /health, GET /api/config, POST /api/chat, POST /slack/events")
+      (genex/http/start_server CONFIG/port handle_request)
+    )
+    (run_forever)
+  )
 )
-(run_forever)

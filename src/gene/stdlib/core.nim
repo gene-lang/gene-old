@@ -26,7 +26,9 @@ import ./gene_meta as stdlib_gene_meta
 import ./aspects as stdlib_aspects
 
 when not defined(gene_wasm):
-  import osproc, asyncfile
+  import osproc, asyncfile, terminal
+  when not defined(windows):
+    import posix except Key
 
 # Note: Extensions register their poll handlers via register_scheduler_callback
 # This avoids direct dependency from core to extensions like HTTP
@@ -231,6 +233,169 @@ proc object_to_method(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], a
     actual_type = runtime_type_name(value_arg)
   raise new_exception(types.Exception,
     "Type error: cannot convert " & actual_type & " to " & target_type)
+
+const
+  IO_HANDLE_NAME_KEY = "__io_handle_name__"
+
+when not defined(gene_wasm):
+  var io_handle_class_global: Class
+  var console_sigint_handler: Value = NIL
+  var console_sigint_hook_installed = false
+  var console_sigint_pending = false
+
+  proc console_set_sigint_pending() {.noconv.} =
+    console_sigint_pending = true
+
+  proc get_io_handle_name(self: Value, context: string): string =
+    if self.kind != VkInstance:
+      raise new_exception(types.Exception, context & " must be called on an IOHandle instance")
+
+    let handle_name_val = instance_props(self).getOrDefault(IO_HANDLE_NAME_KEY.to_key(), NIL)
+    if handle_name_val.kind != VkString:
+      raise new_exception(types.Exception, "Invalid IOHandle instance")
+
+    result = handle_name_val.str
+
+  proc write_console_handle(handle_name: string, content: string, newline: bool) =
+    case handle_name
+    of "stdout":
+      if newline:
+        stdout.writeLine(content)
+      else:
+        stdout.write(content)
+    of "stderr":
+      if newline:
+        stderr.writeLine(content)
+      else:
+        stderr.write(content)
+    else:
+      raise new_exception(types.Exception, handle_name & " is not writable")
+
+  proc flush_console_handle(handle_name: string) =
+    case handle_name
+    of "stdout":
+      stdout.flushFile()
+    of "stderr":
+      stderr.flushFile()
+    of "stdin":
+      discard
+    else:
+      raise new_exception(types.Exception, "Unknown IO handle: " & handle_name)
+
+  proc console_handle_isatty(handle_name: string): bool =
+    case handle_name
+    of "stdin":
+      stdin.isatty()
+    of "stdout":
+      stdout.isatty()
+    of "stderr":
+      stderr.isatty()
+    else:
+      false
+
+  proc dispatch_pending_console_signal(vm: ptr VirtualMachine) =
+    if not console_sigint_pending:
+      return
+
+    console_sigint_pending = false
+    let handler = ({.cast(gcsafe).}: console_sigint_handler)
+    if handler != NIL:
+      {.cast(gcsafe).}:
+        discard vm_exec_callable(vm, handler, @[])
+
+  when not defined(windows):
+    proc wait_for_console_input(timeout_ms: int): bool =
+      while true:
+        var read_fds: TFdSet = default(TFdSet)
+        FD_ZERO(read_fds)
+        FD_SET(0, read_fds)
+
+        var tv = Timeval(
+          tv_sec: posix.Time(timeout_ms div 1000),
+          tv_usec: Suseconds((timeout_ms mod 1000) * 1000)
+        )
+        let rc = posix.select(1, addr(read_fds), nil, nil, addr(tv))
+        if rc < 0:
+          let err = osLastError()
+          if err.cint == EINTR:
+            continue
+          raiseOSError(err)
+        return rc > 0 and FD_ISSET(0, read_fds) != 0'i32
+
+  proc read_console_line(vm: ptr VirtualMachine): Value =
+    when defined(windows):
+      dispatch_pending_console_signal(vm)
+      var input: string
+      if stdin.readLine(input):
+        return input.to_value()
+      return NIL
+    else:
+      while true:
+        dispatch_pending_console_signal(vm)
+        if wait_for_console_input(100):
+          var input: string
+          if stdin.readLine(input):
+            return input.to_value()
+          return NIL
+
+  proc init_io_handle_class(object_class: Class) =
+    if io_handle_class_global != nil:
+      return
+
+    io_handle_class_global = new_class("IOHandle")
+    io_handle_class_global.parent = object_class
+
+    io_handle_class_global.def_native_method("read", proc(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+      let handle_name = get_io_handle_name(get_self(args, has_keyword_args), "IOHandle.read")
+      if handle_name != "stdin":
+        raise new_exception(types.Exception, handle_name & " is not readable")
+      stdin.readAll().to_value()
+    )
+
+    io_handle_class_global.def_native_method("read_line", proc(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+      let handle_name = get_io_handle_name(get_self(args, has_keyword_args), "IOHandle.read_line")
+      if handle_name != "stdin":
+        raise new_exception(types.Exception, handle_name & " is not readable")
+      read_console_line(vm)
+    )
+
+    io_handle_class_global.def_native_method("write", proc(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+      if get_method_arg_count(arg_count, has_keyword_args) < 1:
+        raise new_exception(types.Exception, "IOHandle.write requires content")
+      let handle_name = get_io_handle_name(get_self(args, has_keyword_args), "IOHandle.write")
+      write_console_handle(handle_name, get_method_arg(args, 0, has_keyword_args).str_no_quotes(), false)
+      NIL
+    )
+
+    io_handle_class_global.def_native_method("write_line", proc(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+      if get_method_arg_count(arg_count, has_keyword_args) < 1:
+        raise new_exception(types.Exception, "IOHandle.write_line requires content")
+      let handle_name = get_io_handle_name(get_self(args, has_keyword_args), "IOHandle.write_line")
+      write_console_handle(handle_name, get_method_arg(args, 0, has_keyword_args).str_no_quotes(), true)
+      NIL
+    )
+
+    io_handle_class_global.def_native_method("flush", proc(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+      let handle_name = get_io_handle_name(get_self(args, has_keyword_args), "IOHandle.flush")
+      flush_console_handle(handle_name)
+      NIL
+    )
+
+    io_handle_class_global.def_native_method("isatty?", proc(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+      let handle_name = get_io_handle_name(get_self(args, has_keyword_args), "IOHandle.isatty?")
+      console_handle_isatty(handle_name).to_value()
+    )
+
+    let io_handle_class_ref = new_ref(VkClass)
+    io_handle_class_ref.class = io_handle_class_global
+    App.app.global_ns.ns["IOHandle".to_key()] = io_handle_class_ref.to_ref_value()
+
+  proc new_io_handle_value(handle_name: string): Value =
+    if io_handle_class_global == nil:
+      raise new_exception(types.Exception, "IOHandle class is not initialized")
+    let handle = new_instance_value(io_handle_class_global)
+    instance_props(handle)[IO_HANDLE_NAME_KEY.to_key()] = handle_name.to_value()
+    handle
 
 proc init_basic_classes(): Class =
   # Initialize Object, Nil, Bool, Int, Float classes
@@ -1972,7 +2137,11 @@ proc core_print*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_co
     s &= k.str_no_quotes()
     if i < get_positional_count(arg_count, has_keyword_args) - 1:
       s &= " "
-  stdout.write(s)
+  let target_stderr = has_keyword_args and get_keyword_arg(args, "stderr").to_bool()
+  if target_stderr:
+    stderr.write(s)
+  else:
+    stdout.write(s)
   return NIL
 
 # Print with newline
@@ -1983,8 +2152,56 @@ proc core_println*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_
     s &= k.str_no_quotes()
     if i < get_positional_count(arg_count, has_keyword_args) - 1:
       s &= " "
-  echo s
+  let target_stderr = has_keyword_args and get_keyword_arg(args, "stderr").to_bool()
+  if target_stderr:
+    stderr.writeLine(s)
+  else:
+    echo s
   return NIL
+
+proc core_flush(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
+  let positional = get_positional_count(arg_count, has_keyword_args)
+  if positional == 0:
+    flush_console_handle("stdout")
+    return NIL
+  if positional > 1:
+    raise new_exception(types.Exception, "flush accepts at most one IOHandle")
+
+  let handle_name = get_io_handle_name(get_positional_arg(args, 0, has_keyword_args), "flush")
+  flush_console_handle(handle_name)
+  NIL
+
+proc core_readline(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
+  if get_positional_count(arg_count, has_keyword_args) != 0:
+    raise new_exception(types.Exception, "readline does not accept arguments")
+  read_console_line(vm)
+
+proc core_on_signal(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
+  let positional = get_positional_count(arg_count, has_keyword_args)
+  if positional < 2:
+    raise new_exception(types.Exception, "on_signal requires a signal name and handler")
+
+  let signal_name_arg = get_positional_arg(args, 0, has_keyword_args)
+  if signal_name_arg.kind notin {VkString, VkSymbol}:
+    raise new_exception(types.Exception, "on_signal requires a string or symbol signal name")
+
+  let handler = get_positional_arg(args, 1, has_keyword_args)
+  case handler.kind
+  of VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock:
+    discard
+  else:
+    raise new_exception(types.Exception, "on_signal handler must be callable")
+
+  let signal_name = signal_name_arg.str.toUpperAscii()
+  if signal_name != "INT":
+    raise new_exception(types.Exception, "on_signal currently supports only INT")
+
+  if not console_sigint_hook_installed:
+    setControlCHook(console_set_sigint_pending)
+    console_sigint_hook_installed = true
+
+  console_sigint_handler = handler
+  NIL
 
 proc core_concat*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
   let positional = get_positional_count(arg_count, has_keyword_args)
@@ -3771,6 +3988,7 @@ proc init_gene_namespace*() =
   stdlib_collections.init_collection_classes(object_class)
 
   stdlib_dates.init_date_classes(object_class)
+  init_io_handle_class(object_class)
 
   stdlib_json.init_json_namespace()
   stdlib_gdat.init_gdat_namespace()
@@ -3831,7 +4049,13 @@ proc init_stdlib*() =
   var global_ns = App.app.global_ns.ns
   global_ns["print".to_key()] = core_print.to_value()
   global_ns["println".to_key()] = core_println.to_value()
+  global_ns["flush".to_key()] = core_flush.to_value()
+  global_ns["readline".to_key()] = core_readline.to_value()
+  global_ns["on_signal".to_key()] = core_on_signal.to_value()
   global_ns["++".to_key()] = core_concat.to_value()
+  global_ns["stdin".to_key()] = new_io_handle_value("stdin")
+  global_ns["stdout".to_key()] = new_io_handle_value("stdout")
+  global_ns["stderr".to_key()] = new_io_handle_value("stderr")
 
   # Collections
   global_ns["len".to_key()] = NativeFn(core_len).to_value()

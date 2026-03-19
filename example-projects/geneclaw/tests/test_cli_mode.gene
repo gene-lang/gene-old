@@ -1,0 +1,62 @@
+(import build_session_id from "agent")
+(import load_session from "workspace_state")
+
+(fn start_cli_process [session_name = ""]
+  (var gene_bin (($env .get "GENE_BIN" "") .to_s))
+  (assert gene_bin/.not_empty?)
+  (if (((session_name || "") .to_s) .not_empty?)
+    (system/Process/start gene_bin "run" "--no-gir-cache" "src/main.gene" "--cli" "--session" session_name)
+  else
+    (system/Process/start gene_bin "run" "--no-gir-cache" "src/main.gene" "--cli")
+  )
+)
+
+(fn wait_for_prompt [proc]
+  (var chunk (proc .read_until "User: " ^timeout 20))
+  (assert (chunk != nil))
+  chunk
+)
+
+(fn run_turn [proc text]
+  (proc .write_line text)
+  (var chunk (proc .read_until "User: " ^timeout 20))
+  (assert (chunk != nil))
+  chunk
+)
+
+(var smoke (start_cli_process "smoke"))
+(var smoke_prompt (wait_for_prompt smoke))
+(assert (smoke_prompt .contain "User: "))
+(var smoke_response (run_turn smoke "hello from cli"))
+(assert (smoke_response .contain "Assistant:"))
+(assert (smoke_response .contain "Running in mock mode"))
+(smoke .close_stdin)
+(assert ((smoke .wait ^timeout 10) == 0))
+
+(var session_name "cli-persist")
+(var persist_a (start_cli_process session_name))
+(wait_for_prompt persist_a)
+(run_turn persist_a "first memory item")
+(persist_a .close_stdin)
+(assert ((persist_a .wait ^timeout 10) == 0))
+(sleep 20)
+
+(var persist_b (start_cli_process session_name))
+(wait_for_prompt persist_b)
+(run_turn persist_b "second memory item")
+(persist_b .close_stdin)
+(assert ((persist_b .wait ^timeout 10) == 0))
+
+(var session_id (build_session_id "default" "cli" session_name))
+(var session (load_session session_id "default"))
+(assert (session/memory/.size >= 3))
+(assert (session/memory/0/content == "first memory item"))
+(assert (session/memory/1/role == "assistant"))
+(assert (session/memory/2/content == "second memory item"))
+
+(var sigint_proc (start_cli_process "cli-sigint"))
+(wait_for_prompt sigint_proc)
+(sigint_proc .signal "INT")
+(assert ((sigint_proc .wait ^timeout 10) == 0))
+
+(println "ok")

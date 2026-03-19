@@ -1,0 +1,87 @@
+# GeneClaw CLI mode
+
+(import init_db from "db")
+(import init_tools from "tools")
+(import run_agent_envelope from "agent")
+
+(fn parse_cli_options [args]
+  (var options {^cli false ^session "" ^show_tools false})
+  (var items (if (args is Array) args else []))
+  (var i 0)
+  (while (i < items/.size)
+    (var current ((((items .get i) || "") .to_s) .trim))
+    (if ((current == "--cli") || (current == "cli"))
+      (options/cli = true)
+    elif ((current == "--session") || (current == "session"))
+      (if ((i + 1) >= items/.size)
+        (stderr .write_line "Missing value for --session")
+        (exit 2)
+      )
+      (options/session = ((((items .get (i + 1)) || "") .to_s) .trim))
+      (i += 1)
+    elif ((current == "--show-tools") || (current == "show-tools"))
+      (options/show_tools = true)
+    )
+    (i += 1)
+  )
+  options
+)
+
+(fn $ns/start_cli [session_name = "" show_tools = false]
+  (var workspace_id "default")
+  (var thread_id (((session_name || "") .to_s) .trim))
+
+  (stderr .write_line "GeneClaw CLI mode. Type 'exit' to quit.")
+  (if show_tools
+    (stderr .write_line "--show-tools is not implemented yet; continuing without live tool output.")
+  )
+
+  (on_signal "INT" (fn []
+    (stderr .write_line "")
+    (stderr .write_line "Interrupted.")
+    (exit 0)
+  ))
+
+  (loop
+    (print "User: ")
+    (flush stdout)
+
+    (var input (readline))
+    (if (input == nil)
+      (break)
+    )
+
+    (var trimmed (input .trim))
+    (if ((trimmed == "exit") || (trimmed == "quit"))
+      (break)
+    )
+    (if trimmed/.empty?
+      (continue)
+    )
+
+    (var result (run_agent_envelope {
+      ^workspace_id workspace_id
+      ^user_id "cli-user"
+      ^channel_id "cli"
+      ^thread_id thread_id
+      ^text trimmed
+      ^attachments []
+    }))
+
+    (println #"Assistant: #{result/response}")
+  )
+
+  (stderr .write_line "Bye.")
+  true
+)
+
+(fn $ns/maybe_run_cli [args]
+  (var options (parse_cli_options args))
+  (if options/cli
+    (init_db)
+    (init_tools)
+    (start_cli options/session options/show_tools)
+  else
+    false
+  )
+)
