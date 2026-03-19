@@ -42,21 +42,52 @@ The system SHALL support routing a single log event to one or more configured ta
 - **AND** two log events are emitted in sequence
 - **THEN** both events are appended to the file in emission order
 
-### Requirement: Human-Readable Output Format
-The system SHALL emit human-readable logs in the fixed format:
-`T00 LEVEL yy-mm-dd Wed HH:mm:ss.xxx logger message`.
+### Requirement: Structured Log Event
+The system SHALL construct one shared log event for each emitted message after level filtering passes and SHALL route that event through the selected sinks.
 
-#### Scenario: Format includes level and logger name
+#### Scenario: Event exposes stable fields
+- **WHEN** a `DEBUG` log is emitted from logger `src/tools.gene` on thread `0`
+- **THEN** the routed event exposes fields equivalent to `thr`, `lvl`, `time`, `name`, and `value`
+- **AND** `lvl` is `DEBUG`
+- **AND** `name` is `src/tools.gene`
+
+#### Scenario: Disabled log does not allocate event
+- **WHEN** logger `gene/compiler` is configured at `INFO`
+- **AND** compiler code attempts to emit a `DEBUG` log
+- **THEN** the runtime can suppress the log before constructing the routed event object
+
+### Requirement: Sink-Specific Output Formats
+The system SHALL allow each sink to select its own built-in output format independently of the sink transport.
+
+#### Scenario: Verbose text format includes thread and logger
 - **WHEN** a log at level `INFO` is emitted with logger name `examples/app.gene`
-- **THEN** the output contains the `INFO` level and `examples/app.gene` logger name in the fixed format
+- **AND** the sink format is `verbose`
+- **THEN** the output uses the form `T00 LEVEL yy-mm-dd Wed HH:mm:ss.xxx logger message`
+- **AND** the output contains the `INFO` level and `examples/app.gene` logger name
 
-### Requirement: Backward-Compatible Configuration
-The system SHALL continue accepting the existing logging config shape that defines only a root `level` and `loggers`.
+#### Scenario: Concise text format omits thread label
+- **WHEN** a log at level `DEBUG` is emitted with logger name `src/tools.gene`
+- **AND** the sink format is `concise`
+- **THEN** the output uses the form `LEVEL MM-dd HH:mm:ss.xxx logger message`
+- **AND** the output does not include the `T00` thread prefix
 
-#### Scenario: Legacy config keeps implicit console output
-- **WHEN** a config file defines `level` and `loggers` but no sink declarations
-- **THEN** the backend creates an implicit console target
-- **AND** logger level resolution behaves as before
+#### Scenario: Record format writes structured Gene map
+- **WHEN** a log at level `DEBUG` is emitted with logger name `src/tools.gene`
+- **AND** the sink format is `record`
+- **THEN** the sink writes one append-only Gene map record per event
+- **AND** the record contains stable keys `thr`, `lvl`, `time`, `name`, and `value`
+
+### Requirement: Sink Format Configuration
+The system SHALL allow sink definitions in `config/logging.gene` to choose a built-in `format`.
+
+#### Scenario: Omitted format uses verbose output
+- **WHEN** a sink declaration omits `^format`
+- **THEN** that sink uses `verbose` formatting by default
+
+#### Scenario: Invalid format warns without breaking valid sinks
+- **WHEN** one sink declares an unsupported `^format`
+- **THEN** configuration loading warns about that sink
+- **AND** valid sink declarations remain active
 
 ### Requirement: Gene Logging API
 The system SHALL provide a `genex/logging/Logger` class with level methods whose constructor accepts any value and derives the logger name from `value/.to_s`.

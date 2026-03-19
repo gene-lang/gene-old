@@ -6,6 +6,11 @@
 
 {
   ^level "TRACE"
+  ^sinks {
+    ^console   {^type "console" ^stream "stdout"             ^format "verbose"}
+    ^main_file {^type "file"    ^path "./home/logs/main.log" ^format "record"}
+  }
+  ^targets ["console" "main_file"]
   ^loggers {
     ^geneclaw         {^level "TRACE"}
     ^geneclaw/db      {^level "TRACE"}

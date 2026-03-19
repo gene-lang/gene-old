@@ -10,6 +10,7 @@ import ../repl_session
 import ../vm/thread
 import ../vm/pubsub as vm_pubsub
 import ../logging_core
+import ../logging_config
 import ../wasm_host_abi
 import ./math as stdlib_math
 import ./io as stdlib_io
@@ -4103,6 +4104,7 @@ proc init_stdlib*() =
   
   stdlib_aspects.init_aspect_support()
 
+  register_logging_config_loader()
   ensure_logging_loaded()
 
 {.pop.}

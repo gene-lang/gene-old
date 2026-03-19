@@ -1,6 +1,7 @@
 import tables
 
 import ../gene/logging_core
+import ../gene/logging_config
 
 type
   CommandResult* = object
@@ -15,6 +16,7 @@ type
   Command* = proc(cmd: string, args: seq[string]): CommandResult
 
 proc setup_logger*(debugging: bool) =
+  register_logging_config_loader()
   reset_logging_config()
   set_default_root_level(if debugging: LlDebug else: LlInfo)
   ensure_logging_loaded()

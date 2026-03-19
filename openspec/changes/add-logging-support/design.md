@@ -12,15 +12,16 @@ Goals:
 - Configure logging via `config/logging.gene`.
 - Support hierarchical logger names with level inheritance and per-logger sink routing.
 - Support `console` and `file` sinks, including multi-target fan-out.
+- Support sink-specific rendering presets so different sinks can render the same event differently.
 - Keep disabled log statements cheap enough for parser/compiler/vm code paths.
-- Preserve a simple Gene API (`genex/logging/Logger`) and support the current simple config shape.
+- Preserve a simple Gene API (`genex/logging/Logger`).
 
 Non-Goals:
 - Log rotation, retention policies, or compression.
-- JSON/structured log serialization.
 - Dynamic reloading or runtime config mutation.
 - Replacing user-facing program output such as `println`, REPL prompts, or compiler command results.
 - Replacing high-volume instruction tracing formats used by explicit `--trace` / execution-trace modes in this change.
+- Arbitrary user-defined formatter plugins in this change.
 
 ## Decisions
 
@@ -60,8 +61,9 @@ Non-Goals:
   ```gene
   {^level "INFO"
    ^sinks {
-     ^console {^type "console" ^stream "stderr" ^color true}
-     ^main_file {^type "file" ^path "logs/gene.log"}
+     ^console {^type "console" ^stream "stderr" ^color true ^format "verbose"}
+     ^compact {^type "console" ^stream "stdout" ^format "concise"}
+     ^main_file {^type "file" ^path "logs/gene.log" ^format "record"}
    }
    ^targets ["console"]
    ^loggers {
@@ -71,10 +73,10 @@ Non-Goals:
      ^"examples/app.gene/Http/Todo" {^level "ERROR"}
    }}
   ```
-- Backward compatibility:
-  - Existing configs that only define `level` and `loggers` continue to work.
-  - When `sinks` are omitted, the backend creates an implicit console sink.
-  - When `targets` are omitted, the logger inherits the root targets.
+- Config defaults:
+  - When `format` is omitted, the sink defaults to `verbose`.
+  - When root `targets` are omitted, the backend uses the default target selection derived from configured sinks.
+  - When per-logger `targets` are omitted, the logger inherits the resolved root targets.
 
 ### Logging API
 - Nim API: `log_message(level, name, message)` with shared backend and config.
@@ -85,25 +87,47 @@ Non-Goals:
 - Extension API: host logging callback continues to call the same backend, so C/Nim extensions participate in the same routing and filtering rules.
 - All APIs share the same filtering, routing, and formatting pipeline.
 
+### Log Event Model
+- A log event is created only after level filtering passes.
+- The event carries structured fields that sinks render from:
+  - `thr`: numeric thread id
+  - `lvl`: canonical level string such as `DEBUG`
+  - `time`: event timestamp
+  - `name`: normalized logger name
+  - `value`: message text
+- The backend owns the event object and passes the same event instance through sink rendering for one emission.
+- Sinks treat the event as read-only and must not retain it after the synchronous write returns.
+- The implementation may reuse mutable event storage across emissions as long as field values are fully updated before each sink render.
+
 ### Sink Model
 - A log event is created once, routed once, and then fanned out to zero or more sinks.
 - Supported sink types:
   - `console`: stdout/stderr with optional ANSI color
   - `file`: append to an opened file handle
 - File sinks are append-only.
-- File and console sinks write the same rendered line format.
-- A single event is formatted once for text sinks and reused across all selected text targets.
+- Sink transport and sink renderer are orthogonal:
+  - transport decides where bytes go (`console`, `file`)
+  - renderer decides how the event is serialized (`verbose`, `concise`, `record`)
+- Built-in renderers:
+  - `verbose`: `T00 LEVEL yy-mm-dd Wed HH:mm:ss.xxx logger message`
+  - `concise`: `LEVEL MM-dd HH:mm:ss.xxx logger message`
+  - `record`: one Gene map record per line, for example `{^thr 0 ^lvl "DEBUG" ^time <datetime> ^name "src/tools.gene" ^value "Registered tool: self_upgrade"}`
+- Rendered output may be cached on the event object per renderer for the duration of one emission so multiple sinks using the same renderer do not reformat the same event.
 
 ### Output Format
-- Human-readable sinks use the fixed text format:
-  `T00 LEVEL yy-mm-dd Wed HH:mm:ss.xxx logger message`
+- The backend no longer assumes one global log line format.
+- Each sink selects its renderer via `^format`.
+- `verbose` remains the default so existing console and file sinks keep the current human-readable output unless reconfigured.
+- `record` is intended for machine-readable append-only logs and uses stable keys `thr`, `lvl`, `time`, `name`, and `value`.
 
 ### Performance Strategy
 - Disabled logs must return before formatting, color checks, or sink iteration.
+- Disabled logs must also return before event-object construction.
 - Configuration is parsed once into an immutable routing snapshot that runtime calls only read.
 - Logger route lookup should support caching so hot logger names such as `gene/vm` or `gene/parser` do not re-run prefix scans on every event.
 - Sink fan-out happens only after a log passes level filtering.
 - File sinks keep their file handles open instead of reopening per event.
+- Renderer-specific strings should be computed lazily from the shared event and reused across sinks of the same renderer during one emission.
 
 ### Runtime Adoption
 - Parser, compiler, VM, stdlibs, and `genex/*` modules should stop using Nim stdlib logging or ad hoc `echo` calls for diagnostics that are logically logs.

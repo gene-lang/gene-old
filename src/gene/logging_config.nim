@@ -63,6 +63,21 @@ proc parse_console_stream(name: string): ConsoleStream =
     warn_config("Unknown console stream '" & name & "', defaulting to stderr")
     CsStderr
 
+proc parse_sink_format(sink_name: string, sink_map: Table[Key, Value], found: var bool): LogFormat =
+  found = true
+  let format_name = value_to_string(sink_map.getOrDefault("format".to_key(), NIL))
+  if format_name.len == 0:
+    return LfVerbose
+
+  var parsed: LogFormat
+  if parse_log_format(format_name, parsed):
+    found = true
+    return parsed
+
+  warn_config("Unsupported sink format '" & format_name & "' for sink '" & sink_name & "'")
+  found = false
+  LfVerbose
+
 proc load_logging_config*(config_path: string = "") {.gcsafe.} =
   {.cast(gcsafe).}:
     let owns_load = begin_logging_load()
@@ -125,6 +140,10 @@ proc load_logging_config*(config_path: string = "") {.gcsafe.} =
             continue
 
           let sink_map = map_data(entry)
+          var format_found = true
+          let sink_format = parse_sink_format(sink_name, sink_map, format_found)
+          if not format_found:
+            continue
           let sink_type = value_to_string(sink_map.getOrDefault("type".to_key(), NIL)).toLowerAscii()
           case sink_type
           of "console":
@@ -133,7 +152,8 @@ proc load_logging_config*(config_path: string = "") {.gcsafe.} =
             parsed_sinks[sink_name] = new_console_sink(
               name = sink_name,
               stream = parse_console_stream(stream_name),
-              color = color_val.to_bool()
+              color = color_val.to_bool(),
+              render_format = sink_format
             )
           of "file":
             let file_path = value_to_string(sink_map.getOrDefault("path".to_key(), NIL))
@@ -141,7 +161,7 @@ proc load_logging_config*(config_path: string = "") {.gcsafe.} =
               warn_config("File sink '" & sink_name & "' requires ^path")
               continue
             try:
-              parsed_sinks[sink_name] = new_file_sink(sink_name, file_path)
+              parsed_sinks[sink_name] = new_file_sink(sink_name, file_path, render_format = sink_format)
             except CatchableError as e:
               warn_config(e.msg)
           else:
@@ -203,6 +223,7 @@ proc load_logging_config*(config_path: string = "") {.gcsafe.} =
     finally:
       finish_logging_load()
 
-set_logging_loader_hook(proc() {.gcsafe.} =
-  load_logging_config()
-)
+proc register_logging_config_loader*() =
+  set_logging_loader_hook(proc() {.gcsafe.} =
+    load_logging_config()
+  )

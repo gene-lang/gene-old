@@ -10,10 +10,11 @@ We need one logging system that is shared by parser, compiler, VM, stdlibs, and 
 
 - Expand the shared logging subsystem so the same backend is used by Gene code, Nim runtime code, and extension-host logging bridges.
 - Add sink routing for `console` and `file`, including fan-out to multiple targets from a single log event.
+- Introduce a shared log-event object that is created once per emitted event and rendered differently per sink.
 - Keep hierarchical logger names and longest-prefix configuration, while introducing stable runtime logger namespaces such as `gene/parser`, `gene/compiler`, `gene/vm`, `gene/stdlib/*`, and `genex/*`.
-- Extend `config/logging.gene` to configure sinks and per-logger target selection.
+- Extend `config/logging.gene` to configure sinks, sink render formats, and per-logger target selection.
 - Replace Nim stdlib logger bootstrap in CLI commands and convert runtime diagnostic call sites in parser/compiler/vm/stdlibs to the unified backend.
-- Keep fixed text formatting for human-readable sinks, with sink-specific transport details handled by the backend.
+- Support built-in sink renderers such as verbose text, concise text, and structured Gene-record output without forcing callers to care about sink formatting.
 
 ## Impact
 
