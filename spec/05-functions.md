@@ -51,7 +51,7 @@ Functions are first-class values — they can be stored in variables, passed as 
 | `^name`  | Keyword argument (required, no default)    |
 | `^name = val` | Keyword argument with default         |
 | `^^name` | Boolean flag, defaults to `true`           |
-| `^!name` | Negated boolean flag, defaults to `nil`  |
+| `^!name` | Negated boolean flag, defaults to `nil`    |
 
 Calling:
 ```gene

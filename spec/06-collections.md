@@ -128,11 +128,11 @@ Arrays, maps, and Gene values can be made immutable (details implementation-depe
 
 - **Persistent/immutable collections by default**: All collections are mutable. Immutable-by-default with explicit `mut` would improve safety and enable easier concurrency.
 - **Map key types**: Map keys are currently symbols only. String keys, integer keys, or arbitrary hashable keys would be more flexible.
-- **Set type**: No built-in set data structure. Must simulate with maps or arrays.
+- **Set ergonomics**: A `Set` class exists in the runtime, but collection-oriented constructors and set algebra methods are still sparse compared with arrays and maps.
 - **Tuple type**: No immutable fixed-size sequence. Arrays serve this role but are mutable and variable-length.
 - **Collection comprehensions**: No list/map comprehension syntax. Must use `.map`/`.filter` chains or `for` loops.
 - **Lazy sequences**: Arrays are fully materialized. Lazy sequences (beyond generators) would help with large data processing.
 - **Selector error messages**: Selectors return `void` on missing keys, which can make debugging access chains difficult. Consider optional "strict mode" that throws on missing.
 - **Destructuring in `for`**: Works for some cases but not all — e.g., nested destructuring in iteration is limited.
-- **Slice syntax**: No array slicing (`arr[1..3]`). Must use method calls or manual indexing.
+- **Slice syntax**: No dedicated array slice syntax like `arr[1..3]`; use methods such as `.slice` instead.
 - **Sorted maps / ordered iteration**: Map iteration order is not guaranteed. An ordered map variant would be useful.

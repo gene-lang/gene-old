@@ -51,20 +51,22 @@ Module paths are relative to the importing file:
 (import config from "../config")
 ```
 
-## 8.4 Built-in Namespaces
+## 8.4 Built-in Namespaces and Core Paths
 
-| Namespace      | Description                     |
-|----------------|---------------------------------|
-| `gene/`        | Core runtime (Object, Array, String classes) |
-| `gene/io`      | File I/O operations             |
-| `gene/json`    | JSON serialization              |
-| `gene/time`    | Time functions                  |
-| `gene/thread`  | Threading                       |
-| `gene/base64`  | Base64 encoding/decoding        |
-| `genex/`       | Extensions namespace            |
-| `genex/http`   | HTTP client/server              |
-| `genex/sqlite` | SQLite database client          |
-| `genex/postgres`| PostgreSQL database client     |
+| Path            | Description                                |
+|-----------------|--------------------------------------------|
+| `gene/`         | Core runtime root namespace                |
+| `gene/io`       | File I/O helpers                           |
+| `gene/json`     | JSON serialization                         |
+| `gene/Future`   | Future class for async values              |
+| `gene/Thread`   | Thread class for message-passing threads   |
+| `system/`       | Process and environment helpers            |
+| `genex/`        | Extensions namespace                       |
+| `genex/http`    | HTTP client/server                         |
+| `genex/sqlite`  | SQLite database client                     |
+| `genex/postgres`| PostgreSQL database client                 |
+
+The `gene/` root namespace also exposes helpers such as `gene/now`, `gene/today`, `gene/yesterday`, `gene/tomorrow`, `gene/base64_encode`, `gene/base64_decode`, and `gene/sleep_async`.
 
 ## 8.5 Global Variables
 
@@ -86,12 +88,11 @@ $env/HOME              # => "/Users/gcao"
 
 ## Potential Improvements
 
-- **Circular imports**: Behavior on circular module dependencies is undefined. Should either be detected with a clear error or handled gracefully.
 - **Selective re-export**: No way to re-export imported names from a module. Must manually wrap.
 - **Module-level initialization order**: When modules have side effects, import order matters but is not explicitly controlled.
-- **Package system**: No package manager or dependency resolution. Files must be referenced by path.
+- **Package registry/version workflows**: `gene deps` provides package/dependency tooling, but imports themselves are still source-oriented rather than version-pinned at the language level.
 - **Namespace merging**: Cannot extend or augment an existing namespace from another file. Each `ns` block is self-contained.
 - **Private module members**: No explicit private members — anything not `/`-prefixed is effectively private, but this is convention, not enforced at import time.
 - **Dynamic imports**: No `(import ... if ...)` or `(require ...)` for conditional/runtime loading.
 - **Import wildcards**: `(import * from "module")` imports all exports, which can pollute the local scope with unexpected names.
-- **Versioned modules**: No version specification in imports. All modules are resolved by file path only.
+- **Versioned modules**: No version specification in import syntax. Version resolution lives in package tooling rather than in the import form itself.

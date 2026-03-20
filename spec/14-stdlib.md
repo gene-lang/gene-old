@@ -36,6 +36,8 @@
 | `.char_at`       | Character at index                 | `("abc" .char_at 1)` => "b"           |
 | `.split`         | Split by string or regex           | `("a,b,c" .split ",")` => ["a","b","c"] |
 | `.contain`       | Contains (alias for include?)      | `("hi" .contain "h")` => true         |
+| `.trim`          | Trim surrounding whitespace        | `(" hi " .trim)` => "hi"              |
+| `.index`         | Find first index of string/regex   | `("abc" .index "b")` => 1             |
 | `.find`          | Find first match                   | `("abc" .find #/b/)` => "b"           |
 | `.find_all`      | Find all matches                   | `("a1b2" .find_all #/\d/)` => ["1","2"] |
 | `.replace`       | Replace first occurrence           | `("aab" .replace "a" "x")` => "xab"  |
@@ -53,9 +55,15 @@ Unicode-aware: `.capitalize`, `.reverse`, `.length` handle multi-byte characters
 | `.add`     | Append element (mutates)                 |
 | `.get`     | Index access                             |
 | `.pop`     | Remove and return last                   |
+| `.each`    | Visit each element                       |
+| `.find`    | Return first matching element            |
 | `.map`     | Transform each element                   |
 | `.filter`  | Keep elements matching predicate         |
 | `.reduce`  | Fold with accumulator                    |
+| `.zip`     | Pair items with another array            |
+| `.sort`    | Sort values                              |
+| `.reverse` | Reverse element order                    |
+| `.slice`   | Return a sub-array                       |
 
 ## 14.4 Map Methods
 
@@ -64,9 +72,13 @@ Unicode-aware: `.capitalize`, `.reverse`, `.length` handle multi-byte characters
 | `.size`    | Key count                                |
 | `.get`     | Lookup by key                            |
 | `.contains`| Check key existence                      |
+| `.keys`    | Return keys as an array                  |
+| `.values`  | Return values as an array                |
+| `.each`    | Visit entries                            |
 | `.map`     | Transform entries                        |
 | `.filter`  | Keep entries matching predicate          |
 | `.reduce`  | Fold with accumulator                    |
+| `.merge`   | Merge another map into this one          |
 
 ## 14.5 Math
 
@@ -74,6 +86,9 @@ Unicode-aware: `.capitalize`, `.reverse`, `.length` handle multi-byte characters
 (abs -5)        # => 5
 (sqrt 16)       # => 4.0
 (pow 2 10)      # => 1024
+(min 3 7)       # => 3
+(round 3.6)     # => 4
+(random)        # => implementation-defined float
 ```
 
 ## 14.6 Environment
@@ -87,7 +102,14 @@ $env/HOME              # Read env var
 ## 14.7 Time
 
 ```gene
-(gene/time/now)    # Current time (milliseconds)
+(var now (gene/now))
+now/.year
+now/.month
+now/.day
+
+(gene/today)
+(gene/yesterday)
+(gene/tomorrow)
 ```
 
 ## 14.8 JSON
@@ -160,18 +182,30 @@ Request properties: `method`, `path`, `url`, `params`, `headers`, `body`
 
 Results: arrays of arrays `[[col1 col2] [col1 col2] ...]`
 
+## 14.14 System & Processes
+
+```gene
+(cwd)
+
+(var p (system/Process/start "echo" "hello"))
+(var line (p .read_line ^timeout 5))
+(var code (p .wait ^timeout 5))
+```
+
+`system/Process` is currently supported on Unix/macOS. The `system/` namespace also exposes helpers such as `exec`, `shell`, `cwd`, `cd`, `args`, `os`, and `arch`.
+
 ---
 
 ## Potential Improvements
 
 - **String methods consistency**: Some use `?` suffix (`.start_with?`, `.include?`), others don't (`.contain`). Standardize naming.
-- **Missing string methods**: No `.trim`, `.pad_left`, `.pad_right`, `.repeat`, `.index_of`, `.substring` (or `.slice`).
-- **Missing array methods**: No `.sort`, `.reverse`, `.flatten`, `.zip`, `.each`, `.find`, `.any?`, `.all?`, `.index_of`, `.insert`, `.remove_at`, `.slice`.
-- **Missing map methods**: No `.keys`, `.values`, `.entries`, `.merge`, `.has_key?`, `.delete`.
+- **Missing string methods**: No `.pad_left`, `.pad_right`, `.repeat`, or richer substring/slice variants beyond `.index` and `.trim`.
+- **Missing array methods**: No `.flatten`, `.any?`, `.all?`, `.index_of`, `.insert`, or `.remove_at`.
+- **Missing map methods**: No dedicated `.entries`, `.has_key?` alias, or `.delete` helper.
 - **Functional utilities**: No `compose`, `partial`, `identity`, `constantly` built-ins.
-- **Math library**: Very limited. Missing: `min`, `max`, `floor`, `ceil`, `round`, `sin`, `cos`, `log`, `random`.
-- **Date/time**: Only `now` exists. No date parsing, formatting, arithmetic, or timezone support.
+- **Math library**: Core helpers include `min`, `max`, `floor`, `ceil`, `round`, and `random`, but trig/log functions are still absent.
+- **Date/time**: `gene/now`, `gene/today`, `gene/yesterday`, and `gene/tomorrow` exist with Date/DateTime accessors, but there is still no parsing, formatting, arithmetic API, or timezone control.
 - **File system**: No directory listing, file existence check, path manipulation, or file metadata.
-- **Process/system**: No way to spawn system processes or run shell commands.
+- **Process/system**: `system/Process`, `system/exec`, and `system/shell` exist, but process support is still Unix/macOS-focused and there is no richer filesystem/process management layer yet.
 - **Networking**: HTTP exists but no raw TCP/UDP sockets exposed to Gene code.
-- **Logging**: No structured logging facility. Only `print`/`println`.
+- **Logging**: Structured logging exists via `genex/logging`, but it is not part of the core prelude documented in this section.

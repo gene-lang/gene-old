@@ -2330,8 +2330,17 @@ proc check_ctor(self: TypeChecker, gene: ptr Gene, class_name: string, cls: Clas
   self.effect_stack.add(effects)
   defer:
     discard self.effect_stack.pop()
+  var last: TypeExpr = TypeExpr(kind: TkNamed, name: "Nil")
   for i in body_start..<gene.children.len:
-    discard self.check_expr(gene.children[i])
+    last = self.check_expr(gene.children[i])
+  if return_type != ANY_TYPE and return_type != nil:
+    if self.strict:
+      self.unify(return_type, last, "ctor " & class_name)
+    else:
+      try:
+        self.unify(return_type, last, "ctor " & class_name)
+      except CatchableError as e:
+        self.warn("Warning: " & e.msg)
   self.current_return = saved_return
   self.current_class = saved_class
   self.pop_scope()
@@ -2394,8 +2403,17 @@ proc check_method(self: TypeChecker, gene: ptr Gene, class_name: string, cls: Cl
   self.effect_stack.add(effects)
   defer:
     discard self.effect_stack.pop()
+  var last: TypeExpr = TypeExpr(kind: TkNamed, name: "Nil")
   for i in body_start..<gene.children.len:
-    discard self.check_expr(gene.children[i])
+    last = self.check_expr(gene.children[i])
+  if return_type != ANY_TYPE and return_type != nil:
+    if self.strict:
+      self.unify(return_type, last, "method " & class_name & "." & method_name)
+    else:
+      try:
+        self.unify(return_type, last, "method " & class_name & "." & method_name)
+      except CatchableError as e:
+        self.warn("Warning: " & e.msg)
   self.current_return = saved_return
   self.current_class = saved_class
   self.pop_scope()
@@ -2503,6 +2521,22 @@ proc check_symbol(self: TypeChecker, sym: Value): TypeExpr =
   if sym.kind != VkSymbol:
     return ANY_TYPE
   let name = sym.str
+  if name.len > 1 and name[0] == '/':
+    let field_name = name[1..^1]
+    var self_type = self.lookup("self")
+    if self_type == nil:
+      self_type = self.current_init_self()
+    if self_type == nil and self.current_class.len > 0:
+      self_type = TypeExpr(kind: TkNamed, name: self.current_class)
+    let rt = self.resolve(self_type)
+    if rt != nil and rt.kind == TkNamed and self.classes.hasKey(rt.name):
+      let cls = self.classes[rt.name]
+      let ft = self.find_field(cls, field_name)
+      if ft != nil:
+        return ft
+      if cls.fields.len > 0:
+        raise new_exception(types.Exception, "Unknown field: " & field_name & " on class " & rt.name)
+    return ANY_TYPE
   if name == "self" and self.current_class.len > 0:
     return TypeExpr(kind: TkNamed, name: self.current_class)
   let t = self.lookup(name)
@@ -2522,7 +2556,11 @@ proc check_complex_symbol(self: TypeChecker, sym: Value): TypeExpr =
   var base_name = parts[0]
   if base_name == "":
     base_name = "self"
-  let base_type = self.lookup(base_name)
+  var base_type = self.lookup(base_name)
+  if base_type == nil and base_name == "self":
+    base_type = self.current_init_self()
+  if base_type == nil and base_name == "self" and self.current_class.len > 0:
+    base_type = TypeExpr(kind: TkNamed, name: self.current_class)
   if parts.len == 2 and parts[1].startsWith("."):
     let method_name = parts[1][1..^1]
     return self.check_method_call(base_type, method_name, @[], initTable[Key, Value](), "method " & method_name)

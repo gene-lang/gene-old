@@ -21,10 +21,10 @@ Gene uses a NaN-boxed 64-bit representation. Every value is one of the following
 | `Array`     | Ordered, mutable sequence             |
 | `Map`       | Key-value pairs (symbol keys)         |
 | `Gene`      | S-expression node (type + props + children) |
-| `Instance`  | Class instance with properties        |
 | `Function`  | First-class function/closure          |
-| `Class`     | Class definition                      |
 | `Namespace` | Namespace scope                       |
+| `Class`     | Class definition                      |
+| `Instance`  | Class instance with properties        |
 | `Future`    | Async computation result              |
 | `Generator` | Lazy value producer                   |
 | `Thread`    | Concurrent execution                  |
@@ -44,13 +44,15 @@ Annotations are optional (gradual typing). When present, they are checked at com
 (fn add [a: Int b: Int] -> Int
   (a + b))
 
-# Class fields
+# Class field metadata consumed by the type checker
 (class Point
   ^fields {^x Int ^y Int}
   (ctor [x: Int y: Int]
     (/x = x)
     (/y = y)))
 ```
+
+`^fields` currently feeds compile-time type information for field access and assignment. It does not, by itself, imply runtime storage layout or runtime type enforcement.
 
 ## 2.3 Type Expressions
 

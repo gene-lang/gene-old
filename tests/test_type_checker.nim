@@ -93,6 +93,42 @@ suite "Static type checking":
     ((new Child 1) .call_super)
   """
 
+  test_strict_type_error """
+    (class Point
+      ^fields {^x Int}
+      (ctor [x: Int]
+        (/x = x)
+      )
+    )
+    (var p (new Point 1))
+    (p/x = "bad")
+  """
+
+  test_strict_type_error """
+    (class Point
+      ^fields {^x Int ^y Int}
+      (ctor [x: Int y: String]
+        (/x = x)
+        (/y = y)
+      )
+    )
+    (var p (new Point 1 "test"))
+    p/y
+  """
+
+  test_strict_type_error """
+    (class Point
+      ^fields {^x Int}
+      (ctor [x: Int]
+        (/x = x)
+      )
+      (method bad [] -> String
+        /x
+      )
+    )
+    ((new Point 1) .bad)
+  """
+
   test_vm """
     (var x: (Int | String) 1)
     (if (x .is Int)

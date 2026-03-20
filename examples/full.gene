@@ -12,7 +12,7 @@
 (var s "hello")
 (var b true)
 (var nothing nil)
-(var ch ?A)
+(var ch 'A')
 
 # Assignment + augmented assignment
 (i = 20)

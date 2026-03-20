@@ -36,18 +36,23 @@ Real async operations that integrate with the event loop:
 (var resp (await (http_get "https://example.com")))
 
 # Sleep
-(await (sleep_async 1000))   # Milliseconds
+(await (gene/sleep_async 1000))   # Milliseconds
 ```
 
 ## 10.3 Future State & Callbacks
 
 ```gene
 # Check state
-future/.state     # "pending", "completed", "failed"
+future/.state     # => pending | success | failure | cancelled
 
 # Callbacks
 (f .on_success (fn [value] (println "Got:" value)))
 (f .on_failure (fn [error] (println "Error:" error)))
+
+# Manual future + timeout-aware await
+(var f (new gene/Future))
+(f .complete 42)
+(await ^timeout 0.5 f)
 ```
 
 ## 10.4 Error Handling in Async
@@ -67,20 +72,19 @@ catch *
 Gene supports OS threads with message passing:
 
 ```gene
-# Create and run
-(var t (gene/thread/create (fn []
-  (println "in thread"))))
-(gene/thread/start t)
-(gene/thread/join t)
-
-# With return value
+# Spawn a thread that returns a value
 (var result (await (spawn_return (+ 100 23))))
 # result => 123
 ```
 
 ### Message Passing
 ```gene
-(gene/thread/send thread message)
+(var worker (spawn (do
+  (thread .on_message (fn [msg]
+    (msg .reply (+ (msg .payload) 1))))
+  (keep_alive))))
+
+(await (send_expect_reply worker 41))   # => 42
 ```
 
 Only "literal" values can be sent between threads:
@@ -95,13 +99,11 @@ Only "literal" values can be sent between threads:
 
 ## Potential Improvements
 
-- **Structured concurrency**: No built-in way to manage groups of futures (wait-all, wait-any, cancellation). Must manually track and await each.
-- **Cancellation**: Futures cannot be cancelled once started. A cooperative cancellation mechanism would prevent wasted work.
-- **Timeouts**: No built-in `(await-with-timeout future ms)`. Must implement manually with racing futures.
+- **Structured concurrency**: No built-in way to manage groups of futures (wait-all / wait-any). Must manually track and await each.
 - **`async for`**: No async iteration protocol. Cannot `for` over a stream of async values.
 - **Thread safety of shared state**: No mutex, lock, or atomic primitives in the language. Shared mutable state across threads is unsafe.
 - **Channel type**: Message passing uses thread-specific send. A first-class Channel type (like Go channels) would enable more flexible concurrent patterns.
 - **Thread pool**: The 64-thread limit is fixed. A work-stealing thread pool would better utilize resources.
-- **Promise/resolve pattern**: No way to create a future and resolve it externally (manual promise). Only `async` blocks produce futures.
+- **Manual future failure API**: `Future` supports manual completion and cancellation, but there is no dedicated `.fail` / reject-style helper for constructing failed futures directly.
 - **Async in constructors/methods**: Async works in functions but the interaction with class constructors and method dispatch may have edge cases.
 - **Event loop visibility**: The internal polling interval (every 100 instructions) is not configurable and not visible to users.

@@ -69,18 +69,24 @@ GIR is invalidated when:
 
 ## 15.4 Gene Serialization Format
 
-Gene has its own text-based serialization using `gene ser` / `gene deser` commands:
+Gene exposes a text-based runtime serialization API under `gene/serdes`:
+
+```gene
+(var text (gene/serdes/serialize {^name "Alice" ^age 30}))
+(gene/serdes/deserialize text)
+```
+
+The CLI currently ships `gene deser` / `gene deserialize` for inspecting serialized text:
 
 ```bash
-gene ser '(+ 1 2)'     # Serialize Gene value to text
-gene deser '<text>'     # Deserialize text back to Gene value
+gene deser -e '(gene/serialization [1 2 3])'
 ```
 
 ---
 
 ## Potential Improvements
 
-- **Custom serialization hooks**: No way to define how user classes serialize/deserialize to JSON. Must manually implement conversion.
+- **JSON-specific serialization hooks**: `gene/serdes` supports custom class `serialize` / `deserialize` hooks, but `gene/json/*` does not consult those hooks automatically.
 - **Binary serialization**: GIR is for bytecode only. No general-purpose binary serialization for Gene data structures.
 - **YAML/TOML/XML**: No support for other common formats.
 - **Streaming JSON**: Large JSON must be fully parsed into memory. No streaming/SAX-style parser.
