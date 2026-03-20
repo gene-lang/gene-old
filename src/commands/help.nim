@@ -27,6 +27,7 @@ proc handle*(cmd: string, args: seq[string]): CommandResult =
   output &= "  deps     Manage package dependencies\n"
   output &= "  lsp      Start Language Server Protocol server\n"
   output &= "  run-examples  Run function examples declared in source\n"
+  output &= "  deser    Deserialize Gene serialization text (alias: deserialize)\n"
   output &= "  help     Show this help message\n"
   output &= "\n"
   output &= "Examples:\n"
