@@ -4,6 +4,7 @@ import ./types
 import ./compiler
 import ./vm
 import ./parser
+import ./repl_input
 
 proc exec_repl_compiled(vm: ptr VirtualMachine, compiled: CompilationUnit, scope: Scope, ns: Namespace,
                         caller_frame: Frame, caller_cu: CompilationUnit, caller_pc: int,
@@ -81,27 +82,13 @@ proc run_repl_session*(vm: ptr VirtualMachine, scope_tracker: ScopeTracker, scop
 
   var last_value = NIL
   var repl_frame: Frame = nil
-
-  var input_file = stdin
-  var close_input = false
-  if stdin.isatty():
-    var tty: File
-    if open(tty, "/dev/tty", fmRead):
-      input_file = tty
-      close_input = true
-
+  let input_reader = new_repl_input_reader()
   defer:
-    if close_input:
-      input_file.close()
+    input_reader.close()
 
   while true:
-    stdout.write(prompt)
-    stdout.flushFile()
-
     var input: string
-    if not input_file.readLine(input):
-      if prompt.len > 0:
-        echo ""
+    if not input_reader.read_line(prompt, input):
       break
 
     let trimmed = input.strip()
@@ -224,7 +211,7 @@ proc run_repl_on_throw*(vm: ptr VirtualMachine, exception_value: Value): Value =
   ## Start a REPL session at the throw site; return a thrown exception or NIL.
   if vm.isNil or vm.frame.isNil:
     return NIL
-  if not stdin.isatty():
+  if not isatty(stdin):
     return exception_value
 
   let parent_scope = vm.frame.scope

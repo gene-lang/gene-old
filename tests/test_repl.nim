@@ -5,6 +5,7 @@ import ../src/gene/compiler
 import ../src/gene/types except Exception
 import ../src/gene/vm
 import ../src/gene/repl_session
+import ../src/gene/repl_input
 
 init_all()
 
@@ -66,3 +67,14 @@ suite "REPL":
     let scope = new_scope(scope_tracker)
     let result = run_repl_script(VM, @["(var x 1)", "(+ x 2)"], scope_tracker, scope, ns)
     check result == 3.to_value()
+
+  test "history suppresses immediate duplicates and blanks":
+    check should_record_repl_history_entry("", "") == false
+    check should_record_repl_history_entry("x", "") == true
+    check should_record_repl_history_entry("x", "x") == false
+    check should_record_repl_history_entry("(+ x 1)", "x") == true
+
+  test "readline backend only activates for tty sessions with backend":
+    check should_use_readline_backend(true, true) == true
+    check should_use_readline_backend(true, false) == false
+    check should_use_readline_backend(false, true) == false
