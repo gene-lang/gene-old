@@ -2943,6 +2943,14 @@ proc exec*(self: ptr VirtualMachine): Value =
         else:
           self.frame.push(second)
 
+      of IkXor:
+        let second = self.frame.pop()
+        let first = self.frame.pop()
+        if first.to_bool xor second.to_bool:
+          self.frame.push(TRUE)
+        else:
+          self.frame.push(FALSE)
+
       of IkNot:
         let value = self.frame.pop()
         if value.to_bool:

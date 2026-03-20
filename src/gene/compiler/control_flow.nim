@@ -628,6 +628,10 @@ proc compile_assignment(self: Compiler, gene: ptr Gene) =
           self.emit(Instruction(kind: IkAdd))
         of "-=":
           self.emit(Instruction(kind: IkSub))
+        of "*=":
+          self.emit(Instruction(kind: IkMul))
+        of "/=":
+          self.emit(Instruction(kind: IkDiv))
         of "%=":
           self.emit(Instruction(kind: IkMod))
         else:
@@ -728,6 +732,10 @@ proc compile_assignment(self: Compiler, gene: ptr Gene) =
           self.emit(Instruction(kind: IkAdd))
         of "-=":
           self.emit(Instruction(kind: IkSub))
+        of "*=":
+          self.emit(Instruction(kind: IkMul))
+        of "/=":
+          self.emit(Instruction(kind: IkDiv))
         of "%=":
           self.emit(Instruction(kind: IkMod))
         else:

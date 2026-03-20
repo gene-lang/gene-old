@@ -678,7 +678,7 @@ proc skip_ws(self: var Parser) {.gcsafe.} =
   self.bufpos = pos
 
 proc match_symbol(s: string): Value =
-  if s == "/":
+  if s == "/" or s == "/=":
     return s.to_symbol_value()
 
   if '/' notin s:

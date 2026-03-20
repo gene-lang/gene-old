@@ -790,7 +790,7 @@ proc normalized_infix_operator(op_value: Value): string {.inline.} =
   case op_value.kind
   of VkSymbol:
     let op = op_value.str
-    if op in ["+", "-", "*", "/", "%", "**", "++", "./", "<", "<=", ">", ">=", "==", "!=", "is", "&&", "||"]:
+    if op in ["+", "-", "*", "/", "%", "**", "++", "./", "<", "<=", ">", ">=", "==", "!=", "is", "&&", "||", "&|&"]:
       return op
   of VkComplexSymbol:
     # Parser variant: "./" can be emitted as complex symbol @[".", ""]
@@ -812,6 +812,8 @@ proc infix_precedence(op: string): int {.inline.} =
     60
   of "&&":
     50
+  of "&|&":
+    45
   of "||":
     40
   else:
@@ -1184,6 +1186,14 @@ proc compile_gene(self: Compiler, input: Value) =
           self.compile(gene.children[i])
           self.emit(Instruction(kind: IkAnd))
         return
+      of "&|&":
+        if gene.children.len == 0:
+          not_allowed("&|& requires at least one argument")
+        self.compile(gene.children[0])
+        for i in 1..<gene.children.len:
+          self.compile(gene.children[i])
+          self.emit(Instruction(kind: IkXor))
+        return
       of "||":
         if gene.children.len == 0:
           not_allowed("|| requires at least one argument")
@@ -1199,7 +1209,7 @@ proc compile_gene(self: Compiler, input: Value) =
     let first = gene.children[0]
     if first.kind == VkSymbol:
       case first.str:
-        of "=", "+=", "-=", "%=":
+        of "=", "+=", "-=", "*=", "/=", "%=":
           self.compile_assignment(gene)
           return
         of "?":
