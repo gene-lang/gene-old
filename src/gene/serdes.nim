@@ -825,7 +825,7 @@ proc path_to_value*(path: string): Value =
 
   not_allowed("path_to_value: not found: " & path)
 
-proc value_to_gene_str(self: Value): string
+proc value_to_gene_str*(self: Value): string
 
 proc key_to_string(k: Key): string {.inline, gcsafe.} =
   let symbol_value = cast[Value](k)
@@ -1428,7 +1428,7 @@ proc materialize_lazy_tree_data(data: CustomValue): Value {.gcsafe.} =
 proc to_s*(self: Serialization): string =
   result = payload_to_serialized_text(self.data)
 
-proc value_to_gene_str(self: Value): string =
+proc value_to_gene_str*(self: Value): string =
   let self = materialize_lazy_tree_value(self)
   case self.kind:
   of VkNil:

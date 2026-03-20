@@ -202,6 +202,23 @@ suite "Run CLI":
     let result = run_command.handle("run", @[app_src])
     check result.success
 
+  test "run formats runtime diagnostics as Gene values":
+    let source_path = absolutePath("tmp/run_cli_runtime_error.gene")
+    createDir(parentDir(source_path))
+    writeFile(source_path, "(1 .missing)")
+
+    defer:
+      if fileExists(source_path):
+        removeFile(source_path)
+
+    let result = run_command.handle("run", @[source_path, "--no-gir-cache"])
+    check not result.success
+    check result.error.startsWith("{")
+    check result.error.contains("^severity \"error\"")
+    check result.error.contains("^stage \"runtime\"")
+    check result.error.contains("^code \"GENE.RUNTIME.ERROR\"")
+    check result.error.contains("^message \"Unified method call not supported for VkInt\"")
+
   test "run rejects package-qualified imports that escape package root":
     let root = createTempDir("gene_run_pkg_boundary_", "")
     let app_src = root / "src" / "index.gene"

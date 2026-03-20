@@ -5,6 +5,7 @@ import ./compiler
 import ./vm
 import ./parser
 import ./repl_input
+import ./error_display
 
 proc exec_repl_compiled(vm: ptr VirtualMachine, compiled: CompilationUnit, scope: Scope, ns: Namespace,
                         caller_frame: Frame, caller_cu: CompilationUnit, caller_pc: int,
@@ -118,7 +119,7 @@ proc run_repl_session*(vm: ptr VirtualMachine, scope_tracker: ScopeTracker, scop
     except CatchableError as e:
       if propagate_this and vm.current_exception != NIL:
         raise
-      echo "Error: ", e.msg
+      echo "Error: ", render_error_message(e.msg)
       vm.current_exception = NIL
 
   return last_value

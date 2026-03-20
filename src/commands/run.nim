@@ -5,6 +5,7 @@ import ../gene/vm
 import ../gene/compiler
 import ../gene/gir
 import ../gene/repl_session
+import ../gene/error_display
 import ./base
 import ./package_context
 
@@ -172,7 +173,7 @@ proc handle*(cmd: string, args: seq[string]): CommandResult =
   setup_logger(options.debugging)
   proc handle_exec_error(e: ref CatchableError): CommandResult =
     if options.repl_on_error and VM.current_exception != NIL and VM.frame != nil:
-      stderr.writeLine("Error: " & e.msg)
+      stderr.writeLine("Error: " & render_error_message(e.msg))
       let original_exception = VM.current_exception
       discard run_repl_on_error(VM, VM.current_exception)
       # Check if a new exception was thrown from the REPL
@@ -194,9 +195,9 @@ proc handle*(cmd: string, args: seq[string]): CommandResult =
             msg = $VM.current_exception
         else:
           msg = msg & ": " & $VM.current_exception
-        return failure(msg)
+        return failure(render_error_message(msg))
       return failure("")
-    return failure(e.msg)
+    return failure(render_error_message(e.msg))
 
   var file = options.file
   var module_name = file

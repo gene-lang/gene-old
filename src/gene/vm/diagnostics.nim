@@ -1,7 +1,8 @@
 import std/json
+import std/strutils
 
 proc infer_diag_code*(message: string): string =
-  let lower = message.toLowerAscii()
+  let lower = toLowerAscii(message)
   if lower.contains("division by zero") or lower.contains("divide"):
     return "GENE.ARITH.DIV_ZERO"
   if lower.contains("method not found") or lower.contains("no method"):
