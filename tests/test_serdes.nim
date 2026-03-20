@@ -1,4 +1,4 @@
-import strutils, tables
+import os, strutils, tables
 import unittest
 
 import gene/serdes
@@ -12,6 +12,76 @@ proc reset_module_cache() =
   ModuleCache = initTable[string, Namespace]()
   ModuleLoadState = initTable[string, bool]()
   ModuleLoadStack = @[]
+
+type
+  SerializableHandle = ref object of CustomValue
+    id: int
+    label: string
+
+var serializable_handle_class {.threadvar.}: Class
+var missing_serialize_handle_class {.threadvar.}: Class
+var missing_deserialize_handle_class {.threadvar.}: Class
+
+proc serializable_handle_payload(id: int, label: string): Value =
+  new_map_value({
+    "id".to_key(): id.to_value(),
+    "label".to_key(): label.to_value(),
+  }.to_table())
+
+proc custom_serialize_native(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                             has_keyword_args: bool): Value {.gcsafe, nimcall.} =
+  if get_positional_count(arg_count, has_keyword_args) == 0:
+    not_allowed("serialize requires self")
+  let self_value = get_positional_arg(args, 0, has_keyword_args)
+  let data = cast[SerializableHandle](self_value.get_custom_data("SerializableHandle payload missing"))
+  serializable_handle_payload(data.id, data.label)
+
+proc custom_deserialize_native(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                               has_keyword_args: bool): Value {.gcsafe, nimcall.} =
+  if get_positional_count(arg_count, has_keyword_args) < 2:
+    not_allowed("deserialize requires class and state")
+  let class_value = get_positional_arg(args, 0, has_keyword_args)
+  let state = get_positional_arg(args, 1, has_keyword_args)
+  if class_value.kind != VkClass:
+    not_allowed("deserialize expects a class receiver")
+  if state.kind != VkMap:
+    not_allowed("deserialize expects a map payload")
+
+  let payload = map_data(state)
+  let id = payload["id".to_key()].to_int()
+  let label = payload["label".to_key()].str
+  new_custom_value(class_value.ref.class, SerializableHandle(id: id, label: label))
+
+proc ensure_custom_serdes_classes() =
+  init_all()
+
+  if serializable_handle_class.is_nil:
+    serializable_handle_class = new_class("SerializableHandle")
+    serializable_handle_class.parent = App.app.object_class.ref.class
+    serializable_handle_class.def_native_method("serialize", custom_serialize_native)
+    serializable_handle_class.def_native_method("deserialize", custom_deserialize_native)
+
+    var class_ref = new_ref(VkClass)
+    class_ref.class = serializable_handle_class
+    App.app.global_ns.ns["SerializableHandle".to_key()] = class_ref.to_ref_value()
+
+  if missing_serialize_handle_class.is_nil:
+    missing_serialize_handle_class = new_class("MissingSerializeHandle")
+    missing_serialize_handle_class.parent = App.app.object_class.ref.class
+    missing_serialize_handle_class.def_native_method("deserialize", custom_deserialize_native)
+
+    var class_ref = new_ref(VkClass)
+    class_ref.class = missing_serialize_handle_class
+    App.app.global_ns.ns["MissingSerializeHandle".to_key()] = class_ref.to_ref_value()
+
+  if missing_deserialize_handle_class.is_nil:
+    missing_deserialize_handle_class = new_class("MissingDeserializeHandle")
+    missing_deserialize_handle_class.parent = App.app.object_class.ref.class
+    missing_deserialize_handle_class.def_native_method("serialize", custom_serialize_native)
+
+    var class_ref = new_ref(VkClass)
+    class_ref.class = missing_deserialize_handle_class
+    App.app.global_ns.ns["MissingDeserializeHandle".to_key()] = class_ref.to_ref_value()
 
 test_serdes """
   1
@@ -136,7 +206,7 @@ test "Serdes: exported instances preserve identity via InstanceRef":
   check roundtripped.kind == VkInstance
   check instance_props(roundtripped)["name".to_key()] == "default".to_value()
 
-test "Serdes: anonymous instances snapshot state and use .deserialize hook":
+test "Serdes: anonymous instances are rejected":
   init_all()
   init_serdes()
   let instance = VM.exec(cleanup("""
@@ -144,16 +214,31 @@ test "Serdes: anonymous instances snapshot state and use .deserialize hook":
     (var item (new ExportedThing "hammer"))
     item
   """), "serdes_instance_value_source")
-  let serialized = serialize(instance).to_s()
-  check serialized.contains("(Instance ")
-  check serialized.contains("ClassRef")
+  var raised = false
+  try:
+    discard serialize(instance)
+  except CatchableError as e:
+    raised = true
+    check e.msg.contains("anonymous instances cannot be serialized")
+  check raised
 
-  reset_module_cache()
-  discard VM.exec("1", "serdes_other_module")
-  let roundtripped = deserialize(serialized)
-  check roundtripped.kind == VkInstance
-  check instance_props(roundtripped)["name".to_key()] == "hammer".to_value()
-  check instance_props(roundtripped)["restored".to_key()] == TRUE
+test "Serdes: legacy inline anonymous instance payloads are rejected":
+  init_all()
+  init_serdes()
+  let module_path = absolutePath("tests/fixtures/serdes_objects.gene")
+  let serialized = """
+(gene/serialization
+  (Instance
+    (ClassRef ^path "ExportedThing" ^module "$1")
+    {^name "hammer"}))
+""".replace("$1", module_path)
+
+  var raised = false
+  try:
+    discard deserialize(serialized)
+  except CatchableError:
+    raised = true
+  check raised
 
 test "Serdes: enum members use EnumRef and auto-import":
   init_all()
@@ -172,7 +257,7 @@ test "Serdes: enum members use EnumRef and auto-import":
   check roundtripped.kind == VkEnumMember
   check roundtripped.ref.enum_member.name == "ok"
 
-test "Serdes: exported refs reserialize stably and snapshots normalize once":
+test "Serdes: exported refs reserialize stably":
   init_all()
   init_serdes()
   let refs = VM.exec(cleanup("""
@@ -186,15 +271,70 @@ test "Serdes: exported refs reserialize stably and snapshots normalize once":
     let second = serialize(deserialize(first)).to_s()
     check second == first
 
-  let anon = VM.exec(cleanup("""
-    (import ExportedThing from "tests/fixtures/serdes_objects")
-    (new ExportedThing "hammer")
-  """), "serdes_snapshot_stable_source")
-  let first = serialize(anon).to_s()
-  let second = serialize(deserialize(first)).to_s()
-  let third = serialize(deserialize(second)).to_s()
-  check second != first
-  check third == second
+test "Serdes: custom values roundtrip through Instance payload hooks":
+  init_all()
+  init_serdes()
+  ensure_custom_serdes_classes()
+
+  let value = new_custom_value(serializable_handle_class, SerializableHandle(id: 7, label: "demo"))
+  let serialized = serialize(value).to_s()
+  check serialized.contains("(Instance ")
+  check serialized.contains("SerializableHandle")
+
+  let roundtripped = deserialize(serialized)
+  check roundtripped.kind == VkCustom
+  check roundtripped.ref.custom_class == serializable_handle_class
+  let payload = cast[SerializableHandle](roundtripped.get_custom_data("SerializableHandle payload missing"))
+  check payload.id == 7
+  check payload.label == "demo"
+  check serialize(roundtripped).to_s() == serialized
+
+test "Serdes: custom values require serialize hook":
+  init_all()
+  init_serdes()
+  ensure_custom_serdes_classes()
+
+  let value = new_custom_value(missing_serialize_handle_class, SerializableHandle(id: 1, label: "x"))
+  var raised = false
+  try:
+    discard serialize(value)
+  except CatchableError as e:
+    raised = true
+    check e.msg.contains("define serialize")
+  check raised
+
+test "Serdes: custom values require deserialize hook before serialization":
+  init_all()
+  init_serdes()
+  ensure_custom_serdes_classes()
+
+  let value = new_custom_value(missing_deserialize_handle_class, SerializableHandle(id: 1, label: "x"))
+  var raised = false
+  try:
+    discard serialize(value)
+  except CatchableError as e:
+    raised = true
+    check e.msg.contains("define deserialize")
+  check raised
+
+test "Serdes: custom Instance payloads require both hooks on deserialize":
+  init_all()
+  init_serdes()
+  ensure_custom_serdes_classes()
+
+  let serialized = """
+(gene/serialization
+  (Instance
+    (ClassRef ^path "MissingSerializeHandle")
+    {^id 3 ^label "oops"}))
+"""
+  var raised = false
+  try:
+    discard deserialize(serialized)
+  except CatchableError as e:
+    raised = true
+    check e.msg.contains("define serialize")
+  check raised
 
 test "Serdes: anonymous closures are rejected":
   init_all()

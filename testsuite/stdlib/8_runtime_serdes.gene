@@ -35,18 +35,13 @@
 (assert ((gene/serdes/serialize named_round) == named_ser))
 
 (var anon (new Thing "hammer"))
-(var anon_ser (gene/serdes/serialize anon))
-(assert ((anon_ser .index "(Instance ") >= 0))
-(assert ((anon_ser .index "ClassRef") >= 0))
-(var anon_round (gene/serdes/deserialize anon_ser))
-(assert (anon_round/name == "hammer"))
-(assert (anon_round/restored == true))
-(var anon_round_ser (gene/serdes/serialize anon_round))
-(assert ((anon_round_ser .index "^restored true") >= 0))
-(assert ((gene/serdes/serialize (gene/serdes/deserialize anon_round_ser)) == anon_round_ser))
-(anon_round/name = "wrench")
-(assert (anon/name == "hammer"))
-(assert (anon_round/name == "wrench"))
+(var anon_caught false)
+(try
+  (gene/serdes/serialize anon)
+catch *
+  (anon_caught = true)
+)
+(assert (anon_caught == true))
 
 (var closure_caught false)
 (try

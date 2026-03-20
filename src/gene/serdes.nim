@@ -533,6 +533,15 @@ proc resolve_typed_ref(gene: ptr Gene): Value {.gcsafe.} =
   let parsed = parse_typed_ref(gene)
   resolve_named_reference(parsed.module_path, parsed.path)
 
+proc find_serialize_hook(cls: Class): Value =
+  if cls == nil:
+    return NIL
+  for name in [".serialize", "serialize"]:
+    let meth = cls.get_method(name)
+    if meth != nil:
+      return meth.callable
+  return NIL
+
 proc find_deserialize_hook(cls: Class): Value =
   if cls == nil:
     return NIL
@@ -541,6 +550,33 @@ proc find_deserialize_hook(cls: Class): Value =
     if meth != nil:
       return meth.callable
   return NIL
+
+proc class_display_name(cls: Class): string {.inline.} =
+  if cls == nil or cls.name.len == 0:
+    "<nil>"
+  else:
+    cls.name
+
+proc require_custom_serdes_hooks(cls: Class): tuple[serialize_hook: Value, deserialize_hook: Value] =
+  result.serialize_hook = find_serialize_hook(cls)
+  if result.serialize_hook == NIL:
+    not_allowed("Custom serialization requires class '" & class_display_name(cls) & "' to define serialize")
+
+  result.deserialize_hook = find_deserialize_hook(cls)
+  if result.deserialize_hook == NIL:
+    not_allowed("Custom serialization requires class '" & class_display_name(cls) & "' to define deserialize")
+
+proc invoke_serialize_hook(hook: Value, value: Value): Value {.gcsafe.} =
+  case hook.kind:
+  of VkFunction, VkBlock:
+    if VM == nil:
+      not_allowed("Serialization hook requires an active VM")
+    {.cast(gcsafe).}:
+      return vm_exec_callable(VM, hook, @[value])
+  of VkNativeFn:
+    return call_native_fn(hook.ref.native_fn, VM, [value])
+  else:
+    not_allowed("Serialize hook must be a function or native function")
 
 proc invoke_deserialize_hook(cls: Class, state: Value): tuple[handled: bool, value: Value] {.gcsafe.} =
   let hook = find_deserialize_hook(cls)
@@ -681,13 +717,12 @@ proc serialize*(self: Serialization, value: Value): Value =
     let (named, _) = lookup_value_origin(value)
     if named:
       return typed_ref_for_value(value)
-
-    let props = new_map_value()
-    map_data(props) = initTable[Key, Value]()
-    for k, v in value.instance_props:
-      map_data(props)[k] = self.serialize(v)
-
-    return new_serialized_instance(typed_ref_for_class(value.instance_class), props)
+    not_serializable(value, "anonymous instances cannot be serialized")
+  of VkCustom:
+    let cls = value.ref.custom_class
+    let hooks = require_custom_serdes_hooks(cls)
+    let payload = invoke_serialize_hook(hooks.serialize_hook, value)
+    return new_serialized_instance(typed_ref_for_class(cls), self.serialize(payload))
   else:
     not_serializable(value)
 
@@ -1493,39 +1528,35 @@ proc deserialize*(self: Serialization, value: Value): Value =
         return NIL
     of "Instance":
       if value.gene.children.len < 2:
-        return NIL
+        not_allowed("Instance expects a class reference and payload")
 
       let class_ref = self.deserialize(value.gene.children[0])
       if class_ref.kind != VkClass:
         not_allowed("Instance expects a class reference")
 
-      let props = value.gene.children[1]
-      let state =
-        if props.kind == VkMap:
-          var mapped = new_map_value()
-          map_data(mapped) = initTable[Key, Value]()
-          for k, v in map_data(props):
-            map_data(mapped)[k] = self.deserialize(v)
-          mapped
-        else:
-          not_allowed("Instance expects a map state payload")
-          NIL
+      let cls = class_ref.ref.class
+      let hooks = require_custom_serdes_hooks(cls)
+      let state = self.deserialize(value.gene.children[1])
+      let class_val = class_to_value(cls)
+      var restored: Value
+      case hooks.deserialize_hook.kind:
+      of VkFunction, VkBlock:
+        if VM == nil:
+          not_allowed("Deserialization hook requires an active VM")
+        {.cast(gcsafe).}:
+          restored = vm_exec_callable(VM, hooks.deserialize_hook, @[class_val, state])
+      of VkNativeFn:
+        restored = call_native_fn(hooks.deserialize_hook.ref.native_fn, VM, [class_val, state])
+      else:
+        not_allowed("Deserialize hook must be a function or native function")
 
-      let hook_result = invoke_deserialize_hook(class_ref.ref.class, state)
-      if hook_result.handled:
-        return hook_result.value
-
-      let instance = new_instance_value(class_ref.ref.class)
-      for k, v in map_data(state):
-        instance_props(instance)[k] = v
-      return instance
+      if restored.kind != VkCustom:
+        not_allowed("Instance deserialize hook must return a custom value")
+      if restored.ref.custom_class != cls:
+        not_allowed("Instance deserialize hook returned custom value of unexpected class")
+      return restored
     of "gene/instance":
-      if value.gene.children.len >= 2:
-        let legacy = new_gene("Instance".to_symbol_value())
-        legacy.children.add(self.deserialize(value.gene.children[0]))
-        legacy.children.add(value.gene.children[1])
-        return self.deserialize(legacy.to_gene_value())
-      return NIL
+      not_allowed("Legacy anonymous instance serialization is not supported")
     else:
       let gene = new_gene(self.deserialize(value.gene.type), frozen = gene_is_frozen(value))
       for k, v in value.gene.props:

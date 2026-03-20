@@ -13,10 +13,13 @@ The command runs in a full VM environment (like `gene eval`) so it can resolve c
 gene deser state.gene
 
 # From stdin (pipe)
-echo '(gene/serialization (Instance (ClassRef "myapp/models" "User") {^name "Alice" ^age 30}))' | gene deser
+echo '(gene/serialization (FunctionRef ^path "run" ^module "app/main.gene"))' | gene deser
 
 # From a string argument
 gene deser -e '(gene/serialization {^key "value"})'
+
+# Alias form
+gene deserialize -e '(gene/serialization [1 2 3])'
 
 # Pretty print (default)
 gene deser state.gene
@@ -95,16 +98,22 @@ Gene serialization wraps values in `(gene/serialization ...)`:
 (gene/serialization "hello")
 (gene/serialization [1 2 3])
 
-# Class instances use Instance/ClassRef
+# Named runtime objects use typed refs
+(gene/serialization (NamespaceRef ^path "gene/json"))
+(gene/serialization (FunctionRef ^path "run" ^module "app/main.gene"))
+(gene/serialization (ClassRef ^path "User" ^module "myapp/models.gene"))
+(gene/serialization (InstanceRef ^path "DEFAULT_THING" ^module "fixtures/serdes_objects.gene"))
+
+# Custom runtime values use Instance/ClassRef plus a hook-defined payload
 (gene/serialization
   (Instance
-    (ClassRef "module/path" "ClassName")
-    {^prop1 "value1" ^prop2 42}))
-
-# References to named objects
-(gene/serialization (NamespaceRef "module/path" "name"))
-(gene/serialization (FunctionRef "module/path" "fn_name"))
+    (ClassRef ^path "CustomHandle" ^module "myapp/custom.gene")
+    {^id 42 ^label "demo"}))
 ```
+
+Anonymous inline instance/object payloads are not supported. `gene/serdes`
+reserves the `Instance` envelope for custom runtime values whose class defines
+both `serialize` and `deserialize` hooks.
 
 ## Exit Codes
 

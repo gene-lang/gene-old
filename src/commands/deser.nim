@@ -30,7 +30,7 @@ let long_no_val = @[
 ]
 
 let help_text = """
-Usage: gene deser [options] [<file>...]
+Usage: gene deser|deserialize [options] [<file>...]
 
 Deserialize Gene serialization text back into runtime objects.
 
@@ -55,7 +55,14 @@ Examples:
   gene deser state.gene
   echo '(gene/serialization 42)' | gene deser
   gene deser -e '(gene/serialization {^key "value"})'
+  gene deserialize -e '(gene/serialization (FunctionRef ^path "run" ^module "app/main.gene"))'
   gene deser --gene home/state/system_prompt.gene
+
+Notes:
+  - Named runtime refs use ^path and optional ^module properties.
+  - Anonymous inline Instance payloads are not supported.
+  - Custom runtime values deserialize through Instance payloads only when the
+    referenced class defines both serialize and deserialize hooks.
 """
 
 proc parse_args(args: seq[string]): DeserOptions =
@@ -197,6 +204,13 @@ proc format_deserialized(value: Value, format: string, indent: int = 0): string 
       let symbol_index = cast[uint64](symbol_value) and PAYLOAD_MASK
       result &= spaces & "  " & get_symbol(symbol_index.int) & ": " & format_deserialized(v, "compact") & "\n"
     result &= spaces & "}"
+  of VkCustom:
+    let class_name =
+      if value.ref != nil and value.ref.custom_class != nil and value.ref.custom_class.name.len > 0:
+        value.ref.custom_class.name
+      else:
+        "Custom"
+    return spaces & "<Custom " & class_name & ">"
   of VkClass:
     return spaces & "<Class " & value.ref.class.name & ">"
   of VkNamespace:
@@ -220,6 +234,11 @@ proc kind_name(value: Value): string =
   of VkMap: "Map"
   of VkGene: "Gene"
   of VkInstance: "Instance of " & value.instance_class.name
+  of VkCustom:
+    if value.ref != nil and value.ref.custom_class != nil and value.ref.custom_class.name.len > 0:
+      "Custom " & value.ref.custom_class.name
+    else:
+      "Custom"
   of VkClass: "Class"
   of VkNamespace: "Namespace"
   of VkFunction: "Function"
