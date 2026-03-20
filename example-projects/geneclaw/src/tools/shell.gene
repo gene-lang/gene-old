@@ -2,7 +2,7 @@
 
 (fn $ns/register_shell_tool [register_tool log workspace_root]
   (register_tool "shell"
-    "Run a shell command"
+    "Run a shell command from the managed scratch workspace under GENECLAW_HOME/tmp"
     {^type "object"
      ^properties {
        ^command {^type "string" ^description "The command to run"}

@@ -1,0 +1,53 @@
+#!/usr/bin/env gene run
+
+(import TMP_PATH from "config")
+(import init_tools invoke_tool from "tools")
+
+(var repo_root (cwd))
+(var managed_rel_path "tests/build/tool-workspace-managed.txt")
+(var managed_tmp_path #"#{TMP_PATH}/#{managed_rel_path}")
+(var managed_repo_path #"#{repo_root}/#{managed_rel_path}")
+
+(system/shell #"rm -f '#{managed_tmp_path}' '#{managed_repo_path}'")
+
+(init_tools)
+
+(var readme_result (invoke_tool "run-tool-workspaces" "ws-tool-workspaces" "user-1" "chan-1" "" "session-1" "read_file" {^path "README.md"}))
+(assert (readme_result/ok == true))
+(assert ((readme_result/result/content || "") .include? "# GeneClaw"))
+
+(var readme_traversal (invoke_tool "run-tool-workspaces" "ws-tool-workspaces" "user-1" "chan-1" "" "session-1" "read_file" {^path "../README.md"}))
+(assert (readme_traversal/ok == false))
+(assert (readme_traversal/error == "Path traversal not allowed"))
+
+(var list_result (invoke_tool "run-tool-workspaces" "ws-tool-workspaces" "user-1" "chan-1" "" "session-1" "list_files" {^path "."}))
+(assert (list_result/ok == true))
+(assert ((list_result/result/entries || "") .include? "README.md"))
+
+(var grep_result (invoke_tool "run-tool-workspaces" "ws-tool-workspaces" "user-1" "chan-1" "" "session-1" "grep" {^pattern "GeneClaw CLI mode" ^path "src/cli.gene"}))
+(assert (grep_result/ok == true))
+(assert ((grep_result/result/matches || "") .include? "GeneClaw CLI mode"))
+
+(var write_result (invoke_tool "run-tool-workspaces" "ws-tool-workspaces" "user-1" "chan-1" "" "session-1" "write_file" {^path managed_rel_path ^content "alpha\n"}))
+(assert (write_result/ok == true))
+(assert ((gene/io/read managed_tmp_path) == "alpha\n"))
+(var repo_file_check (system/shell #"test -f '#{managed_repo_path}' && echo yes || echo no"))
+(assert (repo_file_check/output/.trim == "no"))
+
+(var edit_result (invoke_tool "run-tool-workspaces" "ws-tool-workspaces" "user-1" "chan-1" "" "session-1" "edit_file" {^path managed_rel_path ^old_text "alpha" ^new_text "beta"}))
+(assert (edit_result/ok == true))
+(assert ((gene/io/read managed_tmp_path) == "beta\n"))
+
+(var patch_result (invoke_tool "run-tool-workspaces" "ws-tool-workspaces" "user-1" "chan-1" "" "session-1" "patch_file" {
+  ^path managed_rel_path
+  ^diff "@@ -1 +1 @@\n-beta\n+gamma\n"
+}))
+(assert (patch_result/ok == true))
+(assert ((gene/io/read managed_tmp_path) == "gamma\n"))
+
+(var delete_result (invoke_tool "run-tool-workspaces" "ws-tool-workspaces" "user-1" "chan-1" "" "session-1" "delete_file" {^path managed_rel_path}))
+(assert (delete_result/ok == true))
+(var tmp_file_check (system/shell #"test -f '#{managed_tmp_path}' && echo yes || echo no"))
+(assert (tmp_file_check/output/.trim == "no"))
+
+(println "ok")

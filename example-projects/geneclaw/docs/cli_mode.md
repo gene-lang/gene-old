@@ -77,6 +77,16 @@ echo "what time is it?" | gene run src/main.gene --cli
 GENECLAW_HOME=/path/to/geneclaw_home gene run src/main.gene --cli
 ```
 
+## Workspace semantics
+
+CLI mode now uses two filesystem roots on purpose:
+
+- **Read-only inspection tools** (`read_file`, `list_files`, `grep`) resolve relative paths from the process launch directory. If you start CLI mode from `example-projects/geneclaw`, `README.md` means `example-projects/geneclaw/README.md`.
+- **Mutating tools** (`write_file`, `edit_file`, `patch_file`, `delete_file`) stay confined to `GENECLAW_HOME/tmp`.
+- **Shell/browser helpers** also start from managed roots under `GENECLAW_HOME`, not the launch directory.
+
+This split lets the agent inspect the repo you launched it from while keeping file creation and edits inside the managed scratch area.
+
 ## Implementation
 
 ### Runtime primitives needed

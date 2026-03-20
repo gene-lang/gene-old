@@ -2,21 +2,24 @@
 
 (fn $ns/register_edit_file_tool [register_tool log workspace_root]
   (register_tool "edit_file"
-    "Edit a file by replacing exact text within the workspace"
+    "Edit a file inside the managed scratch workspace at GENECLAW_HOME/tmp by replacing exact text"
     {^type "object"
      ^properties {
-       ^path {^type "string" ^description "Relative path within workspace"}
+       ^path {^type "string" ^description "Relative path within GENECLAW_HOME/tmp"}
        ^old_text {^type "string" ^description "Exact text to find and replace"}
        ^new_text {^type "string" ^description "Replacement text"}
      }
      ^required ["path" "old_text" "new_text"]}
     (fn [args]
-      (var path args/path)
+      (var path ((args/path || "") .to_s))
       (var old_text args/old_text)
       (var new_text args/new_text)
 
       (if path/.empty?
         (return {^error "Missing path"})
+      )
+      (if ((path .starts_with "/") || (path .starts_with "~"))
+        (return {^error "Path must be relative to the workspace"})
       )
       (if (path .include? "..")
         (return {^error "Path traversal not allowed"})
@@ -28,13 +31,13 @@
         (var content (gene/io/read full_path))
 
         # Count occurrences of old_text
-        (var idx (content .index_of old_text))
+        (var idx (content .index old_text))
         (if (idx == -1)
           (return {^error "old_text not found"})
         )
 
         # Check for multiple occurrences
-        (var second_idx (content .index_of old_text (idx + 1)))
+        (var second_idx (content .index old_text (idx + 1)))
         (if (second_idx != -1)
           (return {^error "old_text found multiple times"})
         )

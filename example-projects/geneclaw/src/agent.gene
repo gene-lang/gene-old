@@ -12,6 +12,32 @@
 (var log (new genex/logging/Logger $ns))
 (var RUN_COUNTER 0)
 
+(fn summarize_log_text [value max_len = 240]
+  (var raw ((value || "") .to_s))
+  (raw = (raw .replace "\r" "\\r"))
+  (raw = (raw .replace "\n" "\\n"))
+  (if (raw/.length > max_len)
+    #"#{(raw .substr 0 (max_len - 16))}...(len=#{raw/.length})"
+  else
+    raw
+  )
+)
+
+(fn summarize_log_value [value max_len = 240]
+  (var rendered
+    (try
+      (if ((value is Map) || (value is Array))
+        value/.to_json
+      else
+        ((value || "") .to_s)
+      )
+    catch *
+      "<unserializable>"
+    )
+  )
+  (summarize_log_text rendered max_len)
+)
+
 (fn make_run_id []
   (RUN_COUNTER += 1)
   #"run-#{RUN_COUNTER}"
@@ -108,7 +134,7 @@
       # Parse arguments JSON string; coerce to map for tool handlers.
       (var parsed_args (try (gene/json/parse tool_args_str) catch * nil))
       (var tool_args (if (parsed_args is Map) parsed_args else {}))
-      (log .debug #"#{run_id} raw tool args #{tool_name}=#{tool_args_str}")
+      (log .debug #"#{run_id} raw tool args #{tool_name}=#{(summarize_log_text tool_args_str)}")
       (var tool_result (invoke_tool run_id workspace_id user_id channel_id thread_id session_id tool_name tool_args))
 
       # Build result text
@@ -117,7 +143,7 @@
       else
         #"Error: #{tool_result/error}"
       ))
-      (log .debug #"#{run_id} tool result: #{result_text}")
+      (log .debug #"#{run_id} tool result: #{(summarize_log_text result_text)}")
 
       (if tool_result/ok
         (last_invalid_tool_signature = "")

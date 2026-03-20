@@ -57,7 +57,7 @@ GeneClaw now boots from `GENECLAW_HOME`.
 - `GENECLAW_HOME/assets/uploaded` and `GENECLAW_HOME/assets/generated` are managed roots for inbound and generated files.
 - `GENECLAW_HOME/logs` stores append-only audit data.
 - `GENECLAW_HOME/archive` is reserved for cold durable data.
-- `GENECLAW_HOME/tmp` is the scratch workspace root used by file-oriented tools.
+- `GENECLAW_HOME/tmp` is the managed scratch workspace root used by mutating tools (`write_file`, `edit_file`, `patch_file`, `delete_file`, and shell/browser helpers). Read-only inspection tools use the process launch directory instead.
 - The built-in repository instance uses `/Users/gcao/gene-workspace/gene-old/example-projects/geneclaw/home`.
 
 Non-sensitive config can use environment placeholders inside any string:
@@ -129,20 +129,20 @@ POST /slack/events
 ## Built-in tools
 
 - `get_time` - Current date/time
-- `shell` - Run allowlisted commands (ls, cat, echo, date, etc.)
-- `read_file` - Read files within workspace (path-traversal blocked)
-- `write_file` - Write files within workspace
+- `shell` - Run shell commands from `GENECLAW_HOME/tmp`
+- `read_file` - Read files from the launch directory using a relative path (path-traversal blocked)
+- `write_file` - Write files only inside `GENECLAW_HOME/tmp`
 - `http_get` - Fetch a URL
 - `browser_playwright` - Browser control (`list_pages`, `navigate`, `click`, `fill`, `text`, `screenshot`, etc.) with auto-attach to Chrome CDP (`http://127.0.0.1:9333`) and managed Playwright server fallback
 - `web_search` - Search the web via Brave Search API (requires `BRAVE_API_KEY`)
-- `list_files` - List files/directories within workspace (supports recursive)
-- `edit_file` - Edit a file by exact text replacement within workspace
-- `patch_file` - Apply a unified diff patch to a file within workspace
+- `list_files` - List files/directories from the launch directory using a relative path (supports recursive)
+- `edit_file` - Edit a file by exact text replacement only inside `GENECLAW_HOME/tmp`
+- `patch_file` - Apply a unified diff patch only inside `GENECLAW_HOME/tmp`
 - `send_message` - Send a message to a Slack channel/thread (requires `SLACK_AGENTX_TOKEN`)
-- `delete_file` - Delete a file within workspace (files only, no directories)
+- `delete_file` - Delete a file only inside `GENECLAW_HOME/tmp` (files only, no directories)
 - `tmux_send` - Send keys to a tmux pane
 - `tmux_tail` - Capture recent output from a tmux pane
-- `grep` - Search file contents using ripgrep within workspace
+- `grep` - Search file contents from the launch directory using ripgrep and relative paths
 
 ## Playwright tool prerequisites
 

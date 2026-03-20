@@ -7,6 +7,32 @@
 
 (var log (new genex/logging/Logger $ns))
 
+(fn summarize_log_text [value max_len = 240]
+  (var raw ((value || "") .to_s))
+  (raw = (raw .replace "\r" "\\r"))
+  (raw = (raw .replace "\n" "\\n"))
+  (if (raw/.length > max_len)
+    #"#{(raw .substr 0 (max_len - 16))}...(len=#{raw/.length})"
+  else
+    raw
+  )
+)
+
+(fn summarize_log_value [value max_len = 240]
+  (var rendered
+    (try
+      (if ((value is Map) || (value is Array))
+        value/.to_json
+      else
+        ((value || "") .to_s)
+      )
+    catch *
+      "<unserializable>"
+    )
+  )
+  (summarize_log_text rendered max_len)
+)
+
 (fn parse_tool_arguments [args_json]
   (var parsed (try (gene/json/parse (args_json || "{}")) catch * nil))
   (ifel (parsed is Map) parsed {})
@@ -152,7 +178,7 @@
     (var parts [])
     (content .each (fn [part]
       (if ((part is Map) && ((part/type == "text") || (part/type == "input_text") || (part/type == "output_text")))
-        (parts .append #"{type:text,text=#{(part/text || "")}}")
+        (parts .append #"{type:text,text=#{(summarize_log_text (part/text || "") 120)}}")
       elif ((part is Map) && (part/type == "image_url"))
         (parts .append #"{type:image_url,url=[image data omitted]}")
       elif ((part is Map) && (part/type == "input_image"))
@@ -163,7 +189,7 @@
     ))
     #"{role=#{msg/role}, content=[#{(parts .join ", ")}]}"
   else
-    (msg .to_json)
+    (summarize_log_value msg)
   )
 )
 
@@ -173,7 +199,7 @@
     (var parts [])
     (content .each (fn [block]
       (if ((block is Map) && (block/type == "text"))
-        (parts .append #"{type:text,text=#{(block/text || "")}}")
+        (parts .append #"{type:text,text=#{(summarize_log_text (block/text || "") 120)}}")
       elif ((block is Map) && (block/type == "image"))
         (parts .append #"{type:image,source=[image data omitted]}")
       elif ((block is Map) && (block/type == "tool_result"))
@@ -186,7 +212,7 @@
     ))
     #"{role=#{msg/role}, content=[#{(parts .join ", ")}]}"
   else
-    (msg .to_json)
+    (summarize_log_value msg)
   )
 )
 
@@ -207,18 +233,18 @@
     (return (openai_message_log_text item))
   )
   (if (item_type == "function_call")
-    (return #"{type:function_call,call_id=#{(item/call_id || "")},name=#{(item/name || "")},arguments=#{(item/arguments || "{}")}}")
+    (return #"{type:function_call,call_id=#{(item/call_id || "")},name=#{(item/name || "")},arguments=#{(summarize_log_text (item/arguments || "{}") 160)}}")
   )
   (if (item_type == "function_call_output")
-    (return #"{type:function_call_output,call_id=#{(item/call_id || "")},output=#{(item/output || "")}}")
+    (return #"{type:function_call_output,call_id=#{(item/call_id || "")},output=#{(summarize_log_text (item/output || "") 160)}}")
   )
-  (item .to_json)
+  (summarize_log_value item)
 )
 
 (fn log_openai_codex_request [request history]
   (log .info #"Built OpenAI Codex request input=#{request/input/.size} tools=#{request/tools/.size} (#{history/.size} history + current user, system separate)")
   (log .info "--- Instructions ---")
-  (log .info request/instructions)
+  (log .info (summarize_log_text request/instructions 240))
   (var item_idx 0)
   (request/input .each (fn [item]
     (log .info #"--- Input #{item_idx} [#{(item/type || "unknown")}] ---")
@@ -231,7 +257,7 @@
 (fn log_anthropic_request [request history]
   (log .info #"Built Anthropic request messages=#{request/messages/.size} tools=#{request/tools/.size} (#{history/.size} history + user, system separate)")
   (log .info "--- System ---")
-  (log .info request/system)
+  (log .info (summarize_log_text request/system 240))
   (var msg_idx 0)
   (request/messages .each (fn [msg]
     (log .info #"--- Message #{msg_idx} [#{msg/role}] ---")
@@ -529,7 +555,7 @@
       )
     elif (block_type == "tool_use")
       (var input_map (ensure_map (block/input || {})))
-      (log .debug #"Anthropic tool_use id=#{(block/id || "")} name=#{(block/name || "")} input=#{input_map/.to_json}")
+      (log .debug #"Anthropic tool_use id=#{(block/id || "")} name=#{(block/name || "")} input=#{(summarize_log_value input_map 160)}")
       (tool_calls .append {
         ^id (block/id || "")
         ^type "function"
@@ -754,7 +780,7 @@
       (var normalized call_result/normalized)
       (log .debug "LLM post-call: normalized response ready")
       (log .info #"LLM responded in #{duration}ms provider=#{CONFIG/llm/provider} content_len=#{normalized/content/.size} tool_calls=#{normalized/tool_calls/.size}")
-      (log .trace #"LLM response: #{normalized/content}")
+      (log .trace #"LLM response: #{(summarize_log_text normalized/content 240)}")
       normalized
     catch *
       (log .error #"LLM call failed: #{$ex/message}")

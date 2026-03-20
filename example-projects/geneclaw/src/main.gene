@@ -290,25 +290,23 @@
 # Startup
 # ============================================================
 (if_not (maybe_run_cli $args)
-  (do
-    (log .info "=== GeneClaw Agent Platform ===")
-    (init_db)
-    (init_tools)
-    (start_pause_watchdog)
-    (start_scheduler)
+  (log .info "=== GeneClaw Agent Platform ===")
+  (init_db)
+  (init_tools)
+  (start_pause_watchdog)
+  (start_scheduler)
 
-    (if CONFIG/slack/app_token
-      # Socket Mode: connect to Slack via outbound WebSocket (no public URL needed)
-      (log .info #"Starting Slack Socket Mode on http://localhost:#{CONFIG/port}")
-      (log .info "Endpoints: GET /health, GET /api/config, POST /api/chat, POST /slack/events (disabled)")
-      (genex/http/start_server CONFIG/port handle_request)
-      (genex/ai/start_slack_socket_mode CONFIG/slack/app_token CONFIG/slack/bot_token handle_socket_slack_command)
-    else
-      # Webhook mode: Slack sends events via HTTP POST
-      (log .info #"Starting server on http://localhost:#{CONFIG/port}")
-      (log .info "Endpoints: GET /health, GET /api/config, POST /api/chat, POST /slack/events")
-      (genex/http/start_server CONFIG/port handle_request)
-    )
-    (run_forever)
+  (if CONFIG/slack/app_token
+    # Socket Mode: connect to Slack via outbound WebSocket (no public URL needed)
+    (log .info #"Starting Slack Socket Mode on http://localhost:#{CONFIG/port}")
+    (log .info "Endpoints: GET /health, GET /api/config, POST /api/chat, POST /slack/events (disabled)")
+    (genex/http/start_server CONFIG/port handle_request)
+    (genex/ai/start_slack_socket_mode CONFIG/slack/app_token CONFIG/slack/bot_token handle_socket_slack_command)
+  else
+    # Webhook mode: Slack sends events via HTTP POST
+    (log .info #"Starting server on http://localhost:#{CONFIG/port}")
+    (log .info "Endpoints: GET /health, GET /api/config, POST /api/chat, POST /slack/events")
+    (genex/http/start_server CONFIG/port handle_request)
   )
+  (run_forever)
 )

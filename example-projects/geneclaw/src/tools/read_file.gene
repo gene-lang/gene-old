@@ -2,16 +2,22 @@
 
 (fn $ns/register_read_file_tool [register_tool log workspace_root]
   (register_tool "read_file"
-    "Read a file within the workspace"
+    "Read a file from the current launch directory using a relative path"
     {^type "object"
      ^properties {
-       ^path {^type "string" ^description "Relative path within workspace"}
+       ^path {^type "string" ^description "Relative path within the current launch directory"}
      }
      ^required ["path"]}
     (fn [args]
-      (var path args/path)
+      (var path ((args/path || "") .to_s))
       (if path/.empty?
         (return {^error "Missing path"})
+      )
+      (if ((path .starts_with "/") || (path .starts_with "~"))
+        (return {^error "Path must be relative to the current workspace"})
+      )
+      (if (path .include? "..")
+        (return {^error "Path traversal not allowed"})
       )
 
       (var full_path #"#{workspace_root}/#{path}")

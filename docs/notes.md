@@ -2,7 +2,7 @@
 
 cd example-projects/geneclaw
 source .env
-GENE_AI_DEBUG=1 gene run --no-gir-cache src/main.gene
+gene run --no-gir-cache src/main.gene
 
 curl -s 'http://localhost:4090/api/config?path=llm/openai' | gene format
 

@@ -17,10 +17,10 @@
 
 (fn $ns/register_write_file_tool [register_tool log workspace_root]
   (register_tool "write_file"
-    "Write or create a file within the workspace using a relative path. Include both path and complete content in the same call."
+    "Write or create a file inside the managed scratch workspace at GENECLAW_HOME/tmp using a relative path. Include both path and complete content in the same call."
     {^type "object"
      ^properties {
-       ^path {^type "string" ^description "Relative path within workspace; absolute paths are not allowed"}
+       ^path {^type "string" ^description "Relative path within GENECLAW_HOME/tmp; absolute paths are not allowed"}
        ^content {^type "string" ^description "Complete file content to write; do not omit this field"}
      }
      ^required ["path" "content"]}

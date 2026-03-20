@@ -29,6 +29,32 @@
 # Tool registry: name -> {^description ^params ^handler}
 (var TOOLS {})
 
+(fn summarize_log_text [value max_len = 240]
+  (var raw ((value || "") .to_s))
+  (raw = (raw .replace "\r" "\\r"))
+  (raw = (raw .replace "\n" "\\n"))
+  (if (raw/.length > max_len)
+    #"#{(raw .substr 0 (max_len - 16))}...(len=#{raw/.length})"
+  else
+    raw
+  )
+)
+
+(fn summarize_log_value [value max_len = 240]
+  (var rendered
+    (try
+      (if ((value is Map) || (value is Array))
+        value/.to_json
+      else
+        ((value || "") .to_s)
+      )
+    catch *
+      "<unserializable>"
+    )
+  )
+  (summarize_log_text rendered max_len)
+)
+
 (fn tool_result_success? [result]
   (if (result is Map)
     (result/ok || result/error/.empty?)
@@ -54,7 +80,7 @@
   (log .info #"invoke_tool run=#{run_id} tool=#{tool_name}")
   (var tool_args (ifel (args is Map) args {}))
   (if (args is Map)
-    (log .debug #"invoke_tool args=#{tool_args/.to_json}")
+    (log .debug #"invoke_tool args=#{(summarize_log_value tool_args)}")
   else
     (log .warn "invoke_tool args is not a map; coercing to {}")
   )
@@ -105,13 +131,13 @@
     (var duration (gene/now/.call/.to_i - start_ms))
     (if (tool_result_success? result)
       (log .info #"Tool #{tool_name} succeeded in #{duration}ms")
-      (log .debug #"Tool #{tool_name} result=#{result/.to_json}")
+      (log .debug #"Tool #{tool_name} result=#{(summarize_log_value result)}")
       (audit_log run_id workspace_id tool_name "success" tool_args result duration)
       {^ok true ^result result}
     else
       (var error_msg (tool_result_error result))
       (log .warn #"Tool #{tool_name} returned failure in #{duration}ms: #{error_msg}")
-      (log .debug #"Tool #{tool_name} result=#{result/.to_json}")
+      (log .debug #"Tool #{tool_name} result=#{(summarize_log_value result)}")
       (audit_log run_id workspace_id tool_name "failed" tool_args result duration)
       {^ok false ^error error_msg ^result result}
     )
@@ -141,6 +167,7 @@
 
 (fn $ns/init_tools []
   (log .info "Initializing built-in tools")
+  (var inspect_root (cwd))
 
   # Ensure scratch and asset roots exist
   (try
@@ -149,18 +176,19 @@
   catch *
     (log .warn #"Could not create managed roots: #{$ex/message}")
   )
+  (log .info #"Tool roots: inspect=#{inspect_root} mutate=#{TMP_PATH} documents=#{DOCUMENT_ROOT} artifacts=#{ARTIFACT_ROOT}")
 
   # Register tool modules
   (register_get_time_tool register_tool log)
   (register_shell_tool register_tool log TMP_PATH)
-  (register_read_file_tool register_tool log TMP_PATH)
+  (register_read_file_tool register_tool log inspect_root)
   (register_write_file_tool register_tool log TMP_PATH)
   (register_http_get_tool register_tool log)
   (register_browser_playwright_tool register_tool log TMP_PATH ARTIFACT_ROOT)
   (register_schedule_tool register_tool log)
   (register_self_upgrade_tool register_tool log)
   (register_web_search_tool register_tool log)
-  (register_list_files_tool register_tool log TMP_PATH)
+  (register_list_files_tool register_tool log inspect_root)
   (register_edit_file_tool register_tool log TMP_PATH)
   (register_patch_file_tool register_tool log TMP_PATH)
   (register_send_message_tool register_tool log)
@@ -168,7 +196,7 @@
   (register_delete_file_tool register_tool log TMP_PATH)
   (register_tmux_send_tool register_tool log)
   (register_tmux_tail_tool register_tool log)
-  (register_grep_tool register_tool log TMP_PATH)
+  (register_grep_tool register_tool log inspect_root)
   (register_memory_tools register_tool log)
 
   (log .info #"Registered #{TOOLS/.size} tools")

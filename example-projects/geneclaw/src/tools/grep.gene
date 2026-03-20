@@ -2,21 +2,24 @@
 
 (fn $ns/register_grep_tool [register_tool log workspace_root]
   (register_tool "grep"
-    "Search file contents using ripgrep within the workspace"
+    "Search files in the current launch directory using ripgrep and relative paths"
     {^type "object"
      ^properties {
        ^pattern {^type "string" ^description "Search pattern (regex)"}
-       ^path {^type "string" ^description "Relative path within workspace (default '.')"}
+       ^path {^type "string" ^description "Relative path within the current launch directory (default '.')"}
        ^flags {^type "string" ^description "Additional rg flags (optional)"}
      }
      ^required ["pattern"]}
     (fn [args]
       (var pattern args/pattern)
-      (var path (args/path || "."))
+      (var path (((args/path || ".") .to_s) || "."))
       (var flags (args/flags || ""))
 
       (if pattern/.empty?
         (return {^error "Missing pattern"})
+      )
+      (if ((path .starts_with "/") || (path .starts_with "~"))
+        (return {^error "Path must be relative to the current workspace"})
       )
       # Block path traversal
       (if (path .include? "..")
