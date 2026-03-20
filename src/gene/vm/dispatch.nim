@@ -591,14 +591,20 @@ proc call_missing_method(self: ptr VirtualMachine, value: Value, value_class: Cl
     return false
   if self.missing_method_depth >= MissingMethodMaxDepth:
     not_allowed("on_method_missing recursion limit exceeded while resolving '" & missing_name & "'")
-  self.missing_method_depth.inc()
-  defer:
-    self.missing_method_depth.dec()
   if value_class.runtime_type != nil:
     discard resolve_method(value_class.runtime_type, "on_method_missing".to_key())
   let missing = value_class.get_method("on_method_missing")
   if missing == nil:
     return false
+
+  self.missing_method_depth.inc()
+  # For native methods invoke_method_value completes synchronously, so
+  # decrement immediately.  For Gene functions a new frame is pushed and the
+  # body executes later in the VM loop — don't decrement here so that the
+  # recursive call_missing_method sees the accumulated depth.
+  if missing.callable.kind == VkNativeFn:
+    defer:
+      self.missing_method_depth.dec()
 
   var missing_args = newSeq[Value](args.len + 1)
   missing_args[0] = missing_name.to_symbol_value()

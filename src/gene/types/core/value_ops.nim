@@ -522,6 +522,10 @@ proc str_no_quotes*(self: Value): string {.gcsafe.} =
         result = $self.ref.time_hour & ":" & $self.ref.time_minute & ":" & $self.ref.time_second
       of VkFuture:
         result = "<Future " & $self.ref.future.state & ">"
+      of VkEnum:
+        result = self.ref.enum_def.name
+      of VkEnumMember:
+        result = self.ref.enum_member.parent.ref.enum_def.name & "/" & self.ref.enum_member.name
       of VkCustom:
         if self.ref != nil and self.ref.custom_data != nil and self.ref.custom_data.materialize_hook != nil:
           result = self.ref.custom_data.materialize_hook(self.ref.custom_data).str_no_quotes()
@@ -602,6 +606,10 @@ proc `$`*(self: Value): string {.gcsafe.} =
         result = $self.ref.time_hour & ":" & $self.ref.time_minute & ":" & $self.ref.time_second
       of VkFuture:
         result = "<Future " & $self.ref.future.state & ">"
+      of VkEnum:
+        result = self.ref.enum_def.name
+      of VkEnumMember:
+        result = self.ref.enum_member.parent.ref.enum_def.name & "/" & self.ref.enum_member.name
       of VkCustom:
         if self.ref != nil and self.ref.custom_data != nil and self.ref.custom_data.materialize_hook != nil:
           result = $self.ref.custom_data.materialize_hook(self.ref.custom_data)
