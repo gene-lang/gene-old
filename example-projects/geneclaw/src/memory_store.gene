@@ -36,6 +36,48 @@
   )
 )
 
+(fn truncate_text [text max_len = 240]
+  (var raw ((text || "") .to_s))
+  (if ((max_len <= 0) || (raw/.length <= max_len))
+    raw
+  elif (max_len <= 3)
+    (raw .substr 0 max_len)
+  else
+    #"#{(raw .substr 0 (max_len - 3))}..."
+  )
+)
+
+(fn structured_warning_payload? [text]
+  (var raw (((text || "") .to_s) .trim))
+  (if raw/.empty?
+    false
+  else
+    (((raw .starts_with "{") || (raw .starts_with "{^")) &&
+     ((raw .include? "\"data\"") ||
+      (raw .include? "^data ") ||
+      (raw .include? "\"embedding\"") ||
+      (raw .include? "^embedding ") ||
+      (raw .include? "\"model\"") ||
+      (raw .include? "^model ")))
+  )
+)
+
+(fn normalize_warning_text [warning fallback = ""]
+  (var default_text ((fallback || "") .to_s))
+  (var raw ((value_text warning default_text) .trim))
+  (if raw/.empty?
+    (return default_text)
+  )
+  (if (structured_warning_payload? raw)
+    (return (if default_text/.empty?
+      "unexpected response payload"
+    else
+      #"#{default_text}: unexpected response payload"
+    ))
+  )
+  (truncate_text raw 240)
+)
+
 (fn record_value [record key fallback]
   (if record
     (record .get key fallback)
@@ -60,8 +102,8 @@
 )
 
 (fn merge_warning_messages [left right]
-  (var left_text ((value_text left "") .trim))
-  (var right_text ((value_text right "") .trim))
+  (var left_text ((normalize_warning_text left "") .trim))
+  (var right_text ((normalize_warning_text right "") .trim))
   (if left_text/.empty?
     right_text
   elif right_text/.empty?
@@ -396,22 +438,120 @@
   (new OpenAIClient client_opts)
 )
 
+(fn value_kind_name [value]
+  (if (value == nil)
+    "nil"
+  elif (value is Array)
+    "array"
+  elif (value is Map)
+    "map"
+  elif (value is String)
+    "string"
+  elif (value is Bool)
+    "bool"
+  elif (value is Int)
+    "int"
+  elif (value is Float)
+    "float"
+  else
+    "value"
+  )
+)
+
+(fn map_keys_preview [record limit = 6]
+  (if_not (record is Map)
+    (return "")
+  )
+  (var names [])
+  (var idx 0)
+  (for key in record/.keys
+    (if (idx >= limit)
+      (break)
+    )
+    (names .append (((key || "") .to_s) .trim))
+    (idx += 1)
+  )
+  (names .join ",")
+)
+
+(fn embedding_response_summary [response]
+  (if_not (response is Map)
+    (return #"response_kind=#{(value_kind_name response)}")
+  )
+
+  (var summary_parts [#"keys=#{(map_keys_preview response)}"])
+  (var data_value ((response .get "data" nil) || nil))
+  (summary_parts .append #"data_kind=#{(value_kind_name data_value)}")
+
+  (if ((data_value is Array) && data_value/.not_empty?)
+    (var first_item (ensure_map (data_value .get 0)))
+    (summary_parts .append #"first_keys=#{(map_keys_preview first_item)}")
+    (var embedding_value ((first_item .get "embedding" nil) || nil))
+    (if (embedding_value is Array)
+      (summary_parts .append #"embedding_size=#{embedding_value/.size}")
+    )
+  elif (data_value is Map)
+    (var data_map (ensure_map data_value))
+    (summary_parts .append #"data_keys=#{(map_keys_preview data_map)}")
+    (var embedding_value ((data_map .get "embedding" nil) || nil))
+    (if (embedding_value is Array)
+      (summary_parts .append #"embedding_size=#{embedding_value/.size}")
+    )
+  elif ((response .get "embedding" nil) is Array)
+    (summary_parts .append #"embedding_size=#{((response .get "embedding" []) .size)}")
+  )
+
+  (summary_parts .join " ")
+)
+
+(fn extract_embedding_vector [response]
+  (if_not (response is Map)
+    (return {^ok false ^summary (embedding_response_summary response)})
+  )
+
+  (var data_value ((response .get "data" nil) || nil))
+  (if ((data_value is Array) && data_value/.not_empty?)
+    (var first_item (ensure_map (data_value .get 0)))
+    (var embedding_value (ensure_array ((first_item .get "embedding" []) || [])))
+    (if embedding_value/.not_empty?
+      (return {^ok true ^vector embedding_value})
+    )
+  elif (data_value is Map)
+    (var data_map (ensure_map data_value))
+    (var embedding_value (ensure_array ((data_map .get "embedding" []) || [])))
+    (if embedding_value/.not_empty?
+      (return {^ok true ^vector embedding_value})
+    )
+  )
+
+  (var top_level_embedding (ensure_array ((response .get "embedding" []) || [])))
+  (if top_level_embedding/.not_empty?
+    (return {^ok true ^vector top_level_embedding})
+  )
+
+  {^ok false ^summary (embedding_response_summary response)}
+)
+
 (fn embedding_error_message [response]
   (if (response is OpenAIError)
-    (return ((response .to_s) .to_s))
+    (var message (normalize_warning_text (response/message || response/provider_error || response/raw_body || (response .to_s)) "Embedding request failed"))
+    (if message/.not_empty?
+      (return message)
+    )
+    (return "Embedding request failed")
   )
   (if_not (response is Map)
     (return "Embedding request failed")
   )
   (var error_map (if (response/error is Map) response/error else nil))
   (if error_map
-    (var message (record_text error_map "message" "Embedding request failed"))
+    (var message (normalize_warning_text (record_text error_map "message" "") "Embedding request failed"))
     (if message/.not_empty?
       (return message)
     )
   )
   (if (text_equals? ((response/type || "") .to_s) "error")
-    (return (record_text response "message" "Embedding request failed"))
+    (return (normalize_warning_text (record_text response "message" "") "Embedding request failed"))
   )
   ""
 )
@@ -422,20 +562,19 @@
   )
   (var client (build_embedding_client))
   (var response (client .embeddings {^model EMBEDDING_MODEL ^input ((text || "") .to_s) ^encoding_format "float"}))
+  (var extracted (extract_embedding_vector response))
+  (if extracted/ok
+    (return {^ok true ^vector extracted/vector})
+  )
   (var error_message (embedding_error_message response))
   (if error_message/.not_empty?
     (return {^ok false ^error error_message})
   )
-  (var data (ensure_array (if (response is Map) (response/data || []) else [])))
-  (if data/.empty?
-    (return {^ok false ^error "Embedding request returned no data"})
+  (var summary ((extracted/summary || "") .to_s))
+  (if summary/.not_empty?
+    (return {^ok false ^error #"Embedding request returned no vector (#{summary})"})
   )
-  (var first (ensure_map (data .get 0)))
-  (var vector (ensure_array (first/embedding || [])))
-  (if vector/.empty?
-    (return {^ok false ^error "Embedding request returned no vector"})
-  )
-  {^ok true ^vector vector}
+  {^ok false ^error "Embedding request returned no vector"}
 )
 
 (fn build_reuse_map [index]
@@ -571,7 +710,8 @@
     (return false)
   )
   (for chunk in (ensure_array (current/chunks || []))
-    (var vector (ensure_array ((ensure_map chunk)/vector || [])))
+    (var normalized (ensure_map chunk))
+    (var vector (ensure_array (normalized/vector || [])))
     (if vector/.not_empty?
       (return true)
     )
@@ -610,7 +750,7 @@
         (vector = embedding/vector)
       else
         (stop_embedding = true)
-        (embedding_warning = (embedding/error || "Embedding index build failed"))
+        (embedding_warning = (normalize_warning_text (embedding/error || "Embedding index build failed") "Embedding index build failed"))
         (log .warn #"memory index embedding refresh skipped: #{embedding_warning}")
       )
     )
@@ -660,7 +800,7 @@
       (move_file (index_tmp_file_path) (index_file_path))
       (reindexed = true)
     catch *
-      (warning = #"Index refresh failed: #{$ex/message}")
+      (warning = (normalize_warning_text #"Index refresh failed: #{$ex/message}" "Index refresh failed"))
       (remove_index_file)
     )
   else
@@ -897,7 +1037,7 @@
   )
 
   (var ensured_index (ensure_map (ensured .get "index" {})))
-  (var warning_text ((ensured/warning || "") .to_s))
+  (var warning_text (normalize_warning_text (ensured/warning || "") ""))
   (if warning_text/.not_empty?
     (log .warn #"memory_search index warning: #{warning_text}")
   )

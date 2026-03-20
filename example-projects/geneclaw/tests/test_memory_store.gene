@@ -2,7 +2,7 @@
 
 (import MEMORY_ROOT MEMORY_MARKDOWN_PATH MEMORY_INDEX_PATH from "config")
 (import file_exists? from "home_store")
-(import memory_read memory_write memory_search sort_results_by_score cosine_similarity from "memory_store")
+(import memory_read memory_write memory_search sort_results_by_score cosine_similarity normalize_warning_text extract_embedding_vector from "memory_store")
 
 (system/shell #"rm -rf '#{MEMORY_ROOT}'")
 
@@ -75,5 +75,17 @@
 
 (assert ((cosine_similarity [1.0 0.0] [1.0 0.0]) > 0.99))
 (assert ((cosine_similarity [1.0 0.0] [0.0 1.0]) < 0.01))
+
+(var structured_warning "{^model \"text-embedding-3-small\" ^data [{^embedding [1 2 3]}]}")
+(assert ((normalize_warning_text structured_warning "Embedding index build failed") == "Embedding index build failed: unexpected response payload"))
+(assert ((normalize_warning_text "Embedding request timed out" "Embedding index build failed") == "Embedding request timed out"))
+
+(var extracted_standard (extract_embedding_vector {^data [{^embedding [1.0 2.0 3.0]}]}))
+(assert (extracted_standard/ok == true))
+(assert (extracted_standard/vector/.size == 3))
+
+(var extracted_map (extract_embedding_vector {^data {^embedding [4.0 5.0]}}))
+(assert (extracted_map/ok == true))
+(assert (extracted_map/vector/.size == 2))
 
 (println "ok")
