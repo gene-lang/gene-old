@@ -3,7 +3,7 @@
 ## 8.1 Namespaces
 
 ```gene
-(ns Geometry
+(ns geometry
   (class /Shape2D
     (method area _ 0))
 
@@ -13,7 +13,7 @@
 ```
 
 - Members prefixed with `/` are exported from the namespace
-- Access via path: `Geometry/Rect`, `Geometry/Shape2D`
+- Access via path: `geometry/Rect`, `geometry/Shape2D`
 - Namespaces can be nested
 
 ## 8.2 Imports
@@ -74,13 +74,15 @@ Special variables available everywhere:
 
 | Variable    | Description                              |
 |-------------|------------------------------------------|
+| `$app`      | The application object                   |
 | `$env`      | Environment variables (read-only map)    |
+| `$cwd`      | Current working directory path           |
 | `$program`  | Current program path                     |
 | `$args`     | Command-line arguments                   |
 | `$ex`       | Current exception in catch block         |
 
 ```gene
-$env/HOME              # => "/Users/gcao"
+$env/HOME                     # => "/Users/gcao"
 ($env/MISSING || "default")   # Fallback for missing
 ```
 

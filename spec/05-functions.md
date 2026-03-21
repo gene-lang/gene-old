@@ -138,9 +138,6 @@ Functions can carry metadata:
     [2 3] -> 5
   ]
   (a + b))
-
-(function_intent my_add)     # => "Add two values"
-(function_examples my_add)   # => [[1,2] -> 3, [2,3] -> 5]
 ```
 
 ---
@@ -148,9 +145,7 @@ Functions can carry metadata:
 ## Potential Improvements
 
 - **Tail call optimization**: Recursive functions are not TCO'd. Deep recursion overflows the stack. This is the single most impactful missing optimization for a Lisp-like language.
-- **Multi-body functions**: No support for multiple arities in a single definition (e.g., Clojure's `(fn ([x] ...) ([x y] ...))`).
 - **Keyword argument ergonomics**: The `^`, `^^`, `^!` syntax is powerful but has a steep learning curve. Consider whether the three-way distinction is necessary or if `^name` + `^name = default` would suffice.
-- **Named arguments at call site**: Keywords must match exactly. No positional-to-keyword bridging.
 - **Partial application / currying**: No built-in `partial` or auto-currying. Must manually create wrapper closures.
 - **Macro hygiene**: Macros using `$caller_eval` are not hygienic — they can capture or shadow caller variables unintentionally. A hygienic macro system would prevent accidental name collisions.
 - **Compile-time macro expansion**: Macros expand at runtime, not compile time. This means macro overhead on every call. Compile-time expansion would eliminate this cost.

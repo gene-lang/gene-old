@@ -27,18 +27,6 @@
 (var r (new Rect 3 4))
 ```
 
-### Macro Constructor (unevaluated args)
-```gene
-(class LazyBox
-  (ctor! [expr]
-    (/raw = expr)))
-
-(var lb (new! LazyBox (+ 1 2)))
-lb/raw   # => the AST node (+ 1 2), not 3
-```
-
-A class has either `ctor` or `ctor!`, not both.
-
 ## 7.3 Methods
 
 ### Regular Methods
@@ -49,12 +37,6 @@ A class has either `ctor` or `ctor!`, not both.
     (/value = (/value + n))
     /value)
   (method get _ /value))
-```
-
-### Macro Methods
-```gene
-(method eval! [expr]
-  ($caller_eval expr))
 ```
 
 ### Method Calls
@@ -110,7 +92,6 @@ The `^fields` property declares field names and types as metadata.
 ```
 
 - `(super .method args...)` — call parent's regular method
-- `(super .method! args...)` — call parent's macro method
 - `(super .ctor args...)` — call parent constructor
 - Single inheritance only (one parent class)
 

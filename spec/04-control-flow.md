@@ -61,12 +61,17 @@ Iterates over collections and generators:
 (for x in [1 2 3 4]
   (println x))
 
-# Destructuring
-(for [k v] in (pairs*)
+# Map destructuring
+(for [k v] in {^a 1 ^b 2}
   (println k "=" v))
 
 # Generator iteration
-(for x in (counter* 10)
+(fn counter* [n]
+  (var i 0)
+  (while (i < n)
+    (yield i)
+    (i += 1)))
+(for x in (counter* 5)
   (println x))
 ```
 

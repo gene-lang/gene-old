@@ -10,8 +10,31 @@ catch *
 ```
 
 - `catch *` catches **all** exceptions
+- `catch SomeError` catches only exceptions of type `SomeError`
 - `$ex` references the caught exception within the catch block
 - `$ex` has a `.message` property
+
+### Catch by Type
+
+```gene
+(try
+  (risky_operation)
+catch SomeError
+  (println $ex/message))
+```
+
+Multiple typed catch clauses can be chained:
+
+```gene
+(try
+  (risky_operation)
+catch IoError
+  (println "IO failed:" $ex/message)
+catch ParseError
+  (println "Parse failed:" $ex/message)
+catch *
+  (println "Unknown error:" $ex))
+```
 
 ### With `finally`
 ```gene
@@ -26,15 +49,18 @@ finally
 
 `finally` always executes, whether or not an exception occurred.
 
-### Important: Always use `catch *`
+### Important: Use `catch *` or `catch TypeName`
 
 Do not name the exception variable in catch:
 ```gene
 # WRONG — causes panic on macOS
 (try ... catch e ...)
 
-# CORRECT
+# CORRECT — catch all
 (try ... catch * (println $ex))
+
+# CORRECT — catch by type
+(try ... catch SomeError (println $ex/message))
 ```
 
 ## 9.2 Throw
@@ -93,9 +119,7 @@ Contracts can be disabled at runtime for performance.
 
 ## Potential Improvements
 
-- **Named catch bindings**: `catch *` is the only working form. Named bindings (`catch e`) should work to avoid the global `$ex` pattern.
-- **Exception types/classes**: No typed exceptions. Cannot selectively catch specific exception types. Must catch all and inspect.
-- **Multiple catch clauses**: Cannot have `catch TypeError ... catch ValueError ...` — only `catch *`.
+- **Exception hierarchies**: Typed catch works (`catch SomeError`), but deeper inheritance-based exception hierarchies could be explored.
 - **Exception chaining**: No built-in way to wrap an exception with additional context (e.g., "failed to load config: file not found").
 - **Stack traces**: Exception stack traces are limited. Improved trace formatting with source locations would aid debugging.
 - **`with` / resource management**: No RAII or `with` statement for automatic resource cleanup. `finally` works but requires manual boilerplate.
