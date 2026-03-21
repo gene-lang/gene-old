@@ -20,18 +20,23 @@ Generator functions produce values lazily via `yield`. They are defined with a `
 gen/.next     # => 0
 gen/.next     # => 1
 gen/.next     # => 2
-gen/.next     # => NOT_FOUND (exhausted)
+gen/.next     # => not_found (exhausted)
 ```
 
 ### `for` Loop Integration
 ```gene
 (for x in (counter* 5)
   (println x))
+# Prints: 0 1 2 3 4 (one per line)
 ```
 
 ### Check Exhaustion
 ```gene
-gen/.has_next   # true if more values available
+(var gen (counter* 2))
+(while (gen .has_next)
+  (println (gen .next)))
+# Prints: 0 1
+(println (gen .next))   # => not_found
 ```
 
 ## 11.3 Anonymous Generator Functions
@@ -55,7 +60,7 @@ Use the `^^generator` flag:
 Generators implement the iterator protocol:
 
 - `.iter` — returns self
-- `.next` — returns next value or `NOT_FOUND`
+- `.next` — returns next value or `not_found`
 - `.has_next` — peek without consuming
 
 Any object implementing these methods works with `for`.
@@ -63,12 +68,17 @@ Any object implementing these methods works with `for`.
 ## 11.5 Destructuring in `for`
 
 ```gene
-(fn pairs* [m]
-  # yields [key, value] pairs from a map
-  ...)
+(fn pairs* []
+  (yield [0 "apple"])
+  (yield [1 "banana"])
+  (yield [2 "cherry"]))
 
-(for [k v] in (pairs* my_map)
-  (println k "=" v))
+(for [i fruit] in (pairs*)
+  (println i "=" fruit))
+# Prints:
+# 0 = apple
+# 1 = banana
+# 2 = cherry
 ```
 
 ---
@@ -76,10 +86,10 @@ Any object implementing these methods works with `for`.
 ## Potential Improvements
 
 - **Generator delegation (`yield*`)**: No way to delegate to another generator. Must manually iterate and re-yield.
-- **Generator return values**: Generators return `NOT_FOUND` on exhaustion. No way to return a final value (like Python's `StopIteration.value`).
+- **Generator return values**: Generators return `not_found` on exhaustion. No way to return a final value (like Python's `StopIteration.value`).
 - **Bidirectional generators**: Cannot send values into a generator (like Python's `gen.send(value)`). Generators are pull-only.
 - **Infinite generators and safety**: No built-in take/drop/limit combinators. Easy to accidentally consume an infinite generator in a `for` loop.
 - **Generator composition**: No built-in way to chain, zip, or transform generators without materializing into arrays first.
 - **Async generators**: No way to yield async values. Would need `async fn*` and `for await` patterns.
 - **Anonymous generator syntax**: The `^^generator` flag is non-obvious compared to the `*` suffix on named generators. Consider `(fn* [args] ...)` for consistency.
-- **`NOT_FOUND` sentinel**: Using a sentinel value for exhaustion means `NOT_FOUND` cannot be yielded as a regular value. Consider a wrapper type or protocol-based exhaustion signal.
+- **`not_found` sentinel**: Using a sentinel value for exhaustion means `not_found` cannot be yielded as a regular value. Consider a wrapper type or protocol-based exhaustion signal.
