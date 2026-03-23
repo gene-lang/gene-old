@@ -1,5 +1,6 @@
 import unittest
 import strutils
+import json
 import gene/types except Exception
 import gene/vm
 
@@ -38,6 +39,8 @@ suite "Source trace diagnostics":
       check false
     except types.Exception as e:
       let msg = e.msg
-      check "runtime.gene" in msg
-      check ":1:" in msg
+      let diag = parseJson(msg)
+      check diag["span"]["file"].getStr() == "runtime.gene"
+      check diag["span"]["line"].getInt() == 1
+      check diag["span"]["column"].getInt() == 5
       check "boom" in msg

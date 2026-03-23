@@ -34,6 +34,9 @@ models/
 tests/test_*
 !tests/test_*.nim
 !tests/test_*.sh
+tests/integration/test_*
+!tests/integration/test_*.nim
+!tests/integration/test_*.sh
 
 *.db
 *.sqlite*
