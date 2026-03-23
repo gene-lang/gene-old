@@ -1,7 +1,8 @@
 # Gene Compiler Architecture
 
 **Date:** 2026-02-07  
-**Status:** Design document — describes current state and target architecture
+**Status:** Implementation note — describes the current compiler pipeline and the
+descriptor-first typing path in the Nim VM
 
 ## Overview
 

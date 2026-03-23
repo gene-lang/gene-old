@@ -38,7 +38,7 @@ Living document tracking cleanup work across design, implementation, documentati
 ## P1 — Important Next
 
 ### Documentation Consolidation & Missing Docs
-- [ ] Merge overlapping docs: `proposals/future/ai-first.md` vs `proposals/future/ai-first-design.md`, `thread_support.md` vs `proposals/archive/threading.md`, `proposals/future/selector_design.md` vs `proposals/future/dynamic_selector_design.md` vs `dispatch-design.md` vs `proposals/future/dynamic_method_dispatch.md`
+- [ ] Merge overlapping docs: `proposals/future/ai-first.md` vs `proposals/future/ai-first-design.md`, `thread_support.md` vs `proposals/archive/threading.md`, `proposals/future/selector_design.md` vs `proposals/future/dynamic_selector_design.md` vs `proposals/implemented/dispatch-design.md` vs `proposals/future/dynamic_method_dispatch.md`
 - [ ] Merge `proposals/future/type-serialization.md` / `proposals/future/type-serialization-design.md` / `proposals/future/serialization_design.md` / `proposals/future/json_serialization.md` into one serialization doc
 - [ ] Merge `package_support.md` and `proposals/future/packaging.md`
 - [ ] Consolidate `proposals/future/oop_inheritance.md` / `proposals/future/oop_updated_design.md` / `proposals/future/constructor_design.md` into one OOP design doc
@@ -102,6 +102,8 @@ Track completed cleanup work here with dates:
 - 2026-03-23: Initial spec/test audit: `testsuite/` covers most major spec areas, but destructuring edge cases and thread messaging APIs are still covered mainly in Nim tests rather than runnable `testsuite/` programs.
 - 2026-03-23: Reorganized `testsuite/` so the default runner follows `spec/` section numbering (`01-syntax` through `15-serialization`), added dedicated section coverage for errors, patterns, regex, serialization, and thread-style async replies, and restored the full `testsuite/run_tests.sh` pass to green.
 - 2026-03-23: Moved proposal/design/history docs out of the `docs/` root into `docs/proposals/{future,implemented,archive}/` and rewrote `docs/README.md` so the root docs now skew toward current implementation/reference material.
+- 2026-03-23: Demoted scratch and design-era leftovers out of the `docs/` root (`NOTES`, `development_notes`, `dispatch-design`, `symbol_resolution`) and rewrote the HTTP, benchmark, and LSP docs around current code paths.
+- 2026-03-23: Documented the current spec-coverage gap in `docs/README.md`: compiler internals, GIR, wasm, HTTP/C extensions, and LSP are still implementation-only docs rather than `spec/` sections.
 
 ## Agent Comments
 

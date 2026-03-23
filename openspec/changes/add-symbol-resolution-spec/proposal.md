@@ -12,6 +12,6 @@ Symbol resolution rules are currently documented but not formalized as OpenSpec 
 
 ## Impact
 - Affected specs: new `symbol-resolution` capability.
-- Affected docs: `docs/symbol_resolution.md` should be aligned after approval.
+- Affected docs: `docs/proposals/archive/symbol_resolution.md` should be aligned after approval.
 - Affected code: parser keyword handling, compiler symbol resolution order, namespace/import handling, and VM symbol lookup.
 - Related changes: overlaps with `openspec/changes/add-module-system`, `openspec/changes/implement-complex-symbol-access`, and `openspec/changes/add-thread-support`.

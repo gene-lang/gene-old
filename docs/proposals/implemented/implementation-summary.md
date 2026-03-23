@@ -57,8 +57,8 @@ is_compatible(v, "Numeric")  # Int and Float compatible with Numeric
 ### 3. Dispatch Design Documentation ✅
 
 **Created:**
-- `docs/dispatch-design.md` - Architecture and implementation plan
-- `docs/dispatch-example.gene` - Usage examples
+- `docs/proposals/implemented/dispatch-design.md` - Architecture and implementation plan
+- `docs/proposals/implemented/dispatch-example.gene` - Usage examples
 
 **Design:**
 ```
@@ -244,6 +244,6 @@ The runtime_types module provides:
 ## References
 
 - Type System MVP: `docs/type-system-mvp.md`
-- Dispatch Design: `docs/dispatch-design.md`
-- Examples: `docs/dispatch-example.gene`
+- Dispatch Design: `docs/proposals/implemented/dispatch-design.md`
+- Examples: `docs/proposals/implemented/dispatch-example.gene`
 - Runtime Types: `src/gene/types/runtime_types.nim`

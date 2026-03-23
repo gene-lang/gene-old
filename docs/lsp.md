@@ -1,228 +1,87 @@
-# Gene Language Server Protocol (LSP) Implementation
+# Gene LSP
 
-## Overview
+Gene ships an LSP server through the `gene lsp` command.
 
-Gene now includes a Language Server Protocol (LSP) implementation that provides modern IDE features for Gene code. The LSP server is integrated directly into the `gene` CLI and enables syntax highlighting, error checking, code completion, and other language services in any LSP-compatible editor.
+This document describes the current implementation in `src/commands/lsp.nim`
+and `src/gene/lsp/`. It is an implementation note, not a language-spec
+document.
 
-**Current Status**: Phase 2 (Language Analysis) is complete. The server parses Gene documents, extracts symbols, provides completions, reports diagnostics, and shows hover information.
+## Startup Modes
 
-**Architecture Note**: The LSP implementation prioritizes simplicity over precision. Position tracking is not stored in the parser output to avoid complexity and conflicts with Gene's property system. LSP features work by symbol name matching rather than exact line/column positions.
-
-## Features
-
-### Phase 1: Core Infrastructure ✅ COMPLETED
-- ✅ **LSP Protocol Compliance**: Full JSON-RPC message handling
-- ✅ **Server Lifecycle**: Initialize, shutdown, and capability negotiation
-- ✅ **Document Synchronization**: Open, close, and change notifications
-- ✅ **CLI Integration**: `gene lsp` command with configuration options
-- ✅ **Async I/O**: Non-blocking request handling with TCP sockets
-- ✅ **Capability Negotiation**: Server advertises supported features to clients
-
-### Phase 2: Language Analysis ✅ COMPLETED
-- ✅ **Gene Parser Integration**: Documents parsed using existing Gene parser
-- ✅ **Symbol Extraction**: Functions, variables, classes, modules by name
-- ✅ **Code Completion**: Keywords + document symbols with proper kinds
-- ✅ **Error Diagnostics**: Parse errors reported to client in real-time
-- ✅ **Hover Information**: Shows all symbols in document
-- ✅ **Find References**: Locate symbol usages by name matching
-- ✅ **Workspace Symbols**: Project-wide symbol search
-- ⚠️ **Position Tracking**: Not implemented (simplicity over precision)
-- ⚠️ **Incremental Parsing**: Full document reparse on changes
-
-### Phase 3: Advanced Features ✅ CORE COMPLETE
-- ✅ **Find References**: Locate all usages of a symbol in document
-- ✅ **Workspace Symbols**: Project-wide symbol search across all documents
-- ✅ **Reference Tracking**: Tracks both definitions and usages
-- ⚠️ **Scope-Aware Completion**: Basic completion (needs scope analysis)
-- ❌ **Document Formatting**: Automatic S-expression formatting
-- ❌ **Rename Symbol**: Safe refactoring with scope awareness
-- ❌ **Signature Help**: Function parameter hints while typing
-- ❌ **Code Actions**: Quick fixes and refactorings
-- ❌ **Incremental Parsing**: Optimize for large files
-
-## Usage
-
-### Starting the LSP Server
+Default mode is stdio:
 
 ```bash
-# Start with default settings (localhost:8080)
 gene lsp
-
-# Start with custom port and tracing
-gene lsp --port 9000 --trace
-
-# Start with workspace directory
-gene lsp --workspace /path/to/project --trace
-
-# Show help
-gene lsp --help
 ```
 
-### Command Line Options
+Useful flags:
 
-- `-p, --port <port>`: Server port (default: 8080)
-- `-h, --host <host>`: Server host (default: localhost)
-- `-w, --workspace <dir>`: Workspace directory
-- `-t, --trace`: Enable request tracing for debugging
-- `--help`: Show help message
+- `--stdio` - explicit stdio mode
+- `--tcp` - TCP server mode for manual debugging
+- `--port <port>` - TCP port, default `8080`
+- `--host <host>` - TCP host, default `localhost`
+- `--workspace <dir>` - set workspace root
+- `--trace` - emit trace logs
 
-### Building
+## Current Server Capabilities
+
+The server advertises:
+
+- text document sync
+- completion
+- definition
+- hover
+- references
+- workspace symbol search
+
+Current request handling exists for:
+
+- `initialize`
+- `shutdown`
+- `textDocument/didOpen`
+- `textDocument/didChange`
+- `textDocument/didSave`
+- `textDocument/didClose`
+- `textDocument/completion`
+- `textDocument/definition`
+- `textDocument/hover`
+- `textDocument/references`
+- `workspace/symbol`
+
+## How It Works
+
+The implementation keeps a document cache in `src/gene/lsp/document.nim` and
+re-parses Gene source on open/change/save. Language features are built on that
+parsed document state.
+
+Today it provides:
+
+- parser-backed diagnostics
+- document symbol extraction
+- basic completion items
+- definition lookup
+- hover text
+- reference search
+- workspace symbol search
+
+## Current Limits
+
+The current LSP is intentionally lightweight:
+
+- no formatter
+- no rename support
+- no signature help
+- no code actions
+- no type-checker-backed semantic analysis
+- completion and navigation are only as precise as the current document parser
+  and symbol extractor
+
+Syntax highlighting is not provided by the LSP server itself. That remains an
+editor-grammar concern.
+
+## Quick Verification
 
 ```bash
-# Build the main Gene CLI (includes LSP server)
-nimble build
-```
-
-The LSP server is integrated directly into the `gene` CLI, so no separate build step is needed.
-
-## Editor Integration
-
-### VS Code
-
-To use the Gene LSP server with VS Code, you can create a simple client configuration:
-
-1. Install the "Generic LSP Client" extension
-2. Configure it to connect to `localhost:8080`
-3. Associate `.gene` files with the LSP client
-
-Example VS Code settings.json:
-```json
-{
-  "genericLspClient.languageServers": [
-    {
-      "name": "Gene",
-      "command": ["gene", "lsp"],
-      "languageId": "gene",
-      "fileExtensions": [".gene"]
-    }
-  ]
-}
-```
-
-### Other Editors
-
-The LSP server works with any LSP-compatible editor:
-
-- **Emacs**: Use `lsp-mode` with custom server configuration
-- **Vim/Neovim**: Use `vim-lsp` or `nvim-lspconfig`
-- **Sublime Text**: Use LSP package
-- **IntelliJ**: Use LSP Support plugin
-
-## Architecture
-
-### Components
-
-1. **LSP Server** (`src/gene/lsp/server.nim`): Main server implementation
-2. **LSP Types** (`src/gene/lsp/types.nim`): Protocol data structures
-3. **LSP Command** (`src/commands/lsp.nim`): CLI integration
-
-### Protocol Implementation
-
-The server implements the LSP specification using:
-- **JSON-RPC 2.0**: Message protocol
-- **TCP Sockets**: Communication transport
-- **Async I/O**: Non-blocking request handling
-
-### Message Flow
-
-1. Client connects to server socket
-2. Client sends `initialize` request with capabilities
-3. Server responds with supported features
-4. Client sends document lifecycle notifications
-5. Client requests language services (completion, hover, etc.)
-6. Server processes requests and returns responses
-
-## Development
-
-### Current Implementation
-
-**Phase 1 (Core Infrastructure)** is complete and functional:
-
-```
-gene lsp
-  ↓
-src/commands/lsp.nim (CLI integration)
-  ↓
-src/gene/lsp/server.nim (LSP server implementation)
-  ↓
-src/gene/lsp/types.nim (Protocol data structures)
-```
-
-**What Works:**
-- ✅ Server starts and listens on configurable port/host
-- ✅ Handles LSP initialize/shutdown lifecycle
-- ✅ Processes document open/close/change notifications
-- ✅ Parses Gene documents and extracts symbols
-- ✅ Provides completions (keywords + document symbols)
-- ✅ Reports parse errors as diagnostics in real-time
-- ✅ Shows hover information (all symbols in document)
-- ✅ Find-references (by symbol name matching)
-- ✅ Workspace symbols (project-wide search)
-- ✅ Reference tracking (definitions + usages by name)
-- ✅ Integrated into main `gene` CLI (no separate binary needed)
-
-**What Doesn't Work (By Design):**
-- ❌ Exact position tracking (line/column)
-- ❌ Precise go-to-definition (jumps to exact line)
-- ❌ Position-aware hover (shows symbol at cursor only)
-- ❌ Accurate diagnostics ranges
-
-**Rationale:** Position tracking was removed to keep the parser simple and avoid polluting Gene's property system. LSP features work by symbol name matching, which provides useful functionality without the complexity of exact position tracking.
-
-**What's Next (Phase 4):**
-- Implement scope-aware completion (local variables, imports)
-- Add incremental parsing for better performance
-- Implement document formatting (S-expression pretty-printing)
-- Add rename refactoring with scope awareness
-- Implement signature help (parameter hints)
-- Add code actions (quick fixes)
-
-### Next Steps
-
-1. **Parser Integration**: Connect Gene parser for syntax analysis
-2. **Symbol Analysis**: Implement symbol table and scope resolution
-3. **Diagnostics**: Add real-time error detection
-4. **Completion**: Implement context-aware code completion
-5. **Navigation**: Add go-to-definition and find-references
-6. **VS Code Extension**: Create official Gene extension
-
-### Testing
-
-```bash
-# Test LSP server compilation
-nim check src/gene.nim
-
-# Test CLI integration
 ./bin/gene lsp --help
-
-# Test server startup
 ./bin/gene lsp --trace
 ```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Port Already in Use**: Change port with `--port` option
-2. **Connection Refused**: Ensure server is running and port is correct
-3. **No Language Features**: Current implementation has stub handlers only
-
-### Debug Mode
-
-Enable tracing to see LSP message flow:
-```bash
-gene lsp --trace
-```
-
-This will log all incoming LSP requests and responses to the console.
-
-## Contributing
-
-The LSP implementation follows the existing Gene codebase patterns:
-
-1. **Protocol Handling**: Add new LSP methods to `gene/lsp/server.nim`
-2. **Type Definitions**: Extend `gene/lsp/types.nim` for new data structures
-3. **Language Analysis**: Integrate with existing parser and compiler modules
-4. **Testing**: Add tests for new LSP features
-
-See the [LSP specification](https://microsoft.github.io/language-server-protocol/) for protocol details.

@@ -694,5 +694,5 @@ Each change must have clear benefit. We don't break things arbitrarily.
 ## See Also
 
 - [ai-first.md](ai-first.md) - Language reference
-- [../../../examples/how-types-work.md](../../../examples/how-types-work.md) - Current typed-language walkthrough
+- [../../how-types-work.md](../../how-types-work.md) - Current typed-language walkthrough
 - [../../architecture.md](../../architecture.md) - VM internals
