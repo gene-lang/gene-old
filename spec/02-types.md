@@ -126,9 +126,8 @@ Color/red     # Access member
 
 - **Generic classes**: Only generic functions are supported. Generic classes (`class Stack:T`) are not yet implemented.
 - **Type bounds/constraints**: No way to express `T: Comparable` or similar constraints on generic type parameters.
-- **Inference completeness**: Type inference does not propagate through all expressions — some positions require explicit annotations.
-- **Union type narrowing**: Flow-sensitive narrowing works in `if` branches but not in all contexts (e.g., `case/when` arms).
+- **Inference completeness**: Type inference still falls back to `Any` in some complex binding positions, notably destructuring parameters and other non-trivial patterns.
+- **Union type narrowing**: Flow-sensitive narrowing works in `if` branches and ADT-aware `case/when` arms, but not in every control-flow form or arbitrary predicate.
 - **Enum values**: Enums are simple symbolic constants with no associated data. Rust-style enums with payloads would unify with ADTs.
 - **Nil safety**: No distinction between "explicitly nil" and "undefined/void". `void` exists internally but is not a first-class user concept, which can lead to confusion when accessing missing keys.
 - **Structural typing**: All typing is nominal. Structural typing or interfaces/protocols would enable more flexible polymorphism.
-- **Type aliases in method signatures**: Type aliases are not consistently respected in all positions.

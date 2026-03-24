@@ -1,0 +1,29 @@
+# Type aliases should work in methods, and ADT case arms should narrow branch types.
+
+(type DisplayLabel (String | Nil))
+
+(class Box
+  (method show [x: DisplayLabel] -> String
+    (if (x != nil)
+      x
+    else
+      "missing")))
+
+(var box (new Box))
+(println "alias_method_1=" (box .show "ok"))
+# Expected: alias_method_1=ok
+
+(println "alias_method_2=" (box .show nil))
+# Expected: alias_method_2=missing
+
+(type (Result T E) ((Ok T) | (Err E)))
+(var result: ((Result Int String) | Int) (Ok 41))
+
+(println "case_narrow=" (case result
+  when (Ok v)
+    (v + 1)
+  when (Err e)
+    0
+  else
+    result))
+# Expected: case_narrow=42

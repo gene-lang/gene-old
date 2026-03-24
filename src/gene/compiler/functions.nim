@@ -219,7 +219,11 @@ proc compile_ns(self: Compiler, gene: ptr Gene) =
   # Handle namespace body if present
   if gene.children.len > 1:
     let body = new_stream_value(gene.children[1..^1])
-    let compiled = compile_init(body, local_defs = true, module_path = self.output.module_path)
+    let compiled = compile_init(body,
+      local_defs = true,
+      module_path = self.output.module_path,
+      inherited_type_descriptors = self.output.type_descriptors,
+      inherited_type_aliases = self.output.type_aliases)
     let r = new_ref(VkCompiledUnit)
     r.cu = compiled
     self.emit(Instruction(kind: IkPushValue, arg0: r.to_ref_value()))
@@ -413,7 +417,11 @@ proc compile_class_with_container(self: Compiler, class_name: Value, parent_clas
   # Compile class body if present
   if gene.children.len > body_start:
     let body = new_stream_value(gene.children[body_start..^1])
-    let compiled = compile_init(body, local_defs = true, module_path = self.output.module_path)
+    let compiled = compile_init(body,
+      local_defs = true,
+      module_path = self.output.module_path,
+      inherited_type_descriptors = self.output.type_descriptors,
+      inherited_type_aliases = self.output.type_aliases)
     let r = new_ref(VkCompiledUnit)
     r.cu = compiled
     self.emit(Instruction(kind: IkPushValue, arg0: r.to_ref_value()))

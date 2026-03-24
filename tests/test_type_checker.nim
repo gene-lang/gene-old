@@ -290,6 +290,33 @@ suite "Static type checking":
   """
 
   test_vm """
+    (type X (String | Nil))
+    (class Box
+      (method show [x: X] -> String
+        (if (x != nil)
+          x
+        else
+          "missing")))
+    (var box (new Box))
+    [(box .show "ok") (box .show nil)]
+  """, proc(result: Value) =
+    check result.kind == VkArray
+    check array_data(result).len == 2
+    check array_data(result)[0] == "ok".to_value()
+    check array_data(result)[1] == "missing".to_value()
+
+  test_vm_error """
+    (type X (String | Nil))
+    (class Box
+      (method show [x: X] -> String
+        (if (x != nil)
+          x
+        else
+          "missing")))
+    ((new Box) .show 1)
+  """
+
+  test_vm """
     (class Box
       (method echo:T [x: T] -> T
         x))

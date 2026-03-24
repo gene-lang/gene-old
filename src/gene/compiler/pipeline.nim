@@ -5,7 +5,9 @@
 ## Included from compiler.nim — shares its scope.
 
 proc compile_init*(input: Value, local_defs = false, module_path = "",
-                   parent_scope_tracker: ScopeTracker = nil): CompilationUnit =
+                   parent_scope_tracker: ScopeTracker = nil,
+                   inherited_type_descriptors: seq[TypeDesc] = @[],
+                   inherited_type_aliases: Table[string, TypeId] = initTable[string, TypeId]()): CompilationUnit =
   let self = Compiler(
     output: new_compilation_unit(),
     tail_position: false,
@@ -13,6 +15,10 @@ proc compile_init*(input: Value, local_defs = false, module_path = "",
     method_access_mode: MamAutoCall
   )
   self.output.module_path = module_path
+  if inherited_type_descriptors.len > 0:
+    self.output.type_descriptors = inherited_type_descriptors
+  if inherited_type_aliases.len > 0:
+    self.output.type_aliases = inherited_type_aliases
   self.local_definitions = local_defs
   if parent_scope_tracker != nil:
     self.scope_trackers.add(parent_scope_tracker)
