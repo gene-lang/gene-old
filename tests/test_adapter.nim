@@ -2,7 +2,7 @@
 # Run with: nim c -r tests/test_adapter.nim
 
 import unittest
-import ../src/gene/types
+import ../src/gene/types except Exception
 import ../src/gene/types/interfaces
 import tables
 
@@ -34,7 +34,7 @@ suite "Implementation Tests":
   test "Create implementation":
     let iface = new_interface("TestInterface")
     let impl = new_implementation(iface)
-    check impl.interface == iface
+    check impl.gene_interface == iface
     check impl.method_mappings.len == 0
     check impl.prop_mappings.len == 0
   
@@ -74,7 +74,7 @@ suite "Adapter Tests":
     let impl = new_implementation(iface)
     let inner = "test".to_value()
     let adapter = new_adapter(iface, inner, impl)
-    check adapter.interface == iface
+    check adapter.gene_interface == iface
     check adapter.inner == inner
     check adapter.implementation == impl
   
@@ -93,7 +93,7 @@ suite "Adapter Registry Tests":
     register_implementation("FileStream", impl)
     let found = find_implementation("FileStream", "Readable")
     check not found.is_nil
-    check found.interface.name == "Readable"
+    check found.gene_interface.name == "Readable"
   
   test "Find non-existent implementation":
     let found = find_implementation("NonExistent", "SomeInterface")

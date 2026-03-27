@@ -810,7 +810,10 @@ type
 
     # Interface and Adapter
     IkInterface          # Define an interface
+    IkInterfaceMethod    # Define an interface method signature
+    IkInterfaceProp      # Define an interface property signature
     IkImplement          # Register implementation (inline or external)
+    IkImplementMethod    # Define an external implementation method mapping
     IkAdapter            # Create adapter wrapper (InterfaceName obj)
 
     IkCallInit

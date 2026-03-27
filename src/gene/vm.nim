@@ -71,14 +71,19 @@ proc spawn_thread(code: Value, return_value: bool): Value
 proc poll_event_loop*(self: ptr VirtualMachine)
 proc run_module_init*(self: ptr VirtualMachine, module_ns: Namespace): tuple[ran: bool, value: Value]
 proc exec_callable*(self: ptr VirtualMachine, callable: Value, args: seq[Value]): Value
+proc exec_callable_with_self*(self: ptr VirtualMachine, callable: Value, self_value: Value, args: seq[Value]): Value
 proc exec_continue*(self: ptr VirtualMachine): Value
 
 # Forward declarations for adapter functions
 proc exec_interface(vm: ptr VirtualMachine, name: Value)
-proc exec_implement(vm: ptr VirtualMachine, interface_name: Value, is_external: bool)
+proc exec_interface_method(vm: ptr VirtualMachine, name: Value)
+proc exec_interface_prop(vm: ptr VirtualMachine, name: Value, readonly: bool)
+proc exec_implement(vm: ptr VirtualMachine, interface_name: Value, is_external: bool, has_body: bool)
+proc exec_implement_method(vm: ptr VirtualMachine, method_name: Value)
 proc exec_adapter(vm: ptr VirtualMachine)
 proc adapter_get_member(vm: ptr VirtualMachine, adapter: Adapter, key: Key): Value
 proc adapter_set_member(adapter: Adapter, key: Key, value: Value)
+proc adapter_member_or_nil(vm: ptr VirtualMachine, adapter_val: Value, prop: Value): Value
 
 include "./vm/native"
 

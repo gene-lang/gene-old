@@ -792,7 +792,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           not_allowed("Cannot set member on nil (namespace or object doesn't exist)")
 
         case target.kind:
-        of VkMap, VkNamespace, VkClass, VkInstance:
+        of VkMap, VkNamespace, VkClass, VkInstance, VkAdapter:
           let key = case prop.kind:
             of VkString, VkSymbol: prop.str.to_key()
             of VkInt: ($prop.int64).to_key()
@@ -809,6 +809,8 @@ proc exec*(self: ptr VirtualMachine): Value =
               target.ref.class.ns[key] = value
             of VkInstance:
               instance_props(target)[key] = value
+            of VkAdapter:
+              adapter_set_member(target.ref.adapter, key, value)
             else:
               discard
         of VkGene:
@@ -1058,6 +1060,10 @@ proc exec*(self: ptr VirtualMachine): Value =
                 self.frame.push(resolved)
               else:
                 self.frame.push(VOID)
+            of VkAdapter:
+              let member = adapter_member_or_nil(self, target, prop)
+              retain(member)
+              self.frame.push(member)
             of VkEnum:
               let member_name = case prop.kind:
                 of VkString, VkSymbol: prop.str
@@ -1242,6 +1248,14 @@ proc exec*(self: ptr VirtualMachine): Value =
               else:
                 retain(default_val)
                 self.frame.push(default_val)
+            of VkAdapter:
+              let member = adapter_member_or_nil(self, target, prop)
+              if member == NIL or member == VOID:
+                retain(default_val)
+                self.frame.push(default_val)
+              else:
+                retain(member)
+                self.frame.push(member)
             of VkEnum:
               let member_name = case prop.kind:
                 of VkString, VkSymbol: prop.str
@@ -3704,10 +3718,20 @@ proc exec*(self: ptr VirtualMachine): Value =
         # Define an interface
         exec_interface(self, inst.arg0)
 
+      of IkInterfaceMethod:
+        exec_interface_method(self, inst.arg0)
+
+      of IkInterfaceProp:
+        exec_interface_prop(self, inst.arg0, inst.arg1 != 0)
+
       of IkImplement:
         # Register an implementation
-        let is_external = inst.arg1 != 0
-        exec_implement(self, inst.arg0, is_external)
+        let is_external = (inst.arg1 and 1) != 0
+        let has_body = (inst.arg1 and 2) != 0
+        exec_implement(self, inst.arg0, is_external, has_body)
+
+      of IkImplementMethod:
+        exec_implement_method(self, inst.arg0)
 
       of IkAdapter:
         # Create an adapter wrapper
@@ -3717,6 +3741,15 @@ proc exec*(self: ptr VirtualMachine): Value =
         # Peek at the object without popping it
         let v = self.frame.current()
         let method_name = inst.arg0.str
+
+        if v.kind == VkAdapter:
+          let member = adapter_get_member(self, v.ref.adapter, method_name.to_key())
+          if member == NIL or member == VOID:
+            not_allowed("Method '" & method_name & "' not found on adapter")
+          self.frame.push(member)
+          self.pc.inc()
+          inst = self.cu.instructions[self.pc].addr
+          continue
 
         let class = v.get_class()
         var cache: ptr InlineCache
@@ -5515,6 +5548,25 @@ proc exec*(self: ptr VirtualMachine): Value =
               self.pc.inc()
             inst = self.cu.instructions[self.pc].addr
             continue
+        if obj.kind == VkAdapter:
+          let member = adapter_get_member(self, obj.ref.adapter, method_name.to_key())
+          if member == NIL or member == VOID:
+            not_allowed("Method " & method_name & " not found on Adapter")
+          let result = case member.kind
+            of VkFunction:
+              self.exec_method_impl(member, obj, @[], self.frame)
+            of VkBoundMethod:
+              let bm = member.ref.bound_method
+              if bm.`method`.callable.kind == VkFunction:
+                self.exec_method_impl(bm.`method`.callable, bm.self, @[], self.frame)
+              else:
+                self.exec_callable(member, @[])
+            else:
+              self.exec_callable_with_self(member, obj, @[])
+          self.frame.push(result)
+          self.pc.inc()
+          inst = self.cu.instructions[self.pc].addr
+          continue
         if obj.kind notin {VkInstance, VkCustom}:
           if call_value_method(self, obj, method_name, []):
             self.pc.inc()
@@ -5666,6 +5718,26 @@ proc exec*(self: ptr VirtualMachine): Value =
               self.pc.inc()
             inst = self.cu.instructions[self.pc].addr
             continue
+
+        if obj.kind == VkAdapter:
+          let member = adapter_get_member(self, obj.ref.adapter, method_name.to_key())
+          if member == NIL or member == VOID:
+            not_allowed("Method " & method_name & " not found on Adapter")
+          let result = case member.kind
+            of VkFunction:
+              self.exec_method_impl(member, obj, @[arg], self.frame)
+            of VkBoundMethod:
+              let bm = member.ref.bound_method
+              if bm.`method`.callable.kind == VkFunction:
+                self.exec_method_impl(bm.`method`.callable, bm.self, @[arg], self.frame)
+              else:
+                self.exec_callable(member, @[arg])
+            else:
+              self.exec_callable_with_self(member, obj, @[arg])
+          self.frame.push(result)
+          self.pc.inc()
+          inst = self.cu.instructions[self.pc].addr
+          continue
 
         if obj.kind notin {VkInstance, VkCustom}:
           if call_value_method(self, obj, method_name, [arg]):
@@ -5828,6 +5900,26 @@ proc exec*(self: ptr VirtualMachine): Value =
               self.pc.inc()
             inst = self.cu.instructions[self.pc].addr
             continue
+
+        if obj.kind == VkAdapter:
+          let member = adapter_get_member(self, obj.ref.adapter, method_name.to_key())
+          if member == NIL or member == VOID:
+            not_allowed("Method " & method_name & " not found on Adapter")
+          let result = case member.kind
+            of VkFunction:
+              self.exec_method_impl(member, obj, @[arg1, arg2], self.frame)
+            of VkBoundMethod:
+              let bm = member.ref.bound_method
+              if bm.`method`.callable.kind == VkFunction:
+                self.exec_method_impl(bm.`method`.callable, bm.self, @[arg1, arg2], self.frame)
+              else:
+                self.exec_callable(member, @[arg1, arg2])
+            else:
+              self.exec_callable_with_self(member, obj, @[arg1, arg2])
+          self.frame.push(result)
+          self.pc.inc()
+          inst = self.cu.instructions[self.pc].addr
+          continue
 
         if obj.kind notin {VkInstance, VkCustom}:
           if call_value_method(self, obj, method_name, [arg1, arg2]):
@@ -6120,6 +6212,30 @@ proc exec*(self: ptr VirtualMachine): Value =
 
         # Pop object
         let obj = self.frame.pop()
+
+        if obj.kind == VkAdapter:
+          let member = adapter_get_member(self, obj.ref.adapter, method_name.to_key())
+          if member == NIL or member == VOID:
+            not_allowed("Method " & method_name & " not found on Adapter")
+          let result = case member.kind
+            of VkFunction:
+              self.exec_method_kw_impl(member, obj, args, kw_pairs, self.frame)
+            of VkBoundMethod:
+              let bm = member.ref.bound_method
+              if bm.`method`.callable.kind == VkFunction:
+                self.exec_method_kw_impl(bm.`method`.callable, bm.self, args, kw_pairs, self.frame)
+              else:
+                if kw_pairs.len > 0:
+                  not_allowed("Keyword arguments are not supported for adapter bound method kind: " & $bm.`method`.callable.kind)
+                self.exec_callable(member, args)
+            else:
+              if kw_pairs.len > 0:
+                not_allowed("Keyword arguments are not supported for adapter method kind: " & $member.kind)
+              self.exec_callable_with_self(member, obj, args)
+          self.frame.push(result)
+          self.pc.inc()
+          inst = self.cu.instructions[self.pc].addr
+          continue
 
         if obj.kind == VkSuper:
           # For super calls with keyword args, forward positional args and kw_pairs

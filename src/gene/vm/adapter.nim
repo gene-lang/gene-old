@@ -51,7 +51,19 @@ proc exec_interface(vm: ptr VirtualMachine, name: Value) =
   vm.frame.ns[interface_name.to_key()] = v
   vm.frame.push(v)
 
-proc exec_implement(vm: ptr VirtualMachine, interface_name: Value, is_external: bool) =
+proc exec_interface_method(vm: ptr VirtualMachine, name: Value) =
+  let interface_val = vm.frame.current()
+  if interface_val.kind != VkInterface:
+    raise new_exception(types.Exception, "interface method definition requires an interface context")
+  interface_val.ref.gene_interface.add_method(name.str)
+
+proc exec_interface_prop(vm: ptr VirtualMachine, name: Value, readonly: bool) =
+  let interface_val = vm.frame.current()
+  if interface_val.kind != VkInterface:
+    raise new_exception(types.Exception, "interface prop definition requires an interface context")
+  interface_val.ref.gene_interface.add_prop(name.str, readonly = readonly)
+
+proc exec_implement(vm: ptr VirtualMachine, interface_name: Value, is_external: bool, has_body: bool) =
   ## Execute IkImplement instruction - register an implementation
   ## 
   ## For inline: class is passed as first argument in frame.args
@@ -96,13 +108,47 @@ proc exec_implement(vm: ptr VirtualMachine, interface_name: Value, is_external: 
   # Create implementation
   let impl = new_implementation(gene_interface, target_class, ItkClass)
   
-  # Register as inline implementation (no adapter wrapper needed)
-  register_inline_implementation(target_class.name, gene_interface.name)
+  if is_external:
+    register_implementation(target_class.name, impl)
+  else:
+    register_inline_implementation(target_class.name, gene_interface.name)
+    register_implementation(target_class.name, impl)
+
+  if has_body:
+    if is_external:
+      let context = new_gene_value()
+      let class_ref = new_ref(VkClass)
+      class_ref.class = target_class
+      context.gene.children.add(class_ref.to_ref_value())
+      context.gene.children.add(interface_val)
+      vm.frame.push(context)
+    else:
+      let class_ref = new_ref(VkClass)
+      class_ref.class = target_class
+      vm.frame.push(class_ref.to_ref_value())
+  else:
+    vm.frame.push(NIL)
   
-  # Register in the adapter registry for lookup
-  register_implementation(target_class.name, impl)
-  
-  vm.frame.push(NIL)
+proc exec_implement_method(vm: ptr VirtualMachine, method_name: Value) =
+  let fn_value = vm.frame.pop()
+  let context = vm.frame.current()
+
+  if context.kind != VkGene or context.gene.children.len < 2:
+    raise new_exception(types.Exception, "external implement method requires an implementation context")
+
+  let class_val = context.gene.children[0]
+  let interface_val = context.gene.children[1]
+  if class_val.kind != VkClass or interface_val.kind != VkInterface:
+    raise new_exception(types.Exception, "invalid implementation context")
+
+  let impl = find_implementation(class_val.ref.class.name, interface_val.ref.gene_interface)
+  if impl.is_nil:
+    raise new_exception(types.Exception, "implementation not found for external method: " & method_name.str)
+
+  if not interface_val.ref.gene_interface.has_method(method_name.str.to_key()):
+    raise new_exception(types.Exception,
+      "Method " & method_name.str & " is not declared on interface " & interface_val.ref.gene_interface.name)
+  impl.map_method_computed(method_name.str, fn_value)
 
 proc exec_adapter(vm: ptr VirtualMachine) =
   ## Execute IkAdapter instruction - create an adapter wrapper
@@ -169,6 +215,12 @@ proc adapter_get_member(vm: ptr VirtualMachine, adapter: Adapter, key: Key): Val
   
   let gene_interface = adapter.gene_interface
   let impl = adapter.implementation
+
+  if adapter.own_data.has_key(key):
+    return adapter.own_data[key]
+
+  if key == "inner".to_key():
+    return adapter.inner
   
   # Check if it's a property
   if gene_interface.props.has_key(key):
@@ -177,12 +229,16 @@ proc adapter_get_member(vm: ptr VirtualMachine, adapter: Adapter, key: Key): Val
       # Default: direct access to inner object with same name
       if adapter.inner.kind == VkInstance and key in instance_props(adapter.inner):
         return instance_props(adapter.inner)[key]
+      if adapter.inner.kind == VkMap:
+        return map_data(adapter.inner).get_or_default(key, NIL)
       return NIL
     
     case mapping.kind
     of AmkRename:
       if adapter.inner.kind == VkInstance and mapping.inner_name in instance_props(adapter.inner):
         return instance_props(adapter.inner)[mapping.inner_name]
+      if adapter.inner.kind == VkMap:
+        return map_data(adapter.inner).get_or_default(mapping.inner_name, NIL)
       return NIL
     of AmkComputed:
       # Call the compute function with inner value as argument
@@ -223,30 +279,68 @@ proc adapter_get_member(vm: ptr VirtualMachine, adapter: Adapter, key: Key): Val
     of AmkHidden:
       raise new_exception(types.Exception, "Method " & $key & " is not accessible")
   
-  # Check adapter's own data
-  if adapter.own_data.has_key(key):
-    return adapter.own_data[key]
-  
   # Not found
   return NIL
 
 proc adapter_set_member(adapter: Adapter, key: Key, value: Value) =
   ## Set a member on an adapter
-  ## Only adapter's own data can be set, not mapped properties
   
   let gene_interface = adapter.gene_interface
+  let impl = adapter.implementation
+
+  if key == "inner".to_key():
+    raise new_exception(types.Exception, "Adapter inner is readonly")
   
   # Check if it's a property
   if gene_interface.props.has_key(key):
     let prop = gene_interface.props[key]
     if prop.readonly:
       raise new_exception(types.Exception, "Property " & $key & " is readonly")
-    # Store in adapter's own data
-    adapter.own_data[key] = value
-    return
-  
+    let mapping = impl.prop_mappings.get_or_default(key, nil)
+    if mapping.is_nil:
+      if adapter.inner.kind == VkInstance:
+        instance_props(adapter.inner)[key] = value
+        return
+      elif adapter.inner.kind == VkMap:
+        map_data(adapter.inner)[key] = value
+        return
+      adapter.own_data[key] = value
+      return
+
+    case mapping.kind
+    of AmkRename:
+      if adapter.inner.kind == VkInstance:
+        instance_props(adapter.inner)[mapping.inner_name] = value
+      elif adapter.inner.kind == VkMap:
+        map_data(adapter.inner)[mapping.inner_name] = value
+      else:
+        adapter.own_data[key] = value
+      return
+    of AmkComputed:
+      adapter.own_data[key] = value
+      return
+    of AmkHidden:
+      raise new_exception(types.Exception, "Property " & $key & " is not accessible")
+
   # Store in adapter's own data
   adapter.own_data[key] = value
+
+proc adapter_member_key(prop: Value): Key =
+  case prop.kind
+  of VkString, VkSymbol:
+    prop.str.to_key()
+  of VkInt:
+    ($prop.int64).to_key()
+  else:
+    raise new_exception(types.Exception, "Invalid adapter property type: " & $prop.kind)
+
+proc adapter_member_or_nil(vm: ptr VirtualMachine, adapter_val: Value, prop: Value): Value =
+  let key = adapter_member_key(prop)
+  adapter_get_member(vm, adapter_val.ref.adapter, key)
+
+proc adapter_set_member_value(adapter_val: Value, prop: Value, value: Value) =
+  let key = adapter_member_key(prop)
+  adapter_set_member(adapter_val.ref.adapter, key, value)
 
 proc is_adapter_value*(value: Value): bool {.inline.} =
   ## Check if a value is an adapter

@@ -76,6 +76,16 @@ proc get_class*(val: Value): Class {.inline.} =
       return App.ref.app.class_class.ref.class
     of VkNamespace:
       return App.ref.app.namespace_class.ref.class
+    of VkInterface:
+      if App.ref.app.interface_class.kind == VkClass:
+        return App.ref.app.interface_class.ref.class
+      else:
+        return App.ref.app.object_class.ref.class
+    of VkAdapter:
+      if App.ref.app.adapter_class.kind == VkClass:
+        return App.ref.app.adapter_class.ref.class
+      else:
+        return App.ref.app.object_class.ref.class
     of VkFuture:
       if App.ref.app.future_class.kind == VkClass:
         return App.ref.app.future_class.ref.class

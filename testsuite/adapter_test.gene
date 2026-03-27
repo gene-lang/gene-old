@@ -63,16 +63,20 @@
   )
 )
 
-# External implementation creates an adapter wrapper
-# (implement Readable for DataBuffer
-#   (method read []
-#     (var result (/inner .get_data))
-#     result
-#   )
-#   (method close []
-#     (/inner .set_data "")
-#   )
-# )
+(implement Readable for DataBuffer
+  (method read []
+    (/inner .get_data)
+  )
+  (method close []
+    (/inner .set_data "")
+  )
+)
+
+(interface DataView
+  (prop data String)
+)
+
+(implement DataView for DataBuffer)
 
 # ============================================================================
 # 4) USING INTERFACES
@@ -83,7 +87,16 @@
 
 # Calling interface on inline implementation returns same object
 (var readable_fs (Readable fs))
-(println "FileStream after Readable cast:" readable_fs/.name)
+(println "FileStream after Readable cast:" readable_fs/name)
+
+# External implementation returns an adapter wrapper that exposes the interface surface
+(var buffer (new DataBuffer "payload"))
+(var readable_buffer (Readable buffer))
+(println "DataBuffer read through adapter:" readable_buffer/.read)
+(readable_buffer .close)
+(println "DataBuffer after close through adapter:" (buffer .get_data))
+(var as_view (DataView buffer))
+(println "DataBuffer through adapter:" as_view/data)
 
 # ============================================================================
 # 5) TEST OUTPUT
