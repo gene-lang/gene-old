@@ -16,6 +16,7 @@ proc new_interface*(name: string, module_path: string = ""): GeneInterface =
     module_path: module_path,
     methods: initTable[Key, InterfaceMethod](),
     props: initTable[Key, InterfaceProp](),
+    implementations: initTable[Key, Implementation](),
     ns: new_namespace(nil, name)
   )
 
@@ -130,60 +131,28 @@ proc unwrap_adapter*(value: Value): Value =
   while result.kind == VkAdapter:
     result = result.ref.adapter.inner
 
-#################### Adapter Registry #######################
+#################### Implementation Registration #######################
 
-# Global registry for external implementations (adapters for classes not owned by the definer)
-var adapter_registry* = initTable[Key, Table[Key, Implementation]]()
-  # Outer key: class name (or built-in type name)
-  # Inner key: interface name
-  # Value: Implementation
+proc register_implementation*(self: GeneInterface, class_name: string, impl: Implementation) =
+  ## Register an implementation for a class on this interface
+  self.implementations[class_name.to_key()] = impl
 
-proc register_implementation*(class_name: string, impl: Implementation) =
-  ## Register an external implementation for a class
-  let class_key = class_name.to_key()
-  let interface_key = impl.gene_interface.name.to_key()
-  
-  if not adapter_registry.has_key(class_key):
-    adapter_registry[class_key] = initTable[Key, Implementation]()
-  
-  adapter_registry[class_key][interface_key] = impl
+proc find_implementation*(self: GeneInterface, class_name: string): Implementation =
+  ## Find an implementation for a class on this interface
+  self.implementations.get_or_default(class_name.to_key(), nil)
 
-proc find_implementation*(class_name: string, interface_name: string): Implementation =
-  ## Find an implementation for a class/interface pair
-  let class_key = class_name.to_key()
-  let interface_key = interface_name.to_key()
-  
-  if adapter_registry.has_key(class_key):
-    return adapter_registry[class_key].get_or_default(interface_key, nil)
-  return nil
+#################### Inline Implementation #######################
 
-proc find_implementation*(class_name: string, gene_interface: GeneInterface): Implementation =
-  ## Find an implementation for a class/interface pair
-  find_implementation(class_name, gene_interface.name)
+proc register_inline*(self: Class, gene_interface: GeneInterface) =
+  ## Record that this class natively satisfies the given interface
+  for iface in self.inline_interfaces:
+    if iface == gene_interface:
+      return
+  self.inline_interfaces.add(gene_interface)
 
-#################### Inline Implementation Check #######################
-
-# Registry for classes that have inline implementations
-var inline_implementations* = initTable[Key, seq[Key]]()
-  # Key: class name
-  # Value: list of interface names that the class implements inline
-
-proc register_inline_implementation*(class_name: string, interface_name: string) =
-  ## Register that a class has an inline implementation of an interface
-  let class_key = class_name.to_key()
-  let interface_key = interface_name.to_key()
-  
-  if not inline_implementations.has_key(class_key):
-    inline_implementations[class_key] = @[]
-  
-  if interface_key notin inline_implementations[class_key]:
-    inline_implementations[class_key].add(interface_key)
-
-proc has_inline_implementation*(class_name: string, interface_name: string): bool =
-  ## Check if a class has an inline implementation of an interface
-  let class_key = class_name.to_key()
-  let interface_key = interface_name.to_key()
-  
-  if inline_implementations.has_key(class_key):
-    return interface_key in inline_implementations[class_key]
+proc has_inline_implementation*(self: Class, gene_interface: GeneInterface): bool =
+  ## Check if this class natively satisfies the given interface
+  for iface in self.inline_interfaces:
+    if iface == gene_interface:
+      return true
   return false

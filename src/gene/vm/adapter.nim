@@ -77,11 +77,9 @@ proc exec_implement(vm: ptr VirtualMachine, interface_name: Value, is_external: 
   # Create implementation
   let impl = new_implementation(gene_interface, target_class, ItkClass)
   
-  if is_external:
-    register_implementation(target_class.name, impl)
-  else:
-    register_inline_implementation(target_class.name, gene_interface.name)
-    register_implementation(target_class.name, impl)
+  gene_interface.register_implementation(target_class.name, impl)
+  if not is_external:
+    target_class.register_inline(gene_interface)
 
   if has_body:
     if is_external:
@@ -110,7 +108,7 @@ proc exec_implement_method(vm: ptr VirtualMachine, method_name: Value) =
   if class_val.kind != VkClass or interface_val.kind != VkInterface:
     raise new_exception(types.Exception, "invalid implementation context")
 
-  let impl = find_implementation(class_val.ref.class.name, interface_val.ref.gene_interface)
+  let impl = interface_val.ref.gene_interface.find_implementation(class_val.ref.class.name)
   if impl.is_nil:
     raise new_exception(types.Exception, "implementation not found for external method: " & method_name.str)
 
@@ -141,15 +139,15 @@ proc exec_adapter(vm: ptr VirtualMachine) =
     inner_class = inner.ref.class
   
   # If the class has an inline implementation, return the value directly
-  if inner_class != nil and has_inline_implementation(inner_class.name, gene_interface.name):
+  if inner_class != nil and inner_class.has_inline_implementation(gene_interface):
     vm.frame.push(inner)
     return
-  
-  # Look for external implementation
+
+  # Look for implementation on the interface
   var impl: Implementation = nil
   if inner_class != nil:
-    impl = find_implementation(inner_class.name, gene_interface)
-  
+    impl = gene_interface.find_implementation(inner_class.name)
+
   if impl.is_nil:
     # Check for built-in types
     let type_name = case inner.kind
@@ -161,9 +159,9 @@ proc exec_adapter(vm: ptr VirtualMachine) =
       of VkBool: "Bool"
       of VkGene: "Gene"
       else: ""
-    
+
     if type_name.len > 0:
-      impl = find_implementation(type_name, gene_interface)
+      impl = gene_interface.find_implementation(type_name)
   
   if impl.is_nil:
     raise new_exception(types.Exception, 

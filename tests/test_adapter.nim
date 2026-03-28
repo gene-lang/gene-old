@@ -4,6 +4,7 @@
 import unittest
 import ../src/gene/types except Exception
 import ../src/gene/types/interfaces
+import ../src/gene/types/classes
 import tables
 
 suite "Interface Type Tests":
@@ -86,26 +87,31 @@ suite "Adapter Tests":
     adapter.own_data["extra".to_key()] = 42.to_value()
     check adapter.own_data.has_key("extra".to_key())
 
-suite "Adapter Registry Tests":
-  test "Register implementation":
+suite "Interface Implementation Registry Tests":
+  test "Register and find implementation on interface":
     let iface = new_interface("Readable")
     let impl = new_implementation(iface)
-    register_implementation("FileStream", impl)
-    let found = find_implementation("FileStream", "Readable")
+    iface.register_implementation("FileStream", impl)
+    let found = iface.find_implementation("FileStream")
     check not found.is_nil
     check found.gene_interface.name == "Readable"
-  
-  test "Find non-existent implementation":
-    let found = find_implementation("NonExistent", "SomeInterface")
+
+  test "Find non-existent implementation returns nil":
+    let iface = new_interface("SomeInterface")
+    let found = iface.find_implementation("NonExistent")
     check found.is_nil
 
 suite "Inline Implementation Tests":
-  test "Register inline implementation":
-    register_inline_implementation("MyClass", "MyInterface")
-    check has_inline_implementation("MyClass", "MyInterface")
-  
-  test "Check non-existent inline implementation":
-    check not has_inline_implementation("UnknownClass", "UnknownInterface")
+  test "Register inline implementation on class":
+    let cls = new_class("MyClass")
+    let iface = new_interface("MyInterface")
+    cls.register_inline(iface)
+    check cls.has_inline_implementation(iface)
+
+  test "Class without inline implementation returns false":
+    let cls = new_class("UnknownClass")
+    let iface = new_interface("UnknownInterface")
+    check not cls.has_inline_implementation(iface)
 
 when isMainModule:
   echo "Running adapter tests..."
