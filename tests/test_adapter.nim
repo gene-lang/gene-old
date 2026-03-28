@@ -87,31 +87,38 @@ suite "Adapter Tests":
     adapter.own_data["extra".to_key()] = 42.to_value()
     check adapter.own_data.has_key("extra".to_key())
 
-suite "Interface Implementation Registry Tests":
-  test "Register and find implementation on interface":
+suite "Class Implementation Tests":
+  test "Register and find implementation on class":
+    let cls = new_class("FileStream")
     let iface = new_interface("Readable")
-    let impl = new_implementation(iface)
-    iface.register_implementation("FileStream", impl)
-    let found = iface.find_implementation("FileStream")
+    let impl = new_implementation(iface, cls)
+    cls.register_implementation(iface, impl)
+    let found = cls.find_implementation(iface)
     check not found.is_nil
     check found.gene_interface.name == "Readable"
 
   test "Find non-existent implementation returns nil":
+    let cls = new_class("SomeClass")
     let iface = new_interface("SomeInterface")
-    let found = iface.find_implementation("NonExistent")
-    check found.is_nil
+    check cls.find_implementation(iface).is_nil
 
-suite "Inline Implementation Tests":
-  test "Register inline implementation on class":
+  test "Inline implementation flag":
     let cls = new_class("MyClass")
     let iface = new_interface("MyInterface")
-    cls.register_inline(iface)
-    check cls.has_inline_implementation(iface)
+    let impl = new_implementation(iface, cls, is_inline = true)
+    cls.register_implementation(iface, impl)
+    let found = cls.find_implementation(iface)
+    check not found.is_nil
+    check found.is_inline
 
-  test "Class without inline implementation returns false":
-    let cls = new_class("UnknownClass")
-    let iface = new_interface("UnknownInterface")
-    check not cls.has_inline_implementation(iface)
+  test "External implementation is not inline":
+    let cls = new_class("MyClass2")
+    let iface = new_interface("MyInterface2")
+    let impl = new_implementation(iface, cls, is_inline = false)
+    cls.register_implementation(iface, impl)
+    let found = cls.find_implementation(iface)
+    check not found.is_nil
+    check not found.is_inline
 
 when isMainModule:
   echo "Running adapter tests..."

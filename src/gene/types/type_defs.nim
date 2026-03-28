@@ -478,7 +478,7 @@ type
     has_macro_constructor*: bool  # Track if class has macro constructor for validation
     prop_types*: Table[Key, TypeId]  # property name → TypeId
     prop_type_descs*: seq[TypeDesc]  # type descriptors for property types
-    inline_interfaces*: seq[GeneInterface]  # interfaces this class natively satisfies
+    implementations*: Table[Key, Implementation]  # interface name → Implementation
 
   Method* = ref object
     class*: Class
@@ -498,7 +498,6 @@ type
     internal_path*: string
     methods*: Table[Key, InterfaceMethod]  # Method signatures
     props*: Table[Key, InterfaceProp]      # Property signatures
-    implementations*: Table[Key, Implementation]  # class name → Implementation
     ns*: Namespace  # Interface can act like a namespace for static access
 
   InterfaceMethod* = ref object
@@ -532,6 +531,7 @@ type
     gene_interface*: GeneInterface
     target_class*: Class   # The class being adapted (nil for external adapters on built-ins)
     target_kind*: ImplementationTargetKind
+    is_inline*: bool       # True if class natively satisfies the interface
     method_mappings*: Table[Key, AdapterMapping]
     prop_mappings*: Table[Key, AdapterMapping]
     own_data*: Table[Key, Value]  # Adapter's own supplementary data

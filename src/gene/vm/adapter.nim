@@ -74,12 +74,9 @@ proc exec_implement(vm: ptr VirtualMachine, interface_name: Value, is_external: 
   
   let gene_interface = interface_val.ref.gene_interface
   
-  # Create implementation
-  let impl = new_implementation(gene_interface, target_class, ItkClass)
-  
-  gene_interface.register_implementation(target_class.name, impl)
-  if not is_external:
-    target_class.register_inline(gene_interface)
+  # Create implementation and register on the class
+  let impl = new_implementation(gene_interface, target_class, ItkClass, is_inline = not is_external)
+  target_class.register_implementation(gene_interface, impl)
 
   if has_body:
     if is_external:
@@ -108,7 +105,7 @@ proc exec_implement_method(vm: ptr VirtualMachine, method_name: Value) =
   if class_val.kind != VkClass or interface_val.kind != VkInterface:
     raise new_exception(types.Exception, "invalid implementation context")
 
-  let impl = interface_val.ref.gene_interface.find_implementation(class_val.ref.class.name)
+  let impl = class_val.ref.class.find_implementation(interface_val.ref.gene_interface)
   if impl.is_nil:
     raise new_exception(types.Exception, "implementation not found for external method: " & method_name.str)
 
@@ -128,45 +125,20 @@ proc exec_adapter(vm: ptr VirtualMachine) =
     raise new_exception(types.Exception, "adapter requires an interface, got " & $interface_val.kind)
   
   let gene_interface = interface_val.ref.gene_interface
-  
-  # Check if inner value has an inline implementation
-  var inner_class: Class = nil
-  if inner.kind == VkInstance:
-    inner_class = inner.instance_class
-  elif inner.kind == VkCustom and inner.ref.custom_class != nil:
-    inner_class = inner.ref.custom_class
-  elif inner.kind == VkClass:
-    inner_class = inner.ref.class
-  
-  # If the class has an inline implementation, return the value directly
-  if inner_class != nil and inner_class.has_inline_implementation(gene_interface):
+
+  # Look up implementation on the value's class
+  let inner_class = inner.get_class()
+  let impl = if inner_class != nil: inner_class.find_implementation(gene_interface) else: nil
+
+  if impl.is_nil:
+    raise new_exception(types.Exception,
+      "No implementation found for interface " & gene_interface.name &
+      " on type " & (if inner_class != nil: inner_class.name else: $inner.kind))
+
+  # Inline implementation — return the value directly, no wrapper
+  if impl.is_inline:
     vm.frame.push(inner)
     return
-
-  # Look for implementation on the interface
-  var impl: Implementation = nil
-  if inner_class != nil:
-    impl = gene_interface.find_implementation(inner_class.name)
-
-  if impl.is_nil:
-    # Check for built-in types
-    let type_name = case inner.kind
-      of VkArray: "Array"
-      of VkMap: "Map"
-      of VkString: "String"
-      of VkInt: "Int"
-      of VkFloat: "Float"
-      of VkBool: "Bool"
-      of VkGene: "Gene"
-      else: ""
-
-    if type_name.len > 0:
-      impl = gene_interface.find_implementation(type_name)
-  
-  if impl.is_nil:
-    raise new_exception(types.Exception, 
-      "No implementation found for interface " & gene_interface.name & 
-      " on type " & (if inner_class != nil: inner_class.name else: $inner.kind))
   
   # Create adapter
   let adapter = new_adapter(gene_interface, inner, impl)

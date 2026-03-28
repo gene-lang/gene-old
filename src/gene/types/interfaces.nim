@@ -16,7 +16,6 @@ proc new_interface*(name: string, module_path: string = ""): GeneInterface =
     module_path: module_path,
     methods: initTable[Key, InterfaceMethod](),
     props: initTable[Key, InterfaceProp](),
-    implementations: initTable[Key, Implementation](),
     ns: new_namespace(nil, name)
   )
 
@@ -50,13 +49,15 @@ proc get_prop*(self: GeneInterface, name: Key): InterfaceProp {.inline.} =
 
 #################### Implementation #######################
 
-proc new_implementation*(gene_interface: GeneInterface, target_class: Class = nil, 
-                         target_kind: ImplementationTargetKind = ItkClass): Implementation =
+proc new_implementation*(gene_interface: GeneInterface, target_class: Class = nil,
+                         target_kind: ImplementationTargetKind = ItkClass,
+                         is_inline: bool = false): Implementation =
   ## Create a new implementation connecting a class to an interface
   Implementation(
     gene_interface: gene_interface,
     target_class: target_class,
     target_kind: target_kind,
+    is_inline: is_inline,
     method_mappings: initTable[Key, AdapterMapping](),
     prop_mappings: initTable[Key, AdapterMapping](),
     own_data: initTable[Key, Value]()
@@ -131,28 +132,12 @@ proc unwrap_adapter*(value: Value): Value =
   while result.kind == VkAdapter:
     result = result.ref.adapter.inner
 
-#################### Implementation Registration #######################
+#################### Class Implementation Lookup #######################
 
-proc register_implementation*(self: GeneInterface, class_name: string, impl: Implementation) =
-  ## Register an implementation for a class on this interface
-  self.implementations[class_name.to_key()] = impl
+proc register_implementation*(self: Class, gene_interface: GeneInterface, impl: Implementation) =
+  ## Register an implementation for an interface on this class
+  self.implementations[gene_interface.name.to_key()] = impl
 
-proc find_implementation*(self: GeneInterface, class_name: string): Implementation =
-  ## Find an implementation for a class on this interface
-  self.implementations.get_or_default(class_name.to_key(), nil)
-
-#################### Inline Implementation #######################
-
-proc register_inline*(self: Class, gene_interface: GeneInterface) =
-  ## Record that this class natively satisfies the given interface
-  for iface in self.inline_interfaces:
-    if iface == gene_interface:
-      return
-  self.inline_interfaces.add(gene_interface)
-
-proc has_inline_implementation*(self: Class, gene_interface: GeneInterface): bool =
-  ## Check if this class natively satisfies the given interface
-  for iface in self.inline_interfaces:
-    if iface == gene_interface:
-      return true
-  return false
+proc find_implementation*(self: Class, gene_interface: GeneInterface): Implementation =
+  ## Find an implementation for an interface on this class
+  self.implementations.get_or_default(gene_interface.name.to_key(), nil)
