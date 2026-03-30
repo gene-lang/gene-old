@@ -5019,6 +5019,14 @@ proc exec*(self: ptr VirtualMachine): Value =
           else:
             not_allowed("Selector value is not callable (no 'call' method)")
 
+        of VkInterface:
+          if args.len < 1:
+            raise new_exception(types.Exception, "Interface call requires at least 1 argument (the object to adapt)")
+          let ctor_args = if args.len > 1: args[1..^1] else: @[]
+          self.frame.push(target)
+          self.frame.push(args[0])
+          exec_adapter(self, ctor_args)
+
         of VkBlock:
           let b = target.ref.block
           if b.body_compiled == nil:
@@ -5053,15 +5061,6 @@ proc exec*(self: ptr VirtualMachine): Value =
         of VkInterception:
           let result = self.run_intercepted_method(target.ref.interception, NIL, args, @[])
           self.frame.push(result)
-
-        of VkInterface:
-          # Interface call with multiple args - use first arg as object to adapt
-          if args.len < 1:
-            raise new_exception(types.Exception, "Interface call requires at least 1 argument (the object to adapt)")
-          let ctor_args = if args.len > 1: args[1..^1] else: @[]
-          self.frame.push(target)
-          self.frame.push(args[0])
-          exec_adapter(self, ctor_args)
 
         else:
           not_allowed("IkUnifiedCall requires a callable, got " & $target.kind)
@@ -5458,6 +5457,14 @@ proc exec*(self: ptr VirtualMachine): Value =
         of VkInterception:
           let result = self.run_intercepted_method(target.ref.interception, NIL, args, @[])
           self.frame.push(result)
+
+        of VkInterface:
+          if args.len < 1:
+            raise new_exception(types.Exception, "Interface call requires at least 1 argument (the object to adapt)")
+          let ctor_args = if args.len > 1: args[1..^1] else: @[]
+          self.frame.push(target)
+          self.frame.push(args[0])
+          exec_adapter(self, ctor_args)
 
         else:
           not_allowed("IkUnifiedCallDynamic requires a callable, got " & $target.kind)
@@ -6082,6 +6089,12 @@ proc exec*(self: ptr VirtualMachine): Value =
             inst = self.cu.instructions[self.pc].addr
             continue
 
+        if obj.kind == VkAdapter:
+          self.frame.push(dispatch_adapter_method(self, obj, method_name, args))
+          self.pc.inc()
+          inst = self.cu.instructions[self.pc].addr
+          continue
+
         if obj.kind notin {VkInstance, VkCustom}:
           if call_value_method(self, obj, method_name, args):
             self.pc.inc()
@@ -6340,6 +6353,12 @@ proc exec*(self: ptr VirtualMachine): Value =
               self.pc.inc()
             inst = self.cu.instructions[self.pc].addr
             continue
+
+        if obj.kind == VkAdapter:
+          self.frame.push(dispatch_adapter_method(self, obj, method_name, args))
+          self.pc.inc()
+          inst = self.cu.instructions[self.pc].addr
+          continue
 
         if obj.kind notin {VkInstance, VkCustom}:
           if call_value_method(self, obj, method_name, args):

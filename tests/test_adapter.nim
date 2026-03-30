@@ -102,6 +102,20 @@ suite "Class Implementation Tests":
     let iface = new_interface("SomeInterface")
     check cls.find_implementation(iface).is_nil
 
+  test "Interfaces with the same name from different modules do not collide":
+    let cls = new_class("SharedClass")
+    let iface_a = new_interface("Readable", "pkg/a")
+    let iface_b = new_interface("Readable", "pkg/b")
+    let impl_a = new_implementation(iface_a, cls)
+    let impl_b = new_implementation(iface_b, cls)
+
+    cls.register_implementation(iface_a, impl_a)
+    cls.register_implementation(iface_b, impl_b)
+
+    check cls.implementations.len == 2
+    check cls.find_implementation(iface_a) == impl_a
+    check cls.find_implementation(iface_b) == impl_b
+
   test "Inline implementation flag":
     let cls = new_class("MyClass")
     let iface = new_interface("MyInterface")

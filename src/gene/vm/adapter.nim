@@ -91,6 +91,17 @@ proc adapter_bind_inner_method(value: Value, key: Key): Value =
     r.bound_method = BoundMethod(self: value, `method`: meth)
     r.to_ref_value()
 
+proc adapter_bind_runtime_method(value: Value, key: Key): Value =
+  let value_class = get_value_class(value)
+  if value_class == nil:
+    return NIL
+  let meth = value_class.get_method(key)
+  if meth.is_nil:
+    return NIL
+  let r = new_ref(VkBoundMethod)
+  r.bound_method = BoundMethod(self: value, `method`: meth)
+  r.to_ref_value()
+
 proc exec_interface(vm: ptr VirtualMachine, name: Value) =
   ## Execute IkInterface instruction - create an interface
   let interface_name = name.str
@@ -294,6 +305,10 @@ proc adapter_get_member(vm: ptr VirtualMachine, adapter_val: Value, key: Key): V
     of AmkHidden:
       raise new_exception(types.Exception, "Method " & $key & " is not accessible")
 
+  let runtime_method = adapter_bind_runtime_method(adapter_val, key)
+  if runtime_method != NIL:
+    return runtime_method
+
   NIL
 
 proc adapter_set_member(adapter: Adapter, key: Key, value: Value) =
@@ -321,8 +336,7 @@ proc adapter_set_member(adapter: Adapter, key: Key, value: Value) =
       adapter.own_data[key] = value
       return
     of AmkComputed:
-      adapter.own_data[key] = value
-      return
+      raise new_exception(types.Exception, "Computed property " & $key & " cannot be set")
     of AmkHidden:
       raise new_exception(types.Exception, "Property " & $key & " is not accessible")
 

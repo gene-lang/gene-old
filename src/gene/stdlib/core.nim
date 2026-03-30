@@ -4030,6 +4030,7 @@ proc init_gene_namespace*() =
   init_stdlib_namespaces()
 
   stdlib_classes.init_class_class(object_class)
+  stdlib_classes.init_interface_adapter_classes(object_class)
   init_vm_namespace()
 
   init_thread_class()

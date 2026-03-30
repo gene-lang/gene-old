@@ -1,4 +1,13 @@
 #!/usr/bin/env gene run
+# Expected: FileStream after Readable cast: test.txt
+# Expected: DataBuffer read through adapter: payload
+# Expected: DataBuffer after close through adapter:
+# Expected: DataBuffer through adapter:
+# Expected: === Adapter Feature Test Complete ===
+# Expected: Testing _genevalue:
+# Expected:   Inner value via _genevalue: VkInstance
+# Expected: Testing _geneinternal:
+# Expected:   Stored in _geneinternal: test_value
 # Test file for Interface and Adapter feature
 # This file demonstrates the adapter pattern in Gene
 

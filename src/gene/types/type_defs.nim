@@ -478,7 +478,7 @@ type
     has_macro_constructor*: bool  # Track if class has macro constructor for validation
     prop_types*: Table[Key, TypeId]  # property name → TypeId
     prop_type_descs*: seq[TypeDesc]  # type descriptors for property types
-    implementations*: Table[Key, Implementation]  # interface name → Implementation
+    implementations*: Table[GeneInterface, Implementation]  # interface identity → Implementation
 
   Method* = ref object
     class*: Class
@@ -534,7 +534,6 @@ type
     is_inline*: bool       # True if class natively satisfies the interface
     method_mappings*: Table[Key, AdapterMapping]
     prop_mappings*: Table[Key, AdapterMapping]
-    own_data*: Table[Key, Value]  # Adapter's own supplementary data
     ctor*: Value           # Constructor for adapter (if it has own data)
 
   ImplementationTargetKind* = enum
@@ -818,7 +817,7 @@ type
     IkImplement          # Register implementation (inline or external)
     IkImplementMethod    # Define an external implementation method mapping
     IkImplementCtor      # Define an external implementation constructor
-    IkAdapter            # Create adapter wrapper (InterfaceName obj)
+    IkAdapter            # Legacy adapter wrapper instruction (kept for GIR compatibility)
 
     IkCallInit
     IkDefineMethod      # Define a method on a class

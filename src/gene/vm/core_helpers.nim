@@ -312,6 +312,12 @@ template get_value_class(val: Value): Class =
     safe_class_value(THREAD_MESSAGE_CLASS_VALUE)
   of VkClass:
     safe_class_value(App.app.class_class)
+  of VkInterface:
+    safe_class_value(App.app.interface_class)
+  of VkAdapter:
+    safe_class_value(App.app.adapter_class)
+  of VkAdapterInternal:
+    safe_class_value(App.app.map_class)
   of VkAspect:
     safe_class_value(App.app.aspect_class)
   of VkNamespace:

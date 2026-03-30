@@ -103,6 +103,18 @@ proc value_class_value*(val: Value): Value =
     App.app.application_class
   of VkClass:
     App.app.class_class
+  of VkInterface:
+    if App.app.interface_class.kind == VkClass:
+      App.app.interface_class
+    else:
+      App.app.object_class
+  of VkAdapter:
+    if App.app.adapter_class.kind == VkClass:
+      App.app.adapter_class
+    else:
+      App.app.object_class
+  of VkAdapterInternal:
+    App.app.map_class
   of VkInstance:
     let class_ref = new_ref(VkClass)
     class_ref.class = val.instance_class
@@ -517,3 +529,22 @@ proc init_class_class*(object_class: Class) =
   App.app.class_class = r.to_ref_value()
   App.app.gene_ns.ns["Class".to_key()] = App.app.class_class
   App.app.global_ns.ns["Class".to_key()] = App.app.class_class
+
+proc init_interface_adapter_classes*(object_class: Class) =
+  var r: ptr Reference
+
+  let interface_class = new_class("Interface")
+  interface_class.parent = object_class
+  r = new_ref(VkClass)
+  r.class = interface_class
+  App.app.interface_class = r.to_ref_value()
+  App.app.gene_ns.ns["Interface".to_key()] = App.app.interface_class
+  App.app.global_ns.ns["Interface".to_key()] = App.app.interface_class
+
+  let adapter_class = new_class("Adapter")
+  adapter_class.parent = object_class
+  r = new_ref(VkClass)
+  r.class = adapter_class
+  App.app.adapter_class = r.to_ref_value()
+  App.app.gene_ns.ns["Adapter".to_key()] = App.app.adapter_class
+  App.app.global_ns.ns["Adapter".to_key()] = App.app.adapter_class

@@ -3,11 +3,14 @@
 ## This module provides helper functions for creating and manipulating
 ## interfaces and adapters in the Gene language.
 
-import tables
+import tables, hashes
 import ./type_defs
 import ./core
 
 #################### Interface #######################
+
+proc hash*(self: GeneInterface): Hash {.inline.} =
+  hash(cast[pointer](self))
 
 proc new_interface*(name: string, module_path: string = ""): GeneInterface =
   ## Create a new interface with the given name
@@ -60,7 +63,6 @@ proc new_implementation*(gene_interface: GeneInterface, target_class: Class = ni
     is_inline: is_inline,
     method_mappings: initTable[Key, AdapterMapping](),
     prop_mappings: initTable[Key, AdapterMapping](),
-    own_data: initTable[Key, Value](),
     ctor: NIL
   )
 
@@ -137,8 +139,8 @@ proc unwrap_adapter*(value: Value): Value =
 
 proc register_implementation*(self: Class, gene_interface: GeneInterface, impl: Implementation) =
   ## Register an implementation for an interface on this class
-  self.implementations[gene_interface.name.to_key()] = impl
+  self.implementations[gene_interface] = impl
 
 proc find_implementation*(self: Class, gene_interface: GeneInterface): Implementation =
   ## Find an implementation for an interface on this class
-  self.implementations.get_or_default(gene_interface.name.to_key(), nil)
+  self.implementations.get_or_default(gene_interface, nil)
