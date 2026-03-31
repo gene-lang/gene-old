@@ -42,20 +42,18 @@ Functions are first-class values — they can be stored in variables, passed as 
 
 ### Keyword Arguments
 ```gene
-(fn config [^host ^port = 8080 ^^ssl ^!debug]
+(fn config [^host ^port = 8080 ^ssl = false ^debug = false]
   ...)
 ```
 
-| Syntax   | Meaning                                    |
-|----------|--------------------------------------------|
-| `^name`  | Keyword argument (required, no default)    |
-| `^name = val` | Keyword argument with default         |
-| `^^name` | Boolean flag, defaults to `true`           |
-| `^!name` | Negated boolean flag, defaults to `nil`    |
+| Syntax        | Meaning                                |
+|---------------|----------------------------------------|
+| `^name`       | Keyword argument (required, no default)|
+| `^name = val` | Keyword argument with default          |
 
 Calling:
 ```gene
-(config ^host "localhost" ^^ssl ^!debug ^port 9090)
+(config ^host "localhost" ^ssl true ^port 9090)
 ```
 
 ## 5.3 Type Annotations
@@ -144,8 +142,8 @@ Functions can carry metadata:
 
 ## Potential Improvements
 
-- **Tail call optimization**: Recursive functions are not TCO'd. Deep recursion overflows the stack. This is the single most impactful missing optimization for a Lisp-like language.
-- **Keyword argument ergonomics**: The `^`, `^^`, `^!` syntax is powerful but has a steep learning curve. Consider whether the three-way distinction is necessary or if `^name` + `^name = default` would suffice.
+- **Tail call optimization**: Implemented for self-recursive tail calls. The compiler emits `IkTailCall` for calls in tail position; the VM reuses the frame for same-function calls. See `docs/tco-support.md`. Cross-function TCO and `IkUnifiedCall*` paths are not yet optimized.
+- **Keyword argument ergonomics**: Keyword args use `^name` (required) and `^name = val` (with default). The previously proposed `^^name` (boolean true) and `^!name` (negated boolean) shortcuts were removed — `^name = false` is clearer.
 - **Partial application / currying**: No built-in `partial` or auto-currying. Must manually create wrapper closures.
 - **Macro hygiene**: Macros using `$caller_eval` are not hygienic — they can capture or shadow caller variables unintentionally. A hygienic macro system would prevent accidental name collisions.
 - **Compile-time macro expansion**: Macros expand at runtime, not compile time. This means macro overhead on every call. Compile-time expansion would eliminate this cost.

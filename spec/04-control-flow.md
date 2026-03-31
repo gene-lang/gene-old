@@ -124,6 +124,5 @@ Early return from a function:
 - **`match` expression**: `case/when` handles simple patterns. A full `match` expression with nested patterns, guards, and exhaustiveness checking would be more powerful.
 - **Exhaustiveness checking**: `case/when` does not verify that all variants of an ADT are covered. Missing branches silently return nil.
 - **Loop labels**: No way to break out of nested loops. Use `^name` on the loop and `^from` on break/continue: `(loop ^name outer ... (break ^from outer 42))`, `(continue ^from inner)`. Works on all loop forms (`loop`, `while`, `for`). Implementation: add optional `name` field to `LoopInfo`, check `gene.props["name"]` in compile_loop/while/for, scan `loop_stack` by name in compile_break/continue.
-- **Tail call optimization**: Implemented for self-recursive tail calls. The compiler emits `IkTailCall` for calls in tail position; the VM reuses the frame for same-function calls. See `docs/tco-support.md`. Cross-function TCO and `IkUnifiedCall*` paths are not yet optimized.
 - **`for` with index**: No built-in way to get the iteration index. Must maintain a manual counter or use `(for [i x] in (enumerate* arr))`.
 - **Early break from `for`**: `break` inside `for` exits the for loop, but returning a value from `for` is not clearly specified.

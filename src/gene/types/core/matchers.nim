@@ -121,29 +121,11 @@ proc parse(self: RootMatcher, group: var seq[Matcher], v: Value) =
         let m = new_matcher(self, MatchProp)
         if v.str.ends_with("..."):
           m.is_splat = true
-          if v.str[1] == '^':
-            m.name_key = v.str[2..^4].to_key()
-            m.is_prop = true
-            m.default_value = TRUE  # ^^param => default true
-          elif v.str[1] == '!':
-            m.name_key = v.str[2..^4].to_key()
-            m.is_prop = true
-            m.default_value = NIL  # ^!param => default false
-          else:
-            m.name_key = v.str[1..^4].to_key()
-            m.is_prop = true  # Named parameters always have is_prop = true
+          m.name_key = v.str[1..^4].to_key()
+          m.is_prop = true
         else:
-          if v.str[1] == '^':
-            m.name_key = v.str[2..^1].to_key()
-            m.is_prop = true
-            m.default_value = TRUE   # ^^param => default true
-          elif v.str[1] == '!':
-            m.name_key = v.str[2..^1].to_key()
-            m.is_prop = true
-            m.default_value = NIL  # ^!param => default false
-          else:
-            m.name_key = v.str[1..^1].to_key()
-            m.is_prop = true  # Named parameters always have is_prop = true
+          m.name_key = v.str[1..^1].to_key()
+          m.is_prop = true
         group.add(m)
       else:
         let m = new_matcher(self, MatchData)

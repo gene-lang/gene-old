@@ -185,7 +185,7 @@
 (println "sum_all(1,2,3,4) =" (sum_all 1 2 3 4))
 
 # Keyword args
-(fn kwdemo [^a ^^b ^!c ^d = 4]
+(fn kwdemo [^a ^b = true ^c = nil ^d = 4]
   [a b c d]
 )
 (println "kwdemo #1 =" (kwdemo ^a 1))

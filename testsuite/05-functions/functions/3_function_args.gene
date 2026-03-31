@@ -60,7 +60,7 @@ catch *
 # =================
 # Keyword arguments
 # =================
-(fn f4 [^a ^^b ^!c ^d = 4]
+(fn f4 [^a ^b = true ^c = nil ^d = 4]
   (println "a:" a "b:" b "c:" c "d:" d)
 )
 (f4 ^a 1)
