@@ -100,7 +100,15 @@ proc str*(v: Value): string =
       not_allowed(fmt"{v} is not a string.")
 
 converter to_value*(v: string): Value =
-  intern_str_value(v)
+  if v.len == 0:
+    return EMPTY_STRING
+  else:
+    let s = cast[ptr String](alloc0(sizeof(String)))
+    s.ref_count = 1
+    s.str = v
+    let ptr_addr = cast[uint64](s)
+    assert (ptr_addr and 0xFFFF_0000_0000_0000u64) == 0, "String pointer too large for NaN boxing"
+    result = cast[Value](STRING_TAG or ptr_addr)
 
 converter to_value*(v: Rune): Value =
   let rune_value = v.ord.uint64

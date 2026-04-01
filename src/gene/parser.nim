@@ -382,7 +382,7 @@ proc read_string(self: var Parser, start: char): Value =
     discard self.parse_string(start)
   if self.error != ErrNone:
     raise new_exception(ParseError, "read_string failure: " & $self.error)
-  result = self.str
+  result = intern_str_value(self.str)
   self.str = ""
 
 # read_string1 removed - ' is now used for character literals, not strings

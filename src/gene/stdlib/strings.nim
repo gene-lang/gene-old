@@ -25,6 +25,8 @@ proc init_string_class*(object_class: Class) =
   string_class.def_native_constructor(string_constructor)
 
   proc ensure_mutable_string(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], has_keyword_args: bool): Value =
+    ## Copy-on-write: return a private mutable copy if the string is shared
+    ## (ref_count > 1 means interned or held by multiple owners).
     let self_index = if has_keyword_args: 1 else: 0
     let original = args[self_index]
     let raw = cast[uint64](original)
@@ -32,6 +34,13 @@ proc init_string_class*(object_class: Class) =
 
     case tag
     of STRING_TAG:
+      let ptr_addr = raw and PAYLOAD_MASK
+      if ptr_addr == 0:
+        return original  # EMPTY_STRING — no content to mutate
+      let str_ptr = cast[ptr String](ptr_addr)
+      if str_ptr.ref_count > 1:
+        # Shared string (interned or multiple owners) — make a private copy
+        return new_str_value(str_ptr.str)
       return original
     else:
       return original
