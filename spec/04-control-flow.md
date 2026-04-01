@@ -57,13 +57,21 @@ Infinite loop, exited with `break`:
 Iterates over collections and generators:
 
 ```gene
-# Array iteration
+# Array iteration - value only
 (for x in [1 2 3 4]
   (println x))
 
-# Map destructuring
-(for [k v] in {^a 1 ^b 2}
+# Array iteration - index + value
+(for i x in [10 20 30]
+  (println i ":" x))        # 0:10  1:20  2:30
+
+# Map iteration - key + value
+(for k v in {^a 1 ^b 2}
   (println k "=" v))
+
+# Map iteration - key + destructured value
+(for k [a b] in {^x [1 2] ^y [3 4]}
+  (println k ":" a "," b))
 
 # Generator iteration
 (fn counter* [n]
@@ -124,5 +132,4 @@ Early return from a function:
 - **`match` expression**: `case/when` handles simple patterns. A full `match` expression with nested patterns, guards, and exhaustiveness checking would be more powerful.
 - **Exhaustiveness checking**: `case/when` does not verify that all variants of an ADT are covered. Missing branches silently return nil.
 - **Loop labels**: No way to break out of nested loops. Use `^name` on the loop and `^from` on break/continue: `(loop ^name outer ... (break ^from outer 42))`, `(continue ^from inner)`. Works on all loop forms (`loop`, `while`, `for`). Implementation: add optional `name` field to `LoopInfo`, check `gene.props["name"]` in compile_loop/while/for, scan `loop_stack` by name in compile_break/continue.
-- **`for` with index**: No built-in way to get the iteration index. Must maintain a manual counter or use `(for [i x] in (enumerate* arr))`.
 - **Early break from `for`**: `break` inside `for` exits the for loop, but returning a value from `for` is not clearly specified.

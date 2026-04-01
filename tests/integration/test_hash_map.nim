@@ -53,7 +53,7 @@ suite "HashMap":
   test_vm """
     (do
       (var total 0)
-      (for [k v] in {{1 10 2 20}}
+      (for k v in {{1 10 2 20}}
         (total += (k + v))
       )
       total

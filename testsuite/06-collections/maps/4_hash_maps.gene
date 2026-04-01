@@ -20,7 +20,7 @@
 (println (m .size))
 
 (var total 0)
-(for [k v] in {{1 10 2 20}}
+(for k v in {{1 10 2 20}}
   (total += (k + v))
 )
 (println total)

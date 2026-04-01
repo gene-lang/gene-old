@@ -69,9 +69,9 @@
 
 ## 12.4 Destructuring in `for`
 
-With arrays, `for [i x]` gives index + value:
+With arrays, `for i x` gives index + value:
 ```gene
-(for [i x] in ["a" "b" "c"]
+(for i x in ["a" "b" "c"]
   (println i "=" x))
 # Prints:
 # 0 = a
@@ -79,13 +79,13 @@ With arrays, `for [i x]` gives index + value:
 # 2 = c
 ```
 
-With generators that yield arrays, elements are destructured:
+With generators that yield pairs, `for k v` destructures each yielded pair:
 ```gene
 (fn pairs* []
   (yield [0 2])
   (yield [1 3]))
 
-(for [k v] in (pairs*)
+(for k v in (pairs*)
   (println k "=" v))
 # Prints:
 # 0 = 2

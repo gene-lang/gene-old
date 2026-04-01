@@ -1874,31 +1874,49 @@ proc check_case(self: TypeChecker, gene: ptr Gene): TypeExpr =
   return result_type
 
 proc check_for(self: TypeChecker, gene: ptr Gene): TypeExpr =
-  ## Type check for loop: (for x in collection body...)
+  ## Type check for loop:
+  ##   (for x in collection body...)
+  ##   (for i x in collection body...)
+  ##   (for k [a b] in collection body...)
   if gene.children.len < 3:
     return ANY_TYPE
 
-  let var_node = gene.children[0]
+  # Find the 'in' keyword position
+  var in_pos = -1
+  for i in 0..<min(gene.children.len, 4):
+    if gene.children[i].kind == VkSymbol and gene.children[i].str == "in":
+      in_pos = i
+      break
+
+  if in_pos < 1 or in_pos + 1 >= gene.children.len:
+    return ANY_TYPE
+
   var index_name = ""
   var value_pattern: Value = NIL
 
-  case var_node.kind
-  of VkSymbol:
-    value_pattern = var_node
-  of VkArray:
-    let items = array_data(var_node)
-    if items.len == 2 and items[0].kind == VkSymbol and items[1].kind in {VkSymbol, VkArray, VkMap}:
-      index_name = items[0].str
-      value_pattern = items[1]
-    else:
+  case in_pos
+  of 1:
+    # (for x in ...) or (for [a b] in ...) or (for {^x x} in ...)
+    let var_node = gene.children[0]
+    case var_node.kind
+    of VkSymbol:
       value_pattern = var_node
-  of VkMap:
-    value_pattern = var_node
+    of VkArray, VkMap:
+      value_pattern = var_node
+    else:
+      value_pattern = "_".to_symbol_value()
+  of 2:
+    # (for i x in ...) or (for k [a b] in ...)
+    let key_node = gene.children[0]
+    let val_node = gene.children[1]
+    if key_node.kind == VkSymbol:
+      index_name = key_node.str
+    value_pattern = val_node
   else:
-    value_pattern = "_".to_symbol_value()
+    return ANY_TYPE
 
-  # children[1] should be "in" symbol
-  let collection = gene.children[2]
+  let collection = gene.children[in_pos + 1]
+  let body_start = in_pos + 2
   let collection_type = self.check_expr(collection)
 
   self.push_scope()
@@ -1923,7 +1941,7 @@ proc check_for(self: TypeChecker, gene: ptr Gene): TypeExpr =
     discard
 
   # Check body
-  for i in 3..<gene.children.len:
+  for i in body_start..<gene.children.len:
     discard self.check_expr(gene.children[i])
 
   self.pop_scope()

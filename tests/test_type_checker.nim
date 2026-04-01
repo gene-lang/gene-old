@@ -223,7 +223,7 @@ suite "Static type checking":
   test "Strict type checking: for index plus destructuring pattern":
     let checker = tc.new_type_checker(strict = true, module_filename = "test_code")
     let code = cleanup("""
-      (for [i [a b]] in [[1 2] [3 4]]
+      (for i [a b] in [[1 2] [3 4]]
         (+ i a)
         b
       )

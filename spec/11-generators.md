@@ -73,7 +73,7 @@ Any object implementing these methods works with `for`.
   (yield [1 "banana"])
   (yield [2 "cherry"]))
 
-(for [i fruit] in (pairs*)
+(for i fruit in (pairs*)
   (println i "=" fruit))
 # Prints:
 # 0 = apple

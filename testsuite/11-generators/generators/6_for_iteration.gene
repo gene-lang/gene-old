@@ -16,7 +16,7 @@
   (yield [1 3]))
 
 (var pair_sum 0)
-(for [k v] in (pairs*)
+(for k v in (pairs*)
   (pair_sum += k)
   (pair_sum += v))
 (assert (pair_sum == 6))

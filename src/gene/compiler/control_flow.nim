@@ -902,42 +902,60 @@ proc compile_repeat(self: Compiler, gene: ptr Gene) =
   discard self.loop_stack.pop()
 
 proc compile_for(self: Compiler, gene: ptr Gene) =
-  # (for var in collection body...)
+  # Supported forms:
+  #   (for x in collection body...)         - value only
+  #   (for i x in collection body...)       - index/key + value
+  #   (for k [a b] in collection body...)   - key + destructured value
   if gene.children.len < 2:
     not_allowed("for expects at least 2 arguments (variable and collection)")
-  
-  let var_node = gene.children[0]
+
+  # Find the position of 'in' keyword to determine the form
+  var in_pos = -1
+  for i in 0..<min(gene.children.len, 4):  # 'in' can be at position 1, 2, or 3 at most
+    if gene.children[i].kind == VkSymbol and gene.children[i].str == "in":
+      in_pos = i
+      break
+
+  if in_pos < 1 or in_pos + 1 >= gene.children.len:
+    not_allowed("for loop requires 'in' keyword followed by a collection")
+
   var pair_name: string = ""
   var use_pair_iteration = false
   var value_pattern: Value = NIL
-  case var_node.kind
-  of VkSymbol:
-    value_pattern = var_node
-  of VkArray:
-    let items = array_data(var_node)
-    if items.len == 2 and items[0].kind == VkSymbol:
-      # [index value] / [key value] / [index pattern]
-      pair_name = items[0].str
-      use_pair_iteration = true
-      if items[1].kind notin {VkSymbol, VkArray, VkMap}:
-        not_allowed("for loop value binding must be a symbol or destructuring pattern")
-      value_pattern = items[1]
-    else:
-      # Destructuring pattern for value
+
+  case in_pos
+  of 1:
+    # (for x in ...) or (for [a b] in ...) or (for {^x x} in ...)
+    let var_node = gene.children[0]
+    case var_node.kind
+    of VkSymbol:
       value_pattern = var_node
-  of VkMap:
-    # Destructuring map pattern for value
-    value_pattern = var_node
+    of VkArray:
+      # Destructuring pattern for value, e.g. (for [a b] in ...)
+      value_pattern = var_node
+    of VkMap:
+      # Destructuring map pattern for value
+      value_pattern = var_node
+    else:
+      not_allowed("for loop variable must be a symbol or destructuring pattern")
+  of 2:
+    # (for i x in ...) or (for k [a b] in ...) or (for k {^x x} in ...)
+    let key_node = gene.children[0]
+    let val_node = gene.children[1]
+    if key_node.kind != VkSymbol:
+      not_allowed("for loop index/key binding must be a symbol")
+    pair_name = key_node.str
+    use_pair_iteration = true
+    if val_node.kind notin {VkSymbol, VkArray, VkMap}:
+      not_allowed("for loop value binding must be a symbol or destructuring pattern")
+    value_pattern = val_node
   else:
-    not_allowed("for loop variable must be a symbol, pattern, or [index value/pattern]")
-  
-  # Check for 'in' keyword
-  if gene.children.len < 3 or gene.children[1].kind != VkSymbol or gene.children[1].str != "in":
-    not_allowed("for loop requires 'in' keyword")
+    not_allowed("for loop: unexpected tokens before 'in'")
 
   if value_pattern == NIL:
     not_allowed("for loop requires a value binding pattern")
-  let collection = gene.children[2]
+  let collection = gene.children[in_pos + 1]
+  let body_start = in_pos + 2
   let iter_method = "iter".to_symbol_value()
   let next_method = "next".to_symbol_value()
   let next_pair_method = "next_pair".to_symbol_value()
@@ -1105,8 +1123,8 @@ proc compile_for(self: Compiler, gene: ptr Gene) =
     bind_value_on_stack(value_pattern)
   
   # Compile body (remaining children after 'in' and collection)
-  if gene.children.len > 3:
-    for i in 3..<gene.children.len:
+  if gene.children.len > body_start:
+    for i in body_start..<gene.children.len:
       let child = gene.children[i]
       if is_vmstmt_form(child):
         self.compile_vmstmt(child.gene)
