@@ -1511,11 +1511,8 @@ proc exec*(self: ptr VirtualMachine): Value =
         {.pop.}
 
       of IkPushValue:
-        if inst.arg0.kind == VkString:
-          # String literals are mutable; avoid mutating shared constants.
-          self.frame.push(new_str_value(inst.arg0.str))
-        else:
-          self.frame.push(inst.arg0)
+        # String literals are interned and immutable; push the shared value directly.
+        self.frame.push(inst.arg0)
       of IkPushNil:
         self.frame.push(NIL)
       of IkPushTypeValue:
