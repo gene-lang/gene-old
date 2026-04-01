@@ -25,25 +25,15 @@ proc init_string_class*(object_class: Class) =
   string_class.def_native_constructor(string_constructor)
 
   proc ensure_mutable_string(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], has_keyword_args: bool): Value =
-    ## Copy-on-write: return a private mutable copy if the string is shared
-    ## (ref_count > 1 means interned or held by multiple owners).
+    ## Return the receiver string ready for in-place mutation.
+    ## IkPushValue always copies string literals on push so each variable binding
+    ## gets a private ptr String (ref_count=1 at the alloc site). The interned
+    ## instruction constant is therefore never reachable here.
+    ## A ref_count > 1 check is incorrect: Nim's =copy hook retains Values when
+    ## they are stored in the temporary arg seq (invoke_method_value), so an
+    ## ordinary local variable appears shared during the call even though it is not.
     let self_index = if has_keyword_args: 1 else: 0
-    let original = args[self_index]
-    let raw = cast[uint64](original)
-    let tag = raw and 0xFFFF_0000_0000_0000u64
-
-    case tag
-    of STRING_TAG:
-      let ptr_addr = raw and PAYLOAD_MASK
-      if ptr_addr == 0:
-        return original  # EMPTY_STRING — no content to mutate
-      let str_ptr = cast[ptr String](ptr_addr)
-      if str_ptr.ref_count > 1:
-        # Shared string (interned or multiple owners) — make a private copy
-        return new_str_value(str_ptr.str)
-      return original
-    else:
-      return original
+    return args[self_index]
 
   proc string_append(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     let pos_count = get_positional_count(arg_count, has_keyword_args)

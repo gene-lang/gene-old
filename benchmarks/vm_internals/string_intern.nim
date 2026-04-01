@@ -1,8 +1,9 @@
 ## Benchmark: string literal push performance with interning.
 ##
 ## Measures iterations/second for a hot loop that repeatedly pushes and uses
-## string literals. With interning, IkPushValue skips the alloc0 call and
-## reuses the interned ptr String directly.
+## string literals. The intern table deduplicates string literals at parse/compile
+## time (one ptr String per unique literal), while IkPushValue still copies on
+## each push to give variables a private mutable object.
 
 when isMainModule:
   import times, strformat
