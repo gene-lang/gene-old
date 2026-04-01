@@ -62,25 +62,25 @@ pair/1 => 42
 
 ### Immutability
 
-Tuples are immutable after construction. To create a modified copy, use the `tuple_with` builtin:
+Tuples are immutable after construction. To create a modified copy, use the `.clone` builtin:
 
 ```gene
 (var p1 (new Point 3 4))
-(var p2 (tuple_with p1 ^x 10))
+(var p2 (p1 .clone ^x 10))
 p2/x => 10
 p2/y => 4
 
 # Positional update by index:
 (var t (new tuple 1 2 3))
-(var t2 (tuple_with t ^0 10))
+(var t2 (t .clone ^0 10))
 t2/0 => 10
 ```
 
-`tuple_with` is a standalone function, consistent with the pure-data model. It returns a new tuple; the original is unchanged.
+`.clone` is a standalone method. It returns a new tuple; the original is unchanged.
 
 ### Type enforcement
 
-Field types are enforced at construction time (and by `tuple_with`). Passing a value that doesn't match the declared type is a runtime error.
+Field types are enforced at construction time (and by `.clone`). Passing a value that doesn't match the declared type is a runtime error.
 
 ```gene
 (tuple Pair String Int)
