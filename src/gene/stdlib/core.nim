@@ -137,8 +137,8 @@ proc value_class_value(val: Value): Value =
   of VkApplication:
     App.app.application_class
   of VkSet:
-    if App.app.set_class.kind == VkClass:
-      App.app.set_class
+    if App.app.hash_set_class.kind == VkClass:
+      App.app.hash_set_class
     else:
       App.app.object_class
   of VkFuture:
@@ -1573,17 +1573,6 @@ proc init_date_functions() =
   var tomorrow_fn = new_ref(VkNativeFn)
   tomorrow_fn.native_fn = gene_tomorrow_native
   App.app.gene_ns.ns["tomorrow".to_key()] = tomorrow_fn.to_ref_value()
-
-proc init_set_class(object_class: Class) =
-  var r: ptr Reference
-  let set_class = new_class("Set")
-  set_class.parent = object_class
-  set_class.def_native_method("to_s", object_to_s_method)
-  r = new_ref(VkClass)
-  r.class = set_class
-  App.app.set_class = r.to_ref_value()
-  App.app.gene_ns.ns["Set".to_key()] = App.app.set_class
-  App.app.global_ns.ns["Set".to_key()] = App.app.set_class
 
 proc init_gene_and_meta_classes(object_class: Class) =
   var r: ptr Reference
@@ -4037,7 +4026,7 @@ proc init_gene_namespace*() =
 
   stdlib_selectors.init_selector_class(object_class)
   
-  stdlib_collections.init_set_class(object_class)
+  stdlib_collections.init_hash_set_class(object_class)
   stdlib_gene_meta.init_gene_and_meta_classes(object_class)
 
   init_gene_core_functions()

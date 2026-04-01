@@ -292,8 +292,6 @@ proc is_named_compatible(value: Value, expected_type: string): bool =
   let actual = runtime_type_name(value)
   if actual == expected_type:
     return true
-  if actual == "HashSet" and expected_type == "Set":
-    return true
   let adt = adt_type_name(value)
   if adt.len > 0 and adt == expected_type:
     return true
@@ -301,7 +299,7 @@ proc is_named_compatible(value: Value, expected_type: string): bool =
   of "Numeric":
     return actual in ["Int", "Float"]
   of "Collection":
-    return actual in ["Array", "Map", "HashMap", "HashSet", "Set"]
+    return actual in ["Array", "Map", "HashMap", "HashSet"]
   of "Function":
     return value.kind in {VkFunction, VkBlock, VkNativeFn}
   else:

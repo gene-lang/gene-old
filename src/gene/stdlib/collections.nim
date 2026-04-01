@@ -1401,18 +1401,16 @@ proc init_collection_classes*(object_class: Class) =
 
   hash_map_class.def_native_method("immutable?", vm_hash_map_immutable, @[], App.app.bool_class)
 
-proc init_set_class*(object_class: Class) =
+proc init_hash_set_class*(object_class: Class) =
   var r: ptr Reference
-  let set_class = new_class("HashSet")
-  set_class.parent = object_class
-  set_class.def_native_method("to_s", object_to_s_method)
+  let hash_set_class = new_class("HashSet")
+  hash_set_class.parent = object_class
+  hash_set_class.def_native_method("to_s", object_to_s_method)
   r = new_ref(VkClass)
-  r.class = set_class
-  App.app.set_class = r.to_ref_value()
-  App.app.gene_ns.ns["HashSet".to_key()] = App.app.set_class
-  App.app.global_ns.ns["HashSet".to_key()] = App.app.set_class
-  App.app.gene_ns.ns["Set".to_key()] = App.app.set_class
-  App.app.global_ns.ns["Set".to_key()] = App.app.set_class
+  r.class = hash_set_class
+  App.app.hash_set_class = r.to_ref_value()
+  App.app.gene_ns.ns["HashSet".to_key()] = App.app.hash_set_class
+  App.app.global_ns.ns["HashSet".to_key()] = App.app.hash_set_class
 
   proc hash_set_constructor(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if has_keyword_args:
@@ -1423,7 +1421,7 @@ proc init_set_class*(object_class: Class) =
         discard hash_set_add(vm, result_set, args[i])
     result_set
 
-  set_class.def_native_constructor(hash_set_constructor)
+  hash_set_class.def_native_constructor(hash_set_constructor)
 
   proc vm_hash_set_has(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 2:
@@ -1438,8 +1436,8 @@ proc init_set_class*(object_class: Class) =
         hash_set_contains(vm, hash_set, get_positional_arg(args, 1, has_keyword_args))
     found.to_value()
 
-  set_class.def_native_method("has", vm_hash_set_has, @[("member", NIL)], App.app.bool_class)
-  set_class.def_native_method("contains", vm_hash_set_has, @[("member", NIL)], App.app.bool_class)
+  hash_set_class.def_native_method("has", vm_hash_set_has, @[("member", NIL)], App.app.bool_class)
+  hash_set_class.def_native_method("contains", vm_hash_set_has, @[("member", NIL)], App.app.bool_class)
 
   proc vm_hash_set_add(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 2:
@@ -1454,7 +1452,7 @@ proc init_set_class*(object_class: Class) =
         discard hash_set_add(vm, hash_set, get_positional_arg(args, i, has_keyword_args))
     hash_set
 
-  set_class.def_native_method("add", vm_hash_set_add)
+  hash_set_class.def_native_method("add", vm_hash_set_add)
 
   proc vm_hash_set_delete(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 2:
@@ -1473,8 +1471,8 @@ proc init_set_class*(object_class: Class) =
         last_removed = deleted.value
     last_removed
 
-  set_class.def_native_method("delete", vm_hash_set_delete)
-  set_class.def_native_method("del", vm_hash_set_delete)
+  hash_set_class.def_native_method("delete", vm_hash_set_delete)
+  hash_set_class.def_native_method("del", vm_hash_set_delete)
 
   proc vm_hash_set_size(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 1:
@@ -1484,7 +1482,7 @@ proc init_set_class*(object_class: Class) =
       not_allowed("HashSet.size must be called on a HashSet")
     hash_set_count(hash_set).to_value()
 
-  set_class.def_native_method("size", vm_hash_set_size, @[], App.app.int_class)
+  hash_set_class.def_native_method("size", vm_hash_set_size, @[], App.app.int_class)
 
   proc vm_hash_set_clear(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 1:
@@ -1496,7 +1494,7 @@ proc init_set_class*(object_class: Class) =
     hash_set_buckets(hash_set).clear()
     hash_set
 
-  set_class.def_native_method("clear", vm_hash_set_clear)
+  hash_set_class.def_native_method("clear", vm_hash_set_clear)
 
   proc vm_hash_set_to_array(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 1:
@@ -1509,7 +1507,7 @@ proc init_set_class*(object_class: Class) =
       array_data(result_array).add(item)
     result_array
 
-  set_class.def_native_method("to_array", vm_hash_set_to_array, @[], App.app.array_class)
+  hash_set_class.def_native_method("to_array", vm_hash_set_to_array, @[], App.app.array_class)
 
   proc vm_hash_set_iter(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe, nimcall.} =
     if get_positional_count(arg_count, has_keyword_args) < 1:
@@ -1525,7 +1523,7 @@ proc init_set_class*(object_class: Class) =
     instance_props(iter_val)["index".to_key()] = 0.to_value()
     iter_val
 
-  set_class.def_native_method("iter", vm_hash_set_iter)
+  hash_set_class.def_native_method("iter", vm_hash_set_iter)
 
   proc require_hash_set_arg(args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool, index: int, method_name: string): Value {.inline, gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) <= index:
@@ -1551,7 +1549,7 @@ proc init_set_class*(object_class: Class) =
         discard hash_set_add(vm, result_set, item)
     result_set
 
-  set_class.def_native_method("union", vm_hash_set_union)
+  hash_set_class.def_native_method("union", vm_hash_set_union)
 
   proc vm_hash_set_intersect(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 2:
@@ -1570,7 +1568,7 @@ proc init_set_class*(object_class: Class) =
           discard hash_set_add(vm, result_set, item)
     result_set
 
-  set_class.def_native_method("intersect", vm_hash_set_intersect)
+  hash_set_class.def_native_method("intersect", vm_hash_set_intersect)
 
   proc vm_hash_set_diff(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 2:
@@ -1589,7 +1587,7 @@ proc init_set_class*(object_class: Class) =
           discard hash_set_add(vm, result_set, item)
     result_set
 
-  set_class.def_native_method("diff", vm_hash_set_diff)
+  hash_set_class.def_native_method("diff", vm_hash_set_diff)
 
   proc vm_hash_set_subset(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 2:
@@ -1606,4 +1604,4 @@ proc init_set_class*(object_class: Class) =
         return FALSE
     TRUE
 
-  set_class.def_native_method("subset?", vm_hash_set_subset, @[("other", NIL)], App.app.bool_class)
+  hash_set_class.def_native_method("subset?", vm_hash_set_subset, @[("other", NIL)], App.app.bool_class)

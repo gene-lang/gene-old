@@ -391,7 +391,7 @@ type
     array_class*    : Value
     map_class*      : Value
     hash_map_class* : Value
-    set_class*      : Value
+    hash_set_class* : Value
     gene_class*     : Value
     stream_class*   : Value
     document_class* : Value

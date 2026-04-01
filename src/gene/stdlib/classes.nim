@@ -99,8 +99,8 @@ proc value_class_value*(val: Value): Value =
   of VkDateTime:
     App.app.datetime_class
   of VkSet:
-    if App.app.set_class.kind == VkClass:
-      App.app.set_class
+    if App.app.hash_set_class.kind == VkClass:
+      App.app.hash_set_class
     else:
       App.app.object_class
   of VkFuture:

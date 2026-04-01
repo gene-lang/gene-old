@@ -16,7 +16,6 @@ Gene's current collection surface does not provide a first-class set optimized f
   - Introduce a set literal syntax in this change.
   - Change `{}` / `Map` or `{{}}` / `HashMap` semantics.
   - Define a serialization format for `HashSet` in this change.
-  - Replace the existing generic `Set` naming elsewhere unless directly required for this runtime type.
 
 ## Decisions
 

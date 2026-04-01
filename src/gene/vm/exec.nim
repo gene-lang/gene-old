@@ -3917,7 +3917,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         of VkGene:
           class_val = App.app.gene_class
         of VkSet:
-          class_val = App.app.set_class
+          class_val = App.app.hash_set_class
         of VkTime:
           class_val = App.app.time_class
         of VkDate:

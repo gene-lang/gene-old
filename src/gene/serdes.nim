@@ -1675,7 +1675,7 @@ proc lazy_tree_class_ref(value: Value): Class {.gcsafe.} =
   of VkDateTime:
     class_value_ref(App.app.datetime_class)
   of VkSet:
-    class_value_ref(if App.app.set_class.kind == VkClass: App.app.set_class else: App.app.object_class)
+    class_value_ref(if App.app.hash_set_class.kind == VkClass: App.app.hash_set_class else: App.app.object_class)
   of VkFuture:
     class_value_ref(if App.app.future_class.kind == VkClass: App.app.future_class else: App.app.object_class)
   of VkGenerator:

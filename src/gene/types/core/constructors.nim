@@ -1,4 +1,4 @@
-## Int, String, ComplexSymbol, Array, Stream, Set, Map, Instance,
+## Int, String, ComplexSymbol, Array, Stream, HashSet, Map, Instance,
 ## Range, Regex, Date/DateTime/Time, Selector, SourceTrace, Gene constructors.
 ## Included from core.nim — shares its scope.
 
@@ -183,7 +183,7 @@ proc new_stream_value*(v: varargs[Value]): Value =
   r.stream = @v
   result = r.to_ref_value()
 
-#################### Set #########################
+#################### HashSet #####################
 
 proc new_set_value*(): Value =
   let r = new_ref(VkSet)
