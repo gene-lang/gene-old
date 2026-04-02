@@ -1,32 +1,10 @@
-# Expected: before a
-# Expected: around a
-# Expected: macro 7
-# Expected: after 7
-# Expected: result 7
-
-(var a 7)
-
-(aspect A [m]
-  (before m [expr]
-    (println "before" expr)
-  )
-  (around m [expr wrapped]
-    (println "around" expr)
-    (wrapped expr)
-  )
-  (after m [expr result]
-    (println "after" result)
-  )
-)
+# ExitCode: 1
 
 (class MacroC
-  ^fields {}
   (method m! [expr]
-    (println "macro" ($caller_eval expr))
-    ($caller_eval expr)
+    expr
   )
 )
 
-(A .apply MacroC "m!")
 (var c (new MacroC))
-(println "result" (c .m! a))
+(c .m! 1)

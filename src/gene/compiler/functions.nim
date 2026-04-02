@@ -238,6 +238,8 @@ proc compile_method_definition(self: Compiler, gene: ptr Gene) =
   if name.kind != VkSymbol:
     not_allowed("Method name must be a symbol")
   let parsed_name = split_generic_definition_name(name.str)
+  if parsed_name.base_name.ends_with("!"):
+    not_allowed("Macro-like class methods are not supported; use (method name [args] ...) and a standalone fn! if you need quoted arguments")
   let method_name = parsed_name.base_name.to_symbol_value()
   
   # Create a function from the method definition
@@ -297,7 +299,8 @@ proc compile_on_method_missing_definition(self: Compiler, gene: ptr Gene) =
   self.compile_method_definition(method_gene)
 
 proc compile_constructor_definition(self: Compiler, gene: ptr Gene) =
-  # Constructor definition: (ctor [args] body...) or (ctor! [args] body...)
+  if gene.type.kind == VkSymbol and gene.type.str == "ctor!":
+    not_allowed("Macro-like constructors are not supported; use (ctor [args] ...)")
   if gene.children.len == 0:
     not_allowed(gene.type.str & " requires an array argument list; use [] for no arguments")
 
@@ -476,47 +479,28 @@ proc compile_new(self: Compiler, gene: ptr Gene) =
   if gene.children.len < 1:
     raise new_exception(types.Exception, "new requires at least a class name")
 
-  # Check if this is a macro constructor call (new!)
-  let is_macro_new = gene.type.kind == VkSymbol and gene.type.str == "new!"
+  if gene.type.kind == VkSymbol and gene.type.str == "new!":
+    not_allowed("Macro-like constructors are not supported; use (new Class ...)")
 
 # Compile the class first, then the arguments
   # Stack will be: [class, args] so VM can pop args first, then class
   self.compile(gene.children[0])
 
-  # Always create a Gene for arguments (for both regular and macro constructors)
-  # This ensures the VM validation logic works correctly
+  # Always create a Gene for arguments so the VM can process positional and
+  # keyword arguments uniformly.
   if gene.children.len > 1 or gene.props.len > 0:
-    # Create a Gene containing all arguments
     self.emit(Instruction(kind: IkGeneStart))
-
-    if is_macro_new:
-      # For macro constructor, don't evaluate arguments - pass them as quoted
-      self.quote_level.inc()
-      for k, v in gene.props:
-        let key_str = $k
-        if key_str.startsWith("..."):
-          self.compile(v)
-          self.emit(Instruction(kind: IkGenePropsSpread))
-        else:
-          self.compile(v)
-          self.emit(Instruction(kind: IkGeneSetProp, arg0: k))
-      for i in 1..<gene.children.len:
-        self.compile(gene.children[i])
-        self.emit(Instruction(kind: IkGeneAddChild))
-      self.quote_level.dec()
-    else:
-      # For regular constructor, evaluate arguments normally, then add to Gene
-      for k, v in gene.props:
-        let key_str = $k
-        if key_str.startsWith("..."):
-          self.compile(v)
-          self.emit(Instruction(kind: IkGenePropsSpread))
-        else:
-          self.compile(v)
-          self.emit(Instruction(kind: IkGeneSetProp, arg0: k))
-      for i in 1..<gene.children.len:
-        self.compile(gene.children[i])
-        self.emit(Instruction(kind: IkGeneAddChild))
+    for k, v in gene.props:
+      let key_str = $k
+      if key_str.startsWith("..."):
+        self.compile(v)
+        self.emit(Instruction(kind: IkGenePropsSpread))
+      else:
+        self.compile(v)
+        self.emit(Instruction(kind: IkGeneSetProp, arg0: k))
+    for i in 1..<gene.children.len:
+      self.compile(gene.children[i])
+      self.emit(Instruction(kind: IkGeneAddChild))
 
     self.emit(Instruction(kind: IkGeneEnd))
   else:
@@ -524,9 +508,7 @@ proc compile_new(self: Compiler, gene: ptr Gene) =
     self.emit(Instruction(kind: IkGeneStart))
     self.emit(Instruction(kind: IkGeneEnd))
 
-  # Use unified IkNew instruction for both regular and macro constructors
-  # Runtime validation will handle the differences
-  self.emit(Instruction(kind: IkNew, arg1: is_macro_new.int32))
+  self.emit(Instruction(kind: IkNew))
 
 proc compile_super(self: Compiler, gene: ptr Gene) =
   discard gene

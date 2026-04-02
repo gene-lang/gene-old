@@ -381,7 +381,7 @@ proc call_instance_method(self: ptr VirtualMachine, instance: Value, method_name
     not_allowed("call method must be a function or native function")
     return false
 
-proc call_super_method_resolved(self: ptr VirtualMachine, parent_class: Class, instance: Value, method_name: string, args: openArray[Value], expect_macro: bool, kw_pairs: seq[(Key, Value)] = @[]): bool =
+proc call_super_method_resolved(self: ptr VirtualMachine, parent_class: Class, instance: Value, method_name: string, args: openArray[Value], kw_pairs: seq[(Key, Value)] = @[]): bool =
   ## Invoke a superclass method without allocating a proxy.
   if parent_class == nil:
     not_allowed("No parent class available for super")
@@ -407,10 +407,8 @@ proc call_super_method_resolved(self: ptr VirtualMachine, parent_class: Class, i
   case meth.callable.kind:
   of VkFunction:
     let f = meth.callable.ref.fn
-    if expect_macro and not f.is_macro_like:
-      not_allowed("Superclass method '" & method_name & "' is not macro-like")
-    if (not expect_macro) and f.is_macro_like:
-      not_allowed("Superclass method '" & method_name & "' is macro-like; use .m!")
+    if f.is_macro_like:
+      not_allowed("Macro-like class methods are not supported")
 
     if f.body_compiled == nil:
       f.compile()
@@ -434,11 +432,9 @@ proc call_super_method_resolved(self: ptr VirtualMachine, parent_class: Class, i
           process_args_direct(f.matcher, args_ptr, all_args.len, false, scope)
 
     var new_frame = new_frame()
-    new_frame.kind = if expect_macro: FkMacroMethod else: FkMethod
+    new_frame.kind = FkMethod
     new_frame.target = meth.callable
     new_frame.scope = scope
-    if expect_macro:
-      new_frame.caller_context = self.frame
     let args_gene = new_gene_value()
     args_gene.gene.children.add(instance)
     for arg in args:
@@ -467,8 +463,6 @@ proc call_super_method_resolved(self: ptr VirtualMachine, parent_class: Class, i
     return true
 
   of VkNativeFn:
-    if expect_macro:
-      not_allowed("Superclass method '" & method_name & "' is not macro-like")
     let has_kw = kw_pairs.len > 0
     let offset = if has_kw: 1 else: 0
     var all_args = newSeq[Value](args.len + 1 + offset)
@@ -493,7 +487,7 @@ proc call_super_method(self: ptr VirtualMachine, super_value: Value, method_name
   if super_value.kind != VkSuper:
     return false
   let super_ref = super_value.ref
-  return self.call_super_method_resolved(super_ref.super_class, super_ref.super_instance, method_name, args, method_name.ends_with("!"), kw_pairs)
+  return self.call_super_method_resolved(super_ref.super_class, super_ref.super_instance, method_name, args, kw_pairs)
 
 proc invoke_method_value(self: ptr VirtualMachine, value: Value, meth: Method,
                          args: openArray[Value], kw_pairs: seq[(Key, Value)] = @[]): bool =
@@ -859,17 +853,12 @@ proc resolve_current_instance_and_parent(self: ptr VirtualMachine): tuple[instan
 
   (instance, current_class.parent)
 
-proc call_super_constructor(self: ptr VirtualMachine, parent_class: Class, instance: Value, args: openArray[Value], expect_macro: bool, kw_pairs: seq[(Key, Value)] = @[]): bool =
+proc call_super_constructor(self: ptr VirtualMachine, parent_class: Class, instance: Value, args: openArray[Value], kw_pairs: seq[(Key, Value)] = @[]): bool =
   ## Invoke a superclass constructor without allocation.
   if parent_class == nil:
     not_allowed("No parent class available for super")
   if instance.kind notin {VkInstance, VkCustom}:
     not_allowed("super requires an instance context")
-
-  if parent_class.has_macro_constructor and not expect_macro:
-    not_allowed("Superclass defines ctor!, use super .ctor! instead of super .ctor")
-  if (not parent_class.has_macro_constructor) and expect_macro:
-    not_allowed("Superclass defines ctor, use super .ctor instead of super .ctor!")
 
   let ctor = parent_class.get_constructor()
   if ctor.is_nil:
@@ -878,10 +867,8 @@ proc call_super_constructor(self: ptr VirtualMachine, parent_class: Class, insta
   case ctor.kind:
   of VkFunction:
     let f = ctor.ref.fn
-    if expect_macro and not f.is_macro_like:
-      not_allowed("Superclass constructor is not macro-like")
-    if (not expect_macro) and f.is_macro_like:
-      not_allowed("Superclass constructor is macro-like; use super .ctor!")
+    if f.is_macro_like:
+      not_allowed("Macro-like constructors are not supported")
 
     if f.body_compiled == nil:
       f.compile()
@@ -908,16 +895,13 @@ proc call_super_constructor(self: ptr VirtualMachine, parent_class: Class, insta
       assign_property_params(f.matcher, scope, instance)
 
     var new_frame = new_frame()
-    new_frame.kind = if expect_macro: FkMacroMethod else: FkMethod
+    new_frame.kind = FkMethod
     new_frame.target = ctor
     new_frame.scope = scope
     new_frame.caller_frame = self.frame
     self.frame.ref_count.inc()
     new_frame.caller_address = Address(cu: self.cu, pc: self.pc + 1)
     new_frame.ns = f.ns
-    if expect_macro:
-      new_frame.caller_context = self.frame
-
     let args_gene = new_gene_value()
     args_gene.gene.children.add(instance)
     for arg in args:
@@ -942,8 +926,6 @@ proc call_super_constructor(self: ptr VirtualMachine, parent_class: Class, insta
     return true
 
   of VkNativeFn:
-    if expect_macro:
-      not_allowed("Superclass constructor is not macro-like")
     if kw_pairs.len > 0:
       var native_args = newSeq[Value](args.len + 1)
       var kw_map = new_map_value()

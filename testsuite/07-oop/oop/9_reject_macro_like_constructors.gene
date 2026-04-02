@@ -1,0 +1,9 @@
+# ExitCode: 1
+
+(class MacroCtor
+  (ctor! [expr]
+    (/body = expr)
+  )
+)
+
+(new! MacroCtor (+ 1 2))

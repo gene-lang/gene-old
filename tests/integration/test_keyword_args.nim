@@ -50,23 +50,20 @@ suite "Keyword Arguments Consistency":
       ((new Child) .method ^x 10 ^y 20)
     """, 60.to_value()
 
-  test "Super call with keyword args - macro method (positional)":
-    # Note: Macro super calls with keyword args may not preserve unevaluated args correctly
-    # Using positional args for macro methods as in existing test_super.nim
-    test_vm """
+  test "Super call with keyword args rejects macro-like methods":
+    test_vm_error """
       (class Base
-        (method method! [x]
+        (method method [x]
           x
         )
       )
       (class Child < Base
-        (method method! [x]
+        (method method [x]
           (super .method! (+ 1 2))
         )
       )
-      ((new Child) .method! 0)
-    """, proc(v: Value) =
-      check v.kind == VkGene
+      ((new Child) .method 0)
+    """
 
   test "Instance method call with keywords through 'call' method":
     test_vm """
@@ -79,19 +76,15 @@ suite "Keyword Arguments Consistency":
       (obj ^a 100 ^b 200)
     """, 300.to_value()
 
-  test "Macro-like method with keywords":
-    test_vm """
+  test "Macro-like method definitions are rejected":
+    test_vm_error """
       (class TestMacro
         (method transform! [code ^multiplier]
           [code multiplier]
         )
       )
-      ((new TestMacro) .transform! (+ 1 2) ^multiplier 10)
-    """, proc(v: Value) =
-      check v.kind == VkArray
-      check array_data(v).len == 2
-      check array_data(v)[0].kind == VkGene  # Unevaluated (+ 1 2)
-      check array_data(v)[1].to_int() == 10  # Keyword arg evaluated
+      ((new TestMacro) .transform (+ 1 2) ^multiplier 10)
+    """
 
   test "Mixed positional and keyword args - order preservation":
     test_vm """

@@ -3105,14 +3105,11 @@ proc exec*(self: ptr VirtualMachine): Value =
 
         # Access the class
         let class = class_value.ref.class
-
-        let is_macro_ctor = fn_value.ref.fn.is_macro_like
+        if fn_value.ref.fn.is_macro_like:
+          not_allowed("Macro-like constructors are not supported")
 
         if class.constructor != NIL:
-          if class.has_macro_constructor != is_macro_ctor:
-            not_allowed("Class '" & class.name & "' cannot define both ctor and ctor!")
-          else:
-            not_allowed("Class '" & class.name & "' already has a constructor")
+          not_allowed("Class '" & class.name & "' already has a constructor")
 
         # Set the constructor
         class.constructor = fn_value
@@ -3121,9 +3118,6 @@ proc exec*(self: ptr VirtualMachine): Value =
 
         # Set the function's namespace to the class namespace
         fn_value.ref.fn.ns = class.ns
-
-        # Set has_macro_constructor flag based on function type
-        class.has_macro_constructor = is_macro_ctor
 
         # Return the function
         self.frame.push(fn_value)
@@ -3590,11 +3584,8 @@ proc exec*(self: ptr VirtualMachine): Value =
         else:
           raise new_exception(types.Exception, "new requires a class, got " & $class_val.kind)
 
-        let is_macro_call = inst.arg1 != 0
-        if is_macro_call and not class.has_macro_constructor:
-          not_allowed("Class '" & class.name & "' defines ctor, use 'new' instead of 'new!'")
-        if (not is_macro_call) and class.has_macro_constructor:
-          not_allowed("Class '" & class.name & "' defines ctor!, use 'new!' instead of 'new'")
+        if inst.arg1 != 0:
+          not_allowed("Macro-like constructors are not supported; use 'new'")
 
         if class.runtime_type != nil:
           let resolved_ctor = resolve_constructor(class.runtime_type)
@@ -3641,7 +3632,7 @@ proc exec*(self: ptr VirtualMachine): Value =
 
             self.pc.inc()
             self.frame = new_frame(self.frame, Address(cu: self.cu, pc: self.pc))
-            self.frame.kind = if class.has_macro_constructor: FkMacroMethod else: FkMethod
+            self.frame.kind = FkMethod
             self.frame.scope = scope  # Set the scope
             self.frame.target = class.constructor
             # Pass instance as first argument for constructor
@@ -5212,8 +5203,9 @@ proc exec*(self: ptr VirtualMachine): Value =
                 not_allowed("Class.ctor must be a function or native function")
               class.constructor = ctor_value
               if ctor_value.kind == VkFunction:
+                if ctor_value.ref.fn.is_macro_like:
+                  not_allowed("Macro-like constructors are not supported")
                 ctor_value.ref.fn.ns = class.ns
-                class.has_macro_constructor = ctor_value.ref.fn.is_macro_like
 
             if methods_value != NIL:
               if methods_value.kind != VkMap:
@@ -5223,6 +5215,8 @@ proc exec*(self: ptr VirtualMachine): Value =
                   not_allowed("Class method values must be functions or native functions")
                 let method_name = get_symbol(symbol_index(method_key))
                 if method_callable.kind == VkFunction:
+                  if method_callable.ref.fn.is_macro_like:
+                    not_allowed("Macro-like class methods are not supported")
                   method_callable.ref.fn.ns = class.ns
                 class.methods[method_key] = Method(
                   class: class,
@@ -5238,6 +5232,8 @@ proc exec*(self: ptr VirtualMachine): Value =
               if missing_value.kind notin {VkFunction, VkNativeFn}:
                 not_allowed("Class.on_method_missing must be a function or native function")
               if missing_value.kind == VkFunction:
+                if missing_value.ref.fn.is_macro_like:
+                  not_allowed("Macro-like class methods are not supported")
                 missing_value.ref.fn.ns = class.ns
               class.methods["on_method_missing".to_key()] = Method(
                 class: class,
@@ -5470,7 +5466,9 @@ proc exec*(self: ptr VirtualMachine): Value =
             args[i] = self.frame.pop()
         let (instance, parent_class) = self.resolve_current_instance_and_parent()
         let saved_frame = self.frame
-        if self.call_super_method_resolved(parent_class, instance, inst.arg0.str, args, inst.kind == IkCallSuperMethodMacro, @[]):
+        if inst.kind == IkCallSuperMethodMacro:
+          not_allowed("Macro-like super methods are not supported")
+        if self.call_super_method_resolved(parent_class, instance, inst.arg0.str, args, @[]):
           if self.frame == saved_frame:
             self.pc.inc()
           inst = self.cu.instructions[self.pc].addr
@@ -5502,7 +5500,9 @@ proc exec*(self: ptr VirtualMachine): Value =
 
         let (instance, parent_class) = self.resolve_current_instance_and_parent()
         let saved_frame = self.frame
-        if self.call_super_method_resolved(parent_class, instance, method_name, args, method_name.ends_with("!"), kw_pairs):
+        if method_name.ends_with("!"):
+          not_allowed("Macro-like super methods are not supported")
+        if self.call_super_method_resolved(parent_class, instance, method_name, args, kw_pairs):
           if self.frame == saved_frame:
             self.pc.inc()
           inst = self.cu.instructions[self.pc].addr
@@ -5521,7 +5521,9 @@ proc exec*(self: ptr VirtualMachine): Value =
             args[i] = self.frame.pop()
         let (instance, parent_class) = self.resolve_current_instance_and_parent()
         let saved_frame = self.frame
-        if self.call_super_constructor(parent_class, instance, args, inst.kind == IkCallSuperCtorMacro):
+        if inst.kind == IkCallSuperCtorMacro:
+          not_allowed("Macro-like super constructors are not supported")
+        if self.call_super_constructor(parent_class, instance, args):
           if self.frame == saved_frame:
             self.pc.inc()
           inst = self.cu.instructions[self.pc].addr
@@ -5530,7 +5532,7 @@ proc exec*(self: ptr VirtualMachine): Value =
 
       of IkCallSuperCtorKw:
         {.push checks: off}
-        # arg0 = ctor/ctor! name, arg1 = (total_items << 16) | kw_count
+        # arg0 = ctor name, arg1 = (total_items << 16) | kw_count
         let ctor_name = inst.arg0.str
         let kw_count = (inst.arg1.int64 and 0xFFFF).int
         let expected = ((inst.arg1.int64 shr 16) and 0xFFFF).int
@@ -5553,7 +5555,9 @@ proc exec*(self: ptr VirtualMachine): Value =
 
         let (instance, parent_class) = self.resolve_current_instance_and_parent()
         let saved_frame = self.frame
-        if self.call_super_constructor(parent_class, instance, args, ctor_name.ends_with("!"), kw_pairs):
+        if ctor_name.ends_with("!"):
+          not_allowed("Macro-like super constructors are not supported")
+        if self.call_super_constructor(parent_class, instance, args, kw_pairs):
           if self.frame == saved_frame:
             self.pc.inc()
           inst = self.cu.instructions[self.pc].addr

@@ -1,5 +1,4 @@
 import unittest
-import tables
 
 import gene/types except Exception
 
@@ -75,7 +74,7 @@ test_vm """
 """, proc(r: Value) =
   check r.kind == VkGene
 
-# new! should be rejected when the class only has ctor (eager)
+# Macro-like constructors are rejected for classes.
 test_vm_error """
   (class Regular
     (ctor []
@@ -85,27 +84,20 @@ test_vm_error """
   (new! Regular)
 """
 
-# new should be rejected when the class only has ctor! (lazy)
+# Defining ctor! is rejected.
 test_vm_error """
   (class MacroCtor
     (ctor! [x]
       (/body = x)
     )
   )
-  (new MacroCtor)
 """
 
-# new! with ctor! delivers unevaluated arguments to the constructor
-test_vm """
-  (class MacroCtor
-    (ctor! [x]
-      (/body = x)
-    )
-  )
-  (var m (new! MacroCtor (+ 1 2)))
-  m/body
-""", proc(r: Value) =
-  check r.kind == VkGene
+# Using new! is rejected even without a constructor.
+test_vm_error """
+  (class Plain)
+  (new! Plain)
+"""
 # test_core """
 #   (fn m! []
 #     (class A

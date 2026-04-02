@@ -1,88 +1,29 @@
-# Test macro constructor functionality
+# Expected: point=10,20
+# Expected: keyword_sum=7
 
-# Basic test - macro constructor receives unevaluated arguments
-(println "=== Macro Constructor Tests ===")
-
-# Test 1: Basic macro constructor
-(println "Test 1: Basic macro constructor")
-(class LazyPoint
-  ^fields {^x Any ^y Any}
-  (ctor! [x y]
-    (/x = x)      # Keep x as symbol
-    (/y = y)      # Keep y as symbol
-  )
-  (method get_x []
-    (/x)
-  )
-  (method get_y []
-    (/y)
-  )
-)
-(var a 5)
-(var lp (new! LazyPoint a b))
-(println "  x symbol: " (lp .get_x))  # Should print symbol 'a'
-(println "  y symbol: " (lp .get_y))  # Should print symbol 'b'
-
-# Test 2: Regular constructor still works
-(println "Test 2: Regular constructor")
 (class Point
   ^fields {^x Any ^y Any}
   (ctor [x y]
-    (/x = x)      # Regular assignment
-    (/y = y)      # Regular assignment
-  )
-  (method get_x []
-    (/x)
-  )
-)
-(var p (new Point 10 20))
-(println "  x value: " (p .get_x))   # Should print 10
-
-# Test 3: Macro constructor with complex symbol expression
-(println "Test 3: Macro constructor with complex expression")
-(class SymbolStore
-  ^fields {^sym Any}
-  (ctor! [sym]
-    (/sym = sym)  # Store the symbol unevaluated
-  )
-  (method get_sym []
-    (/sym)
-  )
-)
-(var my_var 123)
-(var ss (new! SymbolStore my_var))
-(println "  stored symbol: " (ss .get_sym))  # Should print the symbol 'my_var'
-
-# Test 4: Error case - using regular new with macro constructor
-# This should fail but we can't test error handling easily in this test format
-(println "Test 4: Regular new with macro constructor (should show validation error)")
-# (var bad_lp (new LazyPoint a b))  # This would be an error
-
-# Test 5: Multiple macro constructor arguments
-(println "Test 5: Multiple macro constructor arguments")
-(class MultiSymbol
-  ^fields {^x Any ^y Any ^z Any}
-  (ctor! [x y z]
     (/x = x)
     (/y = y)
-    (/z = z)
   )
-  (method get_x []
-    (/x)
-  )
-  (method get_y []
-    (/y)
-  )
-  (method get_z []
-    (/z)
+  (method coords []
+    ((/x .to_s) ++ "," ++ (/y .to_s))
   )
 )
-(var x_val 10)
-(var y_val 20)
-(var z_val 30)
-(var ms (new! MultiSymbol x_val y_val z_val))
-(println "  stored x: " (ms .get_x))  # Should print symbol 'x_val'
-(println "  stored y: " (ms .get_y))  # Should print symbol 'y_val'
-(println "  stored z: " (ms .get_z))  # Should print symbol 'z_val'
 
-(println "=== Tests Complete ===")
+(var p (new Point 10 20))
+(println "point=" (p .coords))
+
+(class KeywordPoint
+  ^fields {^sum Any}
+  (ctor [^x ^y]
+    (/sum = (+ x y))
+  )
+  (method sum []
+    /sum
+  )
+)
+
+(var kp (new KeywordPoint ^x 3 ^y 4))
+(println "keyword_sum=" (kp .sum))

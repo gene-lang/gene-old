@@ -1395,6 +1395,8 @@ proc check_native_method_call(self: TypeChecker, recv_type: TypeExpr, method_nam
   return self.resolve_self(self.native_type_from_class_value(runtime_method.native_return_type))
 
 proc check_method_call(self: TypeChecker, recv_type: TypeExpr, method_name: string, args: seq[Value], props: Table[Key, Value], context: string): TypeExpr =
+  if method_name.ends_with("!"):
+    raise new_exception(types.Exception, "Type error: macro-like class methods are not supported; use a regular method or a standalone fn!")
   let rt = self.resolve(recv_type)
   if rt == nil or rt.kind == TkAny:
     return ANY_TYPE
@@ -1431,7 +1433,11 @@ proc check_super_call(self: TypeChecker, gene: ptr Gene): TypeExpr =
   if member.kind != VkSymbol or not member.str.startsWith("."):
     raise new_exception(types.Exception, "Type error: super requires a dotted member (e.g. .m or .ctor)")
   let member_name = member.str[1..^1]
-  let is_ctor = member_name == "ctor" or member_name == "ctor!"
+  if member_name.ends_with("!"):
+    if member_name == "ctor!":
+      raise new_exception(types.Exception, "Type error: macro-like super constructors are not supported; use .ctor")
+    raise new_exception(types.Exception, "Type error: macro-like super methods are not supported")
+  let is_ctor = member_name == "ctor"
   let args = if gene.children.len > 1: gene.children[1..^1] else: @[]
   if is_ctor:
     if parent_cls.ctor_type != nil:
@@ -2429,6 +2435,8 @@ proc check_block(self: TypeChecker, gene: ptr Gene): TypeExpr =
   return TypeExpr(kind: TkFn, params: fn_params, ret: last, variadic: is_variadic, kw_splat: prop_splats.len > 0, effects: effects)
 
 proc check_ctor(self: TypeChecker, gene: ptr Gene, class_name: string, cls: ClassInfo): TypeExpr =
+  if gene.type.kind == VkSymbol and gene.type.str == "ctor!":
+    raise new_exception(types.Exception, "Macro-like constructors are not supported; use (ctor [args] ...)")
   if gene.children.len == 0:
     return ANY_TYPE
   let args_val = gene.children[0]
@@ -2502,6 +2510,8 @@ proc check_method(self: TypeChecker, gene: ptr Gene, class_name: string, cls: Cl
     return ANY_TYPE
   let parsed_name = split_generic_definition_name(name_val.str)
   let method_name = parsed_name.base_name
+  if method_name.ends_with("!"):
+    raise new_exception(types.Exception, "Macro-like class methods are not supported; use (method name [args] ...)")
   let type_params = parsed_name.type_params
   let args_val = gene.children[1]
   if args_val.kind != VkArray:
@@ -2622,8 +2632,10 @@ proc check_class(self: TypeChecker, gene: ptr Gene): TypeExpr =
         for grandchild in child.gene.children:
           lowered.children.add(grandchild)
         discard self.check_method(lowered, class_name, cls)
-      elif k == "ctor" or k == "ctor!":
+      elif k == "ctor":
         discard self.check_ctor(child.gene, class_name, cls)
+      elif k == "ctor!":
+        raise new_exception(types.Exception, "Macro-like constructors are not supported; use (ctor [args] ...)")
       else:
         init_items.add(child)
     else:
@@ -2877,7 +2889,7 @@ proc check_expr(self: TypeChecker, v: Value): TypeExpr =
         return self.check_return(gene)
       of "super":
         return self.check_super_call(gene)
-      of "new", "new!":
+      of "new":
         if gene.children.len == 0:
           return ANY_TYPE
         let class_val = gene.children[0]
@@ -2888,6 +2900,8 @@ proc check_expr(self: TypeChecker, v: Value): TypeExpr =
             discard self.check_call(cls.ctor_type, args, gene.props, "new")
           return TypeExpr(kind: TkNamed, name: class_val.str)
         return ANY_TYPE
+      of "new!":
+        raise new_exception(types.Exception, "Type error: macro-like constructors are not supported; use (new Class ...)")
       of "type":
         if gene.children.len >= 2 and gene.children[0].kind == VkSymbol:
           let alias_name = gene.children[0].str

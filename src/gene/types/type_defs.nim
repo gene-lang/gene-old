@@ -484,7 +484,6 @@ type
     ns*: Namespace # Class can act like a namespace
     for_singleton*: bool # if it's the class associated with a single object, can not be extended
     version*: uint64  # Incremented when methods are mutated
-    has_macro_constructor*: bool  # Track if class has macro constructor for validation
     prop_types*: Table[Key, TypeId]  # property name → TypeId
     prop_type_descs*: seq[TypeDesc]  # type descriptors for property types
     implementations*: Table[GeneInterface, Implementation]  # interface identity → Implementation

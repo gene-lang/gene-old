@@ -17,6 +17,7 @@
 
 - `/property` reads or writes instance properties
 - Methods and constructors use array argument lists, just like functions. Use `[]` for zero arguments.
+- Class constructors and methods are always eager. Macro-like OOP forms such as `ctor!`, `new!`, `method name!`, and `super .name!` are not supported; use a standalone `fn!` helper when quoted arguments are needed.
 
 ## 7.2 Constructors
 
@@ -264,4 +265,4 @@ Dynamic/foo   # => "Dynamic/foo"
 - **Abstract methods**: No way to declare a method that subclasses must implement. The base class `(method area [] 0)` gives a default instead of forcing override.
 - **Class reopening**: Cannot add methods to an existing class after definition. Open classes (like Ruby) or extension methods would add flexibility.
 - **Constructor overloading**: Only one constructor per class. No way to provide multiple construction patterns.
-- **`new` vs `new!` split**: Having two instantiation forms adds cognitive overhead. Consider unifying by inspecting the constructor type.
+- **Macro-like OOP callables**: Intentionally unsupported. Keeping constructors and methods eager avoids extra inheritance and `super` dispatch complexity.

@@ -1,5 +1,3 @@
-import unittest
-
 import gene/types except Exception
 
 import ../helpers
@@ -58,20 +56,19 @@ test_vm """
   c/sum
 """, 7.to_value()
 
-# Super call to parent macro method should preserve unevaluated args
+# Super call to parent macro-like method should be rejected
 
-test_vm """
+test_vm_error """
   (class Base
-    (method m! [x] x)
+    (method m [x] x)
   )
   (class Child < Base
-    (method m! [x]
+    (method m [x]
       (super .m! (+ 1 2))
     )
   )
-  ((new Child) .m! 0)
-""", proc(v: Value) =
-  check v.kind == VkGene
+  ((new Child) .m 0)
+"""
 
 test_vm """
   (class Base
@@ -87,23 +84,21 @@ test_vm """
   ((new Child) .missing)
 """, "base".to_value()
 
-# Super call to parent macro constructor
+# Super call to parent macro-like constructor should be rejected
 
-test_vm """
+test_vm_error """
   (class Base
-    (ctor! [expr]
+    (ctor [expr]
       (/body = expr)
     )
   )
   (class Child < Base
-    (ctor! [expr]
+    (ctor [expr]
       (super .ctor! expr)
     )
   )
-  (var c (new! Child (+ 1 2)))
-  c/body
-""", proc(v: Value) =
-  check v.kind == VkGene
+  (new Child 1)
+"""
 
 # Bare super proxies are not supported; use (super .member ...).
 

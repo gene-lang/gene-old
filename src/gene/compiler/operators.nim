@@ -66,7 +66,6 @@ proc compile_gene_default(self: Compiler, gene: ptr Gene) {.inline.} =
 # * FnLabel: GeneStart(fail if the type is not a function)
 # * Compile arguments assuming it is a function call
 # * GeneLabel: GeneEnd
-# Similar logic is used for regular method calls and macro-method calls
 proc compile_gene_unknown(self: Compiler, gene: ptr Gene) {.inline.} =
   # Special case: handle method calls like (obj .method ...)
   # These are parsed as genes with type obj/.method
@@ -614,9 +613,8 @@ proc compile_method_call(self: Compiler, gene: ptr Gene) {.inline.} =
     start_index = 1  # Skip the method name when adding arguments
 
   let arg_count = method_prefix_args.len + (gene.children.len - start_index)
-
-  # Check if this is a macro-like method (ends with !)
-  let is_macro_like_method = method_name.ends_with("!")
+  if method_name.ends_with("!"):
+    not_allowed("Macro-like class methods are not supported; use (method name [args] ...) and a standalone fn! if you need quoted arguments")
 
   # Spread operator requires building a gene call (unified method calls don't support spreads)
   var has_spread = false
@@ -642,46 +640,6 @@ proc compile_method_call(self: Compiler, gene: ptr Gene) {.inline.} =
     let end_label = new_label()
     self.emit(Instruction(kind: IkGeneStartDefault, arg0: fn_label.to_value()))
 
-    # Macro branch: quoted arguments
-    self.emit(Instruction(kind: IkSwap))
-    self.emit(Instruction(kind: IkGeneAddChild))
-    self.quote_level.inc()
-    for arg in method_prefix_args:
-      self.emit(Instruction(kind: IkPushValue, arg0: arg))
-      self.emit(Instruction(kind: IkGeneAddChild))
-    for k, v in gene.props:
-      let key_str = $k
-      if key_str.startsWith("..."):
-        self.compile(v)
-        self.emit(Instruction(kind: IkGenePropsSpread))
-      else:
-        self.compile(v)
-        self.emit(Instruction(kind: IkGeneSetProp, arg0: k))
-
-    block:
-      var i = start_index
-      let children = gene.children
-      while i < children.len:
-        let child = children[i]
-        if i + 1 < children.len and children[i + 1].kind == VkSymbol and children[i + 1].str == "...":
-          self.compile(child)
-          self.emit(Instruction(kind: IkGeneAddSpread))
-          i += 2
-          continue
-        if child.kind == VkSymbol and child.str.endsWith("...") and child.str.len > 3:
-          let base_symbol = child.str[0..^4].to_symbol_value()
-          self.compile(base_symbol)
-          self.emit(Instruction(kind: IkGeneAddSpread))
-          i += 1
-          continue
-        self.compile(child)
-        self.emit(Instruction(kind: IkGeneAddChild))
-        i += 1
-
-    self.quote_level.dec()
-    self.emit(Instruction(kind: IkJump, arg0: end_label.to_value()))
-
-    # Function branch: evaluated arguments
     self.emit(Instruction(kind: IkNoop, label: fn_label))
     self.emit(Instruction(kind: IkSwap))
     self.emit(Instruction(kind: IkGeneAddChild))
@@ -723,20 +681,10 @@ proc compile_method_call(self: Compiler, gene: ptr Gene) {.inline.} =
   if gene.props.len == 0:
     # Fast path: positional arguments only
     # Compile arguments - they'll be on stack after object
-    if is_macro_like_method:
-      # For macro-like methods, pass arguments as unevaluated expressions
-      self.quote_level.inc()
-      for arg in method_prefix_args:
-        self.emit(Instruction(kind: IkPushValue, arg0: arg))
-      for i in start_index..<gene.children.len:
-        self.compile(gene.children[i])
-      self.quote_level.dec()
-    else:
-      # For regular methods, evaluate arguments normally
-      for arg in method_prefix_args:
-        self.emit(Instruction(kind: IkPushValue, arg0: arg))
-      for i in start_index..<gene.children.len:
-        self.compile(gene.children[i])
+    for arg in method_prefix_args:
+      self.emit(Instruction(kind: IkPushValue, arg0: arg))
+    for i in start_index..<gene.children.len:
+      self.compile(gene.children[i])
 
     # Use unified method call instructions
     if arg_count == 0:
@@ -760,9 +708,6 @@ proc compile_method_call(self: Compiler, gene: ptr Gene) {.inline.} =
   # Stack layout expected by IkUnifiedMethodCallKw is:
   #   [obj, kw_key1, kw_val1, ..., kw_keyN, kw_valN, pos_arg1, ..., pos_argM]
   # Preserve evaluation order: keyword values first, then positional args.
-  if is_macro_like_method:
-    self.quote_level.inc()
-
   for k, v in gene.props:
     self.emit(Instruction(kind: IkPushValue, arg0: cast[Value](k)))
     self.compile(v)
@@ -772,9 +717,6 @@ proc compile_method_call(self: Compiler, gene: ptr Gene) {.inline.} =
 
   for i in start_index..<gene.children.len:
     self.compile(gene.children[i])
-
-  if is_macro_like_method:
-    self.quote_level.dec()
 
   let kw_count = gene.props.len
   let total_items = arg_count + kw_count * 2
@@ -907,15 +849,18 @@ proc compile_gene(self: Compiler, input: Value) =
       not_allowed("super requires a member")
     let member = gene.children[0]
     if member.kind != VkSymbol:
-      not_allowed("super requires a method or constructor symbol (e.g., .m or .ctor!)")
+      not_allowed("super requires a method or constructor symbol (e.g., .m or .ctor)")
     if member.str == "ctor" or member.str == "ctor!":
-      not_allowed("super constructor calls must use .ctor or .ctor!")
+      not_allowed("super constructor calls must use .ctor")
     if not member.str.starts_with("."):
-      not_allowed("super requires a method or constructor symbol (e.g., .m or .ctor!)")
+      not_allowed("super requires a method or constructor symbol (e.g., .m or .ctor)")
     let member_str = member.str
     let member_name = member_str[1..^1]  # strip leading dot
-    let is_ctor = member_str == ".ctor" or member_str == ".ctor!"
-    let is_macro = member_str.ends_with("!")
+    if member_name.ends_with("!"):
+      if member_str == ".ctor!":
+        not_allowed("Macro-like super constructors are not supported; use .ctor")
+      not_allowed("Macro-like super methods are not supported; use a regular method and a standalone fn! if you need quoted arguments")
+    let is_ctor = member_str == ".ctor"
     let arg_start = 1
     let arg_count = gene.children.len - arg_start
 
@@ -923,21 +868,14 @@ proc compile_gene(self: Compiler, input: Value) =
       let old_tail = self.tail_position
       self.tail_position = false
       for i in arg_start..<gene.children.len:
-        let arg = gene.children[i]
-        # For macro super calls, forward plain symbols as-is (already unevaluated)
-        let needs_quote = is_macro and arg.kind != VkSymbol
-        if needs_quote:
-          self.quote_level.inc()
-        self.compile(arg)
-        if needs_quote:
-          self.quote_level.dec()
+        self.compile(gene.children[i])
       self.tail_position = old_tail
 
       let inst_kind =
         if is_ctor:
-          if is_macro: IkCallSuperCtorMacro else: IkCallSuperCtor
+          IkCallSuperCtor
         else:
-          if is_macro: IkCallSuperMethodMacro else: IkCallSuperMethod
+          IkCallSuperMethod
 
       self.emit(
         Instruction(
@@ -949,18 +887,12 @@ proc compile_gene(self: Compiler, input: Value) =
     else:
       # Keyword super-call layout mirrors IkUnifiedMethodCallKw:
       # [kw_key1, kw_val1, ..., kw_keyN, kw_valN, pos_arg1, ..., pos_argM]
-      if is_macro:
-        self.quote_level.inc()
-
       for k, v in gene.props:
         self.emit(Instruction(kind: IkPushValue, arg0: cast[Value](k)))
         self.compile(v)
 
       for i in arg_start..<gene.children.len:
         self.compile(gene.children[i])
-
-      if is_macro:
-        self.quote_level.dec()
 
       let kw_count = gene.props.len
       let total_items = arg_count + kw_count * 2
@@ -1386,7 +1318,7 @@ proc compile_gene(self: Compiler, input: Value) =
         self.compile_on_method_missing_definition(gene)
         return
       of "method!":
-        not_allowed("method! is not supported; use (method name! [args] ...) for macro-like methods")
+        not_allowed("Macro-like class methods are not supported; use (method name [args] ...)")
       of "ctor", "ctor!":
         # Constructor definition inside class body
         self.compile_constructor_definition(gene)

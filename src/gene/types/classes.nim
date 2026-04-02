@@ -15,7 +15,6 @@ proc new_class*(name: string, parent: Class): Class =
     methods: initTable[Key, Method](),
     implementations: initTable[GeneInterface, Implementation](),
     version: 0,
-    has_macro_constructor: false,  # Initialize to false, will be set during constructor compilation
   )
 
 proc new_class*(name: string): Class =
