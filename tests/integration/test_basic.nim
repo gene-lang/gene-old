@@ -314,7 +314,7 @@ test_vm """
 test_vm """
   (ns n
     (class /C
-      (method m _
+      (method m []
         1
       )
     )

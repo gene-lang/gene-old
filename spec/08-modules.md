@@ -5,11 +5,11 @@
 ```gene
 (ns geometry
   (class /Shape2D
-    (method area _ 0))
+    (method area [] 0))
 
   (class /Rect < Shape2D
     (ctor [w h] (/w = w) (/h = h))
-    (method area _ (/w * /h))))
+    (method area [] (/w * /h))))
 ```
 
 - Members prefixed with `/` are exported from the namespace

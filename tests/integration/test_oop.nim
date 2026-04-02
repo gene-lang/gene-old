@@ -230,10 +230,10 @@ test_vm_error """
 # Object syntax (singleton objects)
 test_vm """
   (object Config
-    (ctor _
+    (ctor []
       (/version = "1.0.0")
     )
-    (method get_version _
+    (method get_version []
       /version
     )
   )
@@ -243,12 +243,12 @@ test_vm """
 
 test_vm """
   (class Base
-    (method value _
+    (method value []
       1
     )
   )
   (var singleton (object Service < Base
-    (method value _
+    (method value []
       (+ (super .value) 1)
     )
   ))
@@ -265,6 +265,46 @@ test_vm """
   (class LoggingProxy < Proxy)
   ((new LoggingProxy) .missing)
 """, "handled"
+
+test_vm_error """
+  (class LegacyMethod
+    (method value _
+      1
+    )
+  )
+"""
+
+test_vm_error """
+  (class LegacyCtor
+    (ctor _
+      nil
+    )
+  )
+"""
+
+test_vm_error """
+  (class ScalarMethod
+    (method echo value
+      value
+    )
+  )
+"""
+
+test_vm_error """
+  (interface Readable
+    (method read)
+  )
+  (class DataBuffer
+    (ctor []
+      nil
+    )
+  )
+  (implement Readable for DataBuffer
+    (method read _
+      "payload"
+    )
+  )
+"""
 
 test_vm """
   ((nil .anything) is Nil)

@@ -48,7 +48,7 @@
   ^fields {^name String}
   (ctor [name]
     (/name = name))
-  (method get_name _
+  (method get_name []
     /name))
 
 (class Dog < Animal

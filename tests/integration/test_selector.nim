@@ -316,7 +316,7 @@ test_vm """
 
 test_vm """
   (class Greeter
-    (method speak _ "hi"))
+    (method speak [] "hi"))
   (var g (new Greeter))
   (var method_name "speak")
   g/.<method_name>

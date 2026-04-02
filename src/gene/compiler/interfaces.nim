@@ -37,31 +37,19 @@ proc compile_interface_prop_decl(self: Compiler, gene: ptr Gene) =
   )
 
 proc external_implement_args_with_self(args: Value): Value =
-  var method_args: Value
-  if args.kind == VkArray:
-    let src = array_data(args)
-    if src.len == 0:
-      method_args = new_array_value()
-      array_data(method_args).add("self".to_symbol_value())
-    elif src[0].kind == VkSymbol and src[0].str == "self":
-      method_args = new_array_value()
-      for arg in src:
-        array_data(method_args).add(arg)
-    else:
-      method_args = new_array_value()
-      array_data(method_args).add("self".to_symbol_value())
-      for arg in src:
-        array_data(method_args).add(arg)
-  elif args.kind == VkSymbol and args.str == "_":
-    method_args = new_array_value()
+  if args.kind != VkArray:
+    not_allowed("external implement methods and ctors require an array argument list; use [] for no arguments")
+  var method_args = new_array_value()
+  let src = array_data(args)
+  if src.len == 0:
     array_data(method_args).add("self".to_symbol_value())
-  elif args.kind == VkSymbol and args.str == "self":
-    method_args = new_array_value()
-    array_data(method_args).add(args)
+  elif src[0].kind == VkSymbol and src[0].str == "self":
+    for arg in src:
+      array_data(method_args).add(arg)
   else:
-    method_args = new_array_value()
     array_data(method_args).add("self".to_symbol_value())
-    array_data(method_args).add(args)
+    for arg in src:
+      array_data(method_args).add(arg)
   method_args
 
 proc compile_external_implement_method(self: Compiler, gene: ptr Gene) =

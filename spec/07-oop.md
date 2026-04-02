@@ -7,16 +7,16 @@
   (ctor [x y]
     (/x = x)
     (/y = y))
-  (method get_x _ /x)
-  (method get_y _ /y)
-  (method sum _ (/x + /y)))
+  (method get_x [] /x)
+  (method get_y [] /y)
+  (method sum [] (/x + /y)))
 
 (var p (new Point 3 4))
 [(p .get_x) (p .get_y) (p .sum)]   # => [3 4 7]
 ```
 
 - `/property` reads or writes instance properties
-- `_` in method signature means no parameters (besides implicit self)
+- Methods and constructors use array argument lists, just like functions. Use `[]` for zero arguments.
 
 ## 7.2 Constructors
 
@@ -39,7 +39,7 @@
   (method increment [n]
     (/value = (/value + n))
     /value)
-  (method get _ /value))
+  (method get [] /value))
 
 (var c (new Counter 0))
 [(c .increment 5) c/.get]   # => [5 5]
@@ -52,7 +52,7 @@
   (method increment [n]
     (/value = (/value + n))
     /value)
-  (method get _ /value))
+  (method get [] /value))
 
 (var c (new Counter 0))
 (c .increment 5)    # Parenthesized: with arguments
@@ -189,11 +189,11 @@ External implementations can define `ctor` to initialize adapter-owned state.
 
 ```gene
 (class Shape
-  (method area _ 0))
+  (method area [] 0))
 
 (class Circle < Shape
   (ctor [r] (/r = r))
-  (method area _ (3.14159 * /r * /r)))
+  (method area [] (3.14159 * /r * /r)))
 
 ((new Circle 2) .area)   # => 12.56636
 ```
@@ -261,8 +261,7 @@ Dynamic/foo   # => "Dynamic/foo"
 - **Static methods**: No dedicated `static` method syntax. Must use namespace functions instead.
 - **`on_member_missing` for instances**: Dynamic dispatch only works on namespaces, not class instances.
 - **Property declaration**: Properties are implicitly created by assignment in constructors. An explicit declaration (`^fields`) exists but is metadata only — not enforced.
-- **Method `_` syntax**: Using `_` for no-arg methods is non-obvious. Consider `(method get [] /value)` for consistency with functions.
-- **Abstract methods**: No way to declare a method that subclasses must implement. The base class `(method area _ 0)` gives a default instead of forcing override.
+- **Abstract methods**: No way to declare a method that subclasses must implement. The base class `(method area [] 0)` gives a default instead of forcing override.
 - **Class reopening**: Cannot add methods to an existing class after definition. Open classes (like Ruby) or extension methods would add flexibility.
 - **Constructor overloading**: Only one constructor per class. No way to provide multiple construction patterns.
 - **`new` vs `new!` split**: Having two instantiation forms adds cognitive overhead. Consider unifying by inspecting the constructor type.

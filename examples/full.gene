@@ -242,9 +242,9 @@
     (/x = x)
     (/y = y)
   )
-  (method get_x _ /x)
-  (method get_y _ /y)
-  (method sum _ (/x + /y))
+  (method get_x [] /x)
+  (method get_y [] /y)
+  (method sum [] (/x + /y))
 )
 
 (var p (new Point 3 4))
@@ -311,7 +311,7 @@
 
 (ns Geometry
   (class /Shape2D
-    (method area _ 0)
+    (method area [] 0)
   )
 
   (class /Rect < Shape2D
@@ -319,7 +319,7 @@
       (/w = w)
       (/h = h)
     )
-    (method area _
+    (method area []
       (/w * /h)
     )
   )

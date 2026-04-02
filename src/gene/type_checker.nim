@@ -1024,9 +1024,6 @@ proc parse_param_annotations(self: TypeChecker, args: Value): (seq[(string, stri
   of VkArray:
     items = array_data(args)
   of VkSymbol:
-    # Shorthand method form: (method to_s _ body...) means zero explicit params.
-    if args.str == "_":
-      return (@[], @[])
     items = @[args]
   of VkComplexSymbol:
     items = @[args]
@@ -2435,6 +2432,8 @@ proc check_ctor(self: TypeChecker, gene: ptr Gene, class_name: string, cls: Clas
   if gene.children.len == 0:
     return ANY_TYPE
   let args_val = gene.children[0]
+  if args_val.kind != VkArray:
+    raise new_exception(types.Exception, "Constructor requires an array argument list; use [] for no arguments")
   var body_start = 1
   var return_type: TypeExpr = TypeExpr(kind: TkNamed, name: class_name)
   if body_start < gene.children.len:
@@ -2505,6 +2504,8 @@ proc check_method(self: TypeChecker, gene: ptr Gene, class_name: string, cls: Cl
   let method_name = parsed_name.base_name
   let type_params = parsed_name.type_params
   let args_val = gene.children[1]
+  if args_val.kind != VkArray:
+    raise new_exception(types.Exception, "Method requires an array argument list; use [] for no arguments")
   var body_start = 2
   if type_params.len > 0:
     self.push_type_param_scope(type_params)

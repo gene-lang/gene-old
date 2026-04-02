@@ -10,7 +10,7 @@
   (ctor [radius]
     (/radius = radius)
   )
-  (method area _
+  (method area []
     (3.14159 * /radius * /radius)
   )
 )

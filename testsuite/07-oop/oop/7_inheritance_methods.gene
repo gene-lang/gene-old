@@ -3,7 +3,7 @@
 # Expected: 42
 
 (class Shape
-  (method area _ 42)
+  (method area [] 42)
 )
 
 (class Circle < Shape
@@ -17,7 +17,7 @@
 
 (ns /Geometry)
 (class Geometry/Shape
-  (method area _ 42)
+  (method area [] 42)
 )
 (class Geometry/Circle < Geometry/Shape
   (ctor [radius]

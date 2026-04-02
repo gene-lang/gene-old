@@ -230,7 +230,7 @@ proc compile_ns(self: Compiler, gene: ptr Gene) =
     self.emit(Instruction(kind: IkCallInit))
 
 proc compile_method_definition(self: Compiler, gene: ptr Gene) =
-  # Method definition: (method name args body...) or (method name arg body...)
+  # Method definition: (method name [args] body...)
   if gene.children.len < 2:
     not_allowed("Method definition requires at least name and args")
   
@@ -252,37 +252,21 @@ proc compile_method_definition(self: Compiler, gene: ptr Gene) =
   # name is still the stripped base name via IkDefineMethod.
   fn_value.gene.children.add(name)
   
-  # Handle args - check if self is already the first parameter
   let args = gene.children[1]
-  var method_args: Value
-  
-  if args.kind == VkArray:
-    let src = array_data(args)
-    if src.len == 0:
-      method_args = new_array_value()
-      array_data(method_args).add("self".to_symbol_value())
-    elif src[0].kind == VkSymbol and src[0].str == "self":
-      method_args = new_array_value()
-      for arg in src:
-        array_data(method_args).add(arg)
-    else:
-      method_args = new_array_value()
-      array_data(method_args).add("self".to_symbol_value())
-      for arg in src:
-        array_data(method_args).add(arg)
-  elif args.kind == VkSymbol and args.str == "_":
-    # _ means no arguments, but methods need self
-    method_args = new_array_value()
+  if args.kind != VkArray:
+    not_allowed("method requires an array argument list; use [] for no arguments")
+
+  var method_args = new_array_value()
+  let src = array_data(args)
+  if src.len == 0:
     array_data(method_args).add("self".to_symbol_value())
-  elif args.kind == VkSymbol and args.str == "self":
-    # Just self
-    method_args = new_array_value()
-    array_data(method_args).add(args)
+  elif src[0].kind == VkSymbol and src[0].str == "self":
+    for arg in src:
+      array_data(method_args).add(arg)
   else:
-    # Single argument that's not self - add self first
-    method_args = new_array_value()
     array_data(method_args).add("self".to_symbol_value())
-    array_data(method_args).add(args)
+    for arg in src:
+      array_data(method_args).add(arg)
   
   fn_value.gene.children.add(method_args)
 
@@ -313,7 +297,9 @@ proc compile_on_method_missing_definition(self: Compiler, gene: ptr Gene) =
   self.compile_method_definition(method_gene)
 
 proc compile_constructor_definition(self: Compiler, gene: ptr Gene) =
-  # Constructor definition: (ctor args body...) or (ctor! args body...)
+  # Constructor definition: (ctor [args] body...) or (ctor! [args] body...)
+  if gene.children.len == 0:
+    not_allowed(gene.type.str & " requires an array argument list; use [] for no arguments")
 
   # Create a function from the constructor definition
   # The constructor is similar to (fn new [args] body...) but bound to the class
@@ -323,18 +309,10 @@ proc compile_constructor_definition(self: Compiler, gene: ptr Gene) =
     fn_value.gene.props[k] = v
   fn_value.gene.children.add(gene.type.str.to_symbol_value())
   
-  # Handle args - always normalize to an array
   let args = gene.children[0]
-  var args_array: Value
-  if args.kind == VkArray:
-    args_array = args
-  elif args.kind == VkSymbol and args.str == "_":
-    # _ means no arguments
-    args_array = new_array_value()
-  else:
-    # Single argument without brackets - wrap it in an array
-    args_array = new_array_value()
-    array_data(args_array).add(args)
+  if args.kind != VkArray:
+    not_allowed(gene.type.str & " requires an array argument list; use [] for no arguments")
+  let args_array = args
   fn_value.gene.children.add(args_array)
   
   # Add remaining body

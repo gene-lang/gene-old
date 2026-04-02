@@ -11,10 +11,10 @@
     (/x = x)      # Keep x as symbol
     (/y = y)      # Keep y as symbol
   )
-  (method get_x _
+  (method get_x []
     (/x)
   )
-  (method get_y _
+  (method get_y []
     (/y)
   )
 )
@@ -31,7 +31,7 @@
     (/x = x)      # Regular assignment
     (/y = y)      # Regular assignment
   )
-  (method get_x _
+  (method get_x []
     (/x)
   )
 )
@@ -45,7 +45,7 @@
   (ctor! [sym]
     (/sym = sym)  # Store the symbol unevaluated
   )
-  (method get_sym _
+  (method get_sym []
     (/sym)
   )
 )
@@ -67,13 +67,13 @@
     (/y = y)
     (/z = z)
   )
-  (method get_x _
+  (method get_x []
     (/x)
   )
-  (method get_y _
+  (method get_y []
     (/y)
   )
-  (method get_z _
+  (method get_z []
     (/z)
   )
 )

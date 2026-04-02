@@ -15,7 +15,7 @@
   (method get [key]
     /data/key
   )
-  (method size _
+  (method size []
     /count
   )
 )
