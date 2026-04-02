@@ -67,6 +67,16 @@ proc prop_splat*(self: seq[Matcher]): Key =
     if m.kind == MatchProp and m.is_splat:
       return m.name_key
 
+proc has_positional_splat(self: seq[Matcher]): bool =
+  for m in self:
+    if m.is_splat and not (m.kind == MatchProp or m.is_prop):
+      return true
+  return false
+
+proc can_apply_postfix_splat(m: Matcher): bool {.inline.} =
+  m != nil and m.kind == MatchData and not m.is_prop and not m.is_splat and
+    m.children.len == 0 and cast[int64](m.name_key) != 0
+
 proc parse*(self: RootMatcher, v: Value)
 
 proc calc_next*(self: Matcher) =
@@ -117,6 +127,8 @@ proc parse(self: RootMatcher, group: var seq[Matcher], v: Value) =
   {.push checks: off}
   case v.kind:
     of VkSymbol:
+      if v.str == "...":
+        not_allowed("Positional rest must follow a named parameter")
       if v.str[0] == '^':
         let m = new_matcher(self, MatchProp)
         if v.str.ends_with("..."):
@@ -132,6 +144,8 @@ proc parse(self: RootMatcher, group: var seq[Matcher], v: Value) =
         group.add(m)
         if v.str != "_":
           if v.str.ends_with("..."):
+            if v.str.len <= 3 or v.str[0..^4] == "_" or group.has_positional_splat():
+              not_allowed("Only one named positional rest parameter is allowed")
             m.is_splat = true
             if v.str[0] == '^':
               m.name_key = v.str[1..^4].to_key()
@@ -162,6 +176,14 @@ proc parse(self: RootMatcher, group: var seq[Matcher], v: Value) =
       let arr = array_data(v)
       while i < arr.len:
         let item = arr[i]
+        if item.kind == VkSymbol and item.str == "...":
+          if group.len == 0 or not can_apply_postfix_splat(group[^1]):
+            not_allowed("Positional rest must follow a named parameter")
+          if group.has_positional_splat():
+            not_allowed("Only one named positional rest parameter is allowed")
+          group[^1].is_splat = true
+          i += 1
+          continue
         i += 1
         if item.kind == VkArray:
           let m = new_matcher(self, MatchData)
@@ -318,11 +340,15 @@ proc resolve_type_value_to_id_with_index(v: Value, type_descs: var seq[TypeDesc]
     # Handle Fn type: (Fn [Int String] Float)
     if gene.`type`.kind == VkSymbol and gene.`type`.str == "Fn":
       var params: seq[TypeId] = @[]
+      var rest_index = -1'i32
       if gene.children.len > 0 and gene.children[0].kind == VkArray:
         let items = array_data(gene.children[0])
         var i = 0
         while i < items.len:
           let item = items[i]
+          var is_rest = false
+          if item.kind == VkSymbol and item.str == "...":
+            not_allowed("Fn type rest marker must follow a parameter type")
           if item.kind == VkSymbol and item.str.startsWith("^"):
             # Keyword param - skip label, use type
             if i + 1 < items.len:
@@ -332,8 +358,21 @@ proc resolve_type_value_to_id_with_index(v: Value, type_descs: var seq[TypeDesc]
               params.add(BUILTIN_TYPE_ANY_ID)
               i += 1
           else:
-            params.add(resolve_type_value_to_id_with_index(item, type_descs, type_desc_index, type_aliases, type_vars, module_path))
+            var param_item = item
+            if item.kind == VkSymbol and item.str.endsWith("...") and item.str.len > 3:
+              param_item = item.str[0..^4].to_symbol_value()
+              is_rest = true
+            params.add(resolve_type_value_to_id_with_index(param_item, type_descs, type_desc_index, type_aliases, type_vars, module_path))
             i += 1
+          if i < items.len and items[i].kind == VkSymbol and items[i].str == "...":
+            if is_rest:
+              not_allowed("Fn type parameter has duplicate rest marker")
+            is_rest = true
+            i += 1
+          if is_rest:
+            if rest_index >= 0:
+              not_allowed("Fn type can only contain one positional rest parameter")
+            rest_index = (params.len - 1).int32
       let ret =
         if gene.children.len > 1: resolve_type_value_to_id_with_index(gene.children[1], type_descs, type_desc_index, type_aliases, type_vars, module_path)
         else: BUILTIN_TYPE_ANY_ID
@@ -347,7 +386,7 @@ proc resolve_type_value_to_id_with_index(v: Value, type_descs: var seq[TypeDesc]
               if eff.kind == VkSymbol:
                 effects.add(eff.str)
       return intern_type_desc(type_descs,
-        TypeDesc(module_path: module_path, kind: TdkFn, params: params, ret: ret, effects: effects), type_desc_index)
+        TypeDesc(module_path: module_path, kind: TdkFn, params: params, rest_index: rest_index, ret: ret, effects: effects), type_desc_index)
     # Handle union type: (Int | String)
     if is_union_gene(gene):
       var members: seq[TypeId] = @[]

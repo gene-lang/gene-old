@@ -122,6 +122,62 @@ suite "Keyword Arguments Consistency":
       check array_data(v)[1].to_int() == 100
       check array_data(v)[2].to_int() == 200
 
+  test "Non-tail rest parameters bind suffix from the end":
+    test_vm """
+      (fn with_suffix [head items... tail]
+        [head items tail]
+      )
+      (with_suffix 1 2 3 4)
+    """, proc(v: Value) =
+      check v.kind == VkArray
+      check array_data(v).len == 3
+      check array_data(v)[0].to_int() == 1
+      check array_data(v)[1].kind == VkArray
+      check array_data(array_data(v)[1]).len == 2
+      check array_data(array_data(v)[1])[0].to_int() == 2
+      check array_data(array_data(v)[1])[1].to_int() == 3
+      check array_data(v)[2].to_int() == 4
+
+  test "Standalone postfix rest token matches suffix syntax":
+    test_vm """
+      (fn postfix_rest [items ... tail]
+        [items tail]
+      )
+      (postfix_rest 1 2 3 4)
+    """, proc(v: Value) =
+      check v.kind == VkArray
+      check array_data(v).len == 2
+      check array_data(v)[0].kind == VkArray
+      check array_data(array_data(v)[0]).len == 3
+      check array_data(v)[1].to_int() == 4
+
+  test "Defaults before rest still leave room for a required suffix":
+    test_vm """
+      (fn default_then_rest [head = 1 items... tail]
+        [head items tail]
+      )
+      (default_then_rest 9)
+    """, proc(v: Value) =
+      check v.kind == VkArray
+      check array_data(v).len == 3
+      check array_data(v)[0].to_int() == 1
+      check array_data(v)[1].kind == VkArray
+      check array_data(array_data(v)[1]).len == 0
+      check array_data(v)[2].to_int() == 9
+
+  test "Invalid positional rest declarations raise":
+    test_vm_error """
+      (fn bad [... tail]
+        tail
+      )
+    """
+
+    test_vm_error """
+      (fn bad [a... b...]
+        [a b]
+      )
+    """
+
   test "Keyword override - last value wins":
     test_vm """
       (fn test_kw [^a]

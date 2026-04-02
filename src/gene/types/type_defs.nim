@@ -266,6 +266,7 @@ type
       members*: seq[TypeId]
     of TdkFn:
       params*: seq[TypeId]
+      rest_index*: int32
       ret*: TypeId
       effects*: seq[string]
     of TdkVar:

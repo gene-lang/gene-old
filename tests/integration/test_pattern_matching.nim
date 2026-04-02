@@ -91,6 +91,32 @@ test_vm """
   check array_data(r)[1] == 2
 
 test_vm """
+  (var [items... tail] [1 2 3 4])
+  [items tail]
+""", proc(r: Value) =
+  check r.kind == VkArray
+  check array_data(r).len == 2
+  check array_data(r)[0].kind == VkArray
+  check array_data(array_data(r)[0]).len == 3
+  check array_data(array_data(r)[0])[0] == 1
+  check array_data(array_data(r)[0])[1] == 2
+  check array_data(array_data(r)[0])[2] == 3
+  check array_data(r)[1] == 4
+
+test_vm """
+  (var [items ... tail] [1 2 3 4])
+  [items tail]
+""", proc(r: Value) =
+  check r.kind == VkArray
+  check array_data(r).len == 2
+  check array_data(r)[0].kind == VkArray
+  check array_data(array_data(r)[0]).len == 3
+  check array_data(array_data(r)[0])[0] == 1
+  check array_data(array_data(r)[0])[1] == 2
+  check array_data(array_data(r)[0])[2] == 3
+  check array_data(r)[1] == 4
+
+test_vm """
   (var payload `(payload ^a 10 ^x 99 20 30 40))
   (var [^a b c... ^rest...] payload)
   [a b c rest/x]
@@ -112,6 +138,14 @@ test_vm_error """
 test_vm_error """
   (var payload `(payload ^a 1 ^extra 9 2))
   (var [^a b] payload)
+"""
+
+test_vm_error """
+  (var [... tail] [1 2])
+"""
+
+test_vm_error """
+  (var [a... b...] [1 2 3])
 """
 
 # proc test_arg_matching*(pattern: string, input: string, callback: proc(result: MatchResult)) =

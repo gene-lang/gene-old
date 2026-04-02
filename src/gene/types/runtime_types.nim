@@ -31,6 +31,7 @@ type
       args: seq[RtType]
     of RtFn:
       params: seq[RtType]
+      rest_index: int
       ret: RtType
       effects: seq[string]
 
@@ -171,6 +172,7 @@ proc type_desc_to_rt(type_descs: seq[TypeDesc], type_id: TypeId, depth = 0): RtT
     RtType(
       kind: RtFn,
       params: params,
+      rest_index: desc.rest_index.int,
       ret: type_desc_to_rt(type_descs, desc.ret, depth + 1),
       effects: desc.effects
     )
@@ -378,6 +380,8 @@ proc type_expr_compatible(actual: RtType, expected: RtType): bool =
     return actual.name == expected.ctor
   if actual.kind == RtFn and expected.kind == RtFn:
     if actual.params.len != expected.params.len:
+      return false
+    if actual.rest_index != expected.rest_index:
       return false
     for i in 0..<actual.params.len:
       if not type_expr_compatible(actual.params[i], expected.params[i]):

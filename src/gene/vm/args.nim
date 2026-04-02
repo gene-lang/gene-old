@@ -90,9 +90,18 @@ proc process_args_core(matcher: RootMatcher, positional: ptr UncheckedArray[Valu
 
     if param.is_splat:
       let rest_array = new_array_value()
-      while pos_index < pos_count:
+      var suffix_slots = 0
+      for j in (i + 1)..<matcher.children.len:
+        let suffix_param = matcher.children[j]
+        if not (suffix_param.kind == MatchProp or suffix_param.is_prop):
+          suffix_slots.inc()
+      var rest_count = pos_count - pos_index - suffix_slots
+      if rest_count < 0:
+        rest_count = 0
+      while rest_count > 0:
         array_data(rest_array).add(positional[pos_index])
         pos_index.inc()
+        rest_count.dec()
       scope.members[i] = rest_array
       has_value_splat = true
     elif param.has_default():

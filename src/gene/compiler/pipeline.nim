@@ -101,7 +101,7 @@ proc remap_checker_type_id(checker_type_id: TypeId,
                                        output_descs, output_desc_index, depth + 1))
     let ret = remap_checker_type_id(desc.ret, checker_descs, checker_to_output, checker_visiting,
                                     output_descs, output_desc_index, depth + 1)
-    mapped = TypeDesc(module_path: desc.module_path, kind: TdkFn, params: params, ret: ret, effects: desc.effects)
+    mapped = TypeDesc(module_path: desc.module_path, kind: TdkFn, params: params, rest_index: desc.rest_index, ret: ret, effects: desc.effects)
   else:
     discard
 

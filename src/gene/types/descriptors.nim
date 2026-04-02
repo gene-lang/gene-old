@@ -117,7 +117,8 @@ proc type_desc_key(desc: TypeDesc, type_descs: seq[TypeDesc], depth = 0): string
     for param in desc.params:
       params.add(type_desc_key_for_id(type_descs, param, depth + 1))
     let effects = sorted_unique_strings(desc.effects)
-    return module_prefix & "fn:[" & join_strings(params, ",") & "]->" &
+    return module_prefix & "fn:[" & join_strings(params, ",") & "]@" &
+      $desc.rest_index & "->" &
       type_desc_key_for_id(type_descs, desc.ret, depth + 1) &
       "!" & join_strings(effects, ",")
   of TdkVar:
@@ -265,8 +266,10 @@ proc type_desc_to_string*(type_id: TypeId, type_descs: seq[TypeDesc], depth = 0)
     "(" & join_strings(parts, " | ") & ")"
   of TdkFn:
     var params: seq[string] = @[]
-    for param in desc.params:
+    for i, param in desc.params:
       params.add(type_desc_to_string(param, type_descs, depth + 1))
+      if desc.rest_index >= 0 and i == desc.rest_index.int:
+        params.add("...")
     let ret = type_desc_to_string(desc.ret, type_descs, depth + 1)
     let effects =
       if desc.effects.len > 0: " ! [" & join_strings(desc.effects, " ") & "]"
@@ -319,7 +322,8 @@ proc descriptor_registry_key*(desc: TypeDesc): string {.gcsafe.} =
   of TdkUnion:
     scope & "::union:[" & type_id_list_key(desc.members, normalize = true) & "]"
   of TdkFn:
-    scope & "::fn:[" & type_id_list_key(desc.params) & "]->" & $desc.ret &
+    scope & "::fn:[" & type_id_list_key(desc.params) & "]@" & $desc.rest_index &
+      "->" & $desc.ret &
       "!" & join_strings(sorted_unique_strings(desc.effects), ",")
   of TdkVar:
     scope & "::var:" & $desc.var_id

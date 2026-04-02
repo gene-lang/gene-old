@@ -17,7 +17,22 @@ proc test_strict_type_error(code: string) =
       raised = true
     check raised
 
+proc test_strict_type_ok(code: string) =
+  var code = cleanup(code)
+  test "Strict type checking succeeds: " & code:
+    let checker = tc.new_type_checker(strict = true, module_filename = "test_code")
+    for node in read_all(code):
+      checker.type_check_node(node)
+    check true
+
 suite "Static type checking":
+  test_strict_type_ok """
+    (fn typed_middle_rest [head: Int nums...: (Array Int) tail: Bool]
+      [head nums tail]
+    )
+    (typed_middle_rest 1 2 3 true)
+  """
+
   test_strict_type_error """
     (fn f [x: NotAType] x)
   """
@@ -47,6 +62,20 @@ suite "Static type checking":
       (+ a b)
     )
     (add 1 "x")
+  """
+
+  test_strict_type_error """
+    (fn typed_middle_rest [head: Int nums...: (Array Int) tail: Bool]
+      [head nums tail]
+    )
+    (typed_middle_rest 1 2 "x" true)
+  """
+
+  test_strict_type_error """
+    (fn typed_middle_rest [head: Int nums...: (Array Int) tail: Bool]
+      [head nums tail]
+    )
+    (typed_middle_rest 1 2 3 4)
   """
 
   test_vm_error """

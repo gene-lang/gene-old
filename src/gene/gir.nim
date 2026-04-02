@@ -185,6 +185,7 @@ proc writeTypeDesc(stream: Stream, desc: TypeDesc) =
     stream.write(desc.params.len.uint32)
     for param in desc.params:
       stream.write(param.int32)
+    stream.write(desc.rest_index.int32)
     stream.write(desc.ret.int32)
     stream.write(desc.effects.len.uint32)
     for effect in desc.effects:
@@ -218,12 +219,13 @@ proc readTypeDesc(stream: Stream): TypeDesc =
     var params: seq[TypeId] = @[]
     for _ in 0..<param_count:
       params.add(stream.readInt32())
+    let rest_index = stream.readInt32()
     let ret = stream.readInt32()
     let effect_count = stream.readUint32()
     var effects: seq[string] = @[]
     for _ in 0..<effect_count:
       effects.add(stream.read_string())
-    result = TypeDesc(module_path: module_path, kind: TdkFn, params: params, ret: ret, effects: effects)
+    result = TypeDesc(module_path: module_path, kind: TdkFn, params: params, rest_index: rest_index, ret: ret, effects: effects)
   of TdkVar:
     result = TypeDesc(module_path: module_path, kind: TdkVar, var_id: stream.readInt32())
 
