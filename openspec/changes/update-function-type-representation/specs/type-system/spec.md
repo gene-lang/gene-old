@@ -71,6 +71,41 @@ The type system SHALL store function types as canonical callable signatures that
 - **THEN** the stored descriptor preserves `Void` as the return type
 - **AND** printing the descriptor yields `(Fn -> Void)`
 
+### Requirement: Functions And Methods Share One Callable Model
+The type system SHALL use one callable-signature model for functions and methods. Method surface signatures SHALL describe only caller-supplied arguments, while receiver typing SHALL be stored separately.
+
+#### Scenario: Method signature omits implicit receiver
+- **WHEN** a method is declared as `(method render [width: Int] -> String ...)`
+- **THEN** its public callable signature is `(Fn [Int] -> String)`
+- **AND** the implicit receiver is not exposed as a first argument in that signature
+
+#### Scenario: Method alias may reuse the same signature shape
+- **WHEN** tooling or documentation chooses to render the same method contract as `(Method [Int] -> String)`
+- **THEN** it refers to the same caller-visible callable signature as `(Fn [Int] -> String)`
+- **AND** it does not introduce an extra `Self` argument into the public signature
+
+### Requirement: `Self` Is A Contextual Type Symbol
+The type system SHALL treat `Self` as a special contextual type symbol for the enclosing class instance type.
+
+#### Scenario: `Self` resolves inside class scope
+- **WHEN** a class member annotation references `Self`
+- **THEN** the compiler resolves it to the instance type of the enclosing class
+
+#### Scenario: `Self` is rejected outside class scope
+- **WHEN** a top-level function or variable annotation references `Self`
+- **THEN** the compiler reports an invalid contextual type error
+
+### Requirement: `self` And `Self` Are Reserved
+The language SHALL reserve `self` for receiver bindings and `Self` for the contextual receiver type. User code SHALL NOT declare either name for another purpose.
+
+#### Scenario: Variable binding named `self` is rejected
+- **WHEN** user code declares a variable, parameter, or function named `self`
+- **THEN** the compiler reports a reserved identifier error
+
+#### Scenario: Type-level binding named `Self` is rejected
+- **WHEN** user code declares a class, type alias, generic parameter, or other type-level binding named `Self`
+- **THEN** the compiler reports a reserved identifier error
+
 ### Requirement: Function Type Inference
 The compiler and type checker SHALL infer canonical function types from callable definitions based on parameter declarations, keyword labels, rest bindings, keyword splats, and return annotations or inferred return types.
 
@@ -89,3 +124,8 @@ The compiler and type checker SHALL infer canonical function types from callable
 #### Scenario: Keyword and keyword-rest parameters infer canonical contract form
 - **WHEN** a function definition has keyword parameters `^a: Int` and `^b: String`, a keyword splat accepting `Any`, a positional variadic segment of `Int`, a trailing positional `String`, and a `String` return type
 - **THEN** its inferred type is `(Fn [^a Int ^b String ^... Any Int ... String] -> String)`
+
+#### Scenario: Method inference hides receiver from the public signature
+- **WHEN** a method definition has one user-declared `Int` parameter and a `String` return type
+- **THEN** its inferred public callable signature is `(Fn [Int] -> String)`
+- **AND** the receiver type is tracked separately as `Self`

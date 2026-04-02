@@ -7,6 +7,8 @@
 - [ ] 2.1 Parse canonical function type syntax: `(Fn)`, `(Fn [Args])`, `(Fn -> Return)`, `(Fn [Args] -> Return)`, and effectful variants with `! [Effects]`.
 - [ ] 2.2 Infer canonical function types from function, method, ctor, and native callable definitions, including positional rest and keyword splat parameters.
 - [ ] 2.3 Normalize keyword splat bindings to the anonymous contract form `^... T` and positional rest bindings to the contract form `T ...`.
+- [ ] 2.4 Resolve `Self` as a class-scoped contextual type while keeping method surface signatures receiver-hidden.
+- [ ] 2.5 Reject user-defined bindings or type declarations named `self` or `Self`.
 
 ## 3. Compatibility And Validation
 - [ ] 3.1 Update compile-time and runtime function compatibility checks to use canonical signature structure instead of arity-only comparisons.

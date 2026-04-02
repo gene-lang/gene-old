@@ -14,12 +14,14 @@ The user-facing target shape is:
 - Goals:
   - Define one canonical `Fn` surface syntax that can express zero-arg, zero-return, positional variadic, fixed keyword, and keyword-rest contracts.
   - Preserve enough structure in stored type metadata to round-trip canonical function types exactly.
+  - Unify functions and methods under one callable-signature model.
   - Require inference to collapse concrete callable definitions into those canonical shapes.
   - Keep effect annotations composable with the canonical `Fn` syntax.
 - Non-Goals:
   - Introduce overloaded functions or multimethod dispatch.
   - Infer full effect sets from function bodies.
   - Make positional parameter names part of the function type contract.
+  - Expose the implicit method receiver as a public first argument in method signatures.
 
 ## Decisions
 - Decision: canonical function type syntax uses optional argument and return clauses.
@@ -41,6 +43,23 @@ The user-facing target shape is:
   - Keyword labels are part of the callable contract and are preserved.
   - Keyword-rest binding variable names are not part of the callable contract; a definition such as `[^opts...: Any]` infers to `^... Any`.
 
+- Decision: methods use the same public callable shape as functions.
+  - A method declaration `(method name [x: Int] -> String ...)` exposes the same caller-visible signature shape as a function: `(Fn [Int] -> String)`.
+  - If the language wants a documentation alias such as `(Method [Int] -> String)`, it is an alias over the same callable model rather than a distinct argument-shape system.
+  - The implicit receiver is not included in the public argument list because callers do not pass it explicitly.
+
+- Decision: `Self` has a special contextual meaning.
+  - `Self` is a reserved contextual type symbol, not a nominal class and not a runtime meta-type.
+  - Inside class-scoped type contexts, `Self` resolves to the instance type of the enclosing class.
+  - Outside class-scoped type contexts, `Self` is invalid.
+  - Internal method metadata may store receiver information as `Self` even when the public method signature omits the receiver.
+
+- Decision: `self` and `Self` are reserved identifiers.
+  - `self` is the reserved receiver binding name for methods and other class-scoped receiver contexts.
+  - No variable, parameter, field, function, class, or type alias may be declared with the name `self`.
+  - `Self` is the reserved contextual receiver type symbol.
+  - No class, type alias, generic parameter, or other type-level binding may be declared with the name `Self`.
+
 - Decision: omitted return type defaults to `Any`.
   - `(Fn)` and `(Fn [Int])` normalize to `-> Any`.
   - `Any` means the callable places no return-value constraint on callers.
@@ -55,6 +74,7 @@ The user-facing target shape is:
   - Positional variadic segments match the middle slice between fixed prefix and suffix parameters.
   - Missing annotations continue to degrade to `Any` where the gradual type system already permits that behavior.
   - A callable typed as `-> Void` is not interchangeable with `-> Any`; `Void` is an explicit return contract.
+  - Method call compatibility uses the receiver-hidden signature at the call site and any stored receiver metadata for class/member validation.
 
 ## Proposed Representation
 - `TypeExpr(TkFn)` and `TypeDesc(TdkFn)` should each carry:
@@ -68,11 +88,19 @@ The user-facing target shape is:
 
 This representation preserves canonical printing, compatibility checks, and GIR round-tripping without reconstructing meaning from side channels. Omitted return clauses are normalized to `Any`, so a separate `has_return_type` flag is not required.
 
+## Function / Method Relationship
+- Functions and methods share the same callable-signature structure.
+- A method differs only by carrying receiver metadata in addition to its callable signature.
+- Public method signatures omit the receiver and describe only caller-supplied arguments.
+- Reflection can distinguish methods from free functions with a callable kind flag or alias without changing the argument contract.
+- The reserved runtime receiver name is `self`, and the reserved type-level receiver symbol is `Self`.
+
 ## Trade-offs
 - Richer function metadata adds some descriptor and serialization complexity, but it removes ambiguity that already leaks into the checker and runtime.
 - Omitting positional names from types keeps types compact, but it means signature help and tooling must combine type metadata with source-level parameter names when both are needed.
 - Treating keyword-rest as anonymous in the contract keeps equality and compatibility straightforward, but the runtime still needs to preserve the local binding name for execution.
 - Normalizing omitted returns to `Any` keeps the contract compact, but it removes the ability to tell whether `Any` was written explicitly or arrived by defaulting.
+- Hiding the receiver in method signatures keeps public types aligned with call syntax, but internal metadata still needs a receiver slot for dispatch and class-aware tooling.
 
 ## Migration Plan
 - Accept the existing `(Fn [Args] Return)` form only as a compatibility parse path during migration, but print and serialize canonical arrow form.
