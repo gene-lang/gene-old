@@ -49,16 +49,16 @@
 )
 
 (fn $ns/provider_supports_images? [provider = nil]
-  (var p (provider || CONFIG/llm/provider))
-  (["openai" "anthropic"] .contains p/.to_s/.to_lower)
+  (var p (((provider || CONFIG/llm/provider || "") .to_s) .to_lower))
+  (["openai" "anthropic"] .contains p)
 )
 
 (fn image_attachment_error [image_attachments provider = nil]
   (var images (ensure_array image_attachments))
-  (var selected_provider (((provider || CONFIG/llm/provider) .to_s) .to_lower))
   (if images/.empty?
     (return "")
   )
+  (var selected_provider (((provider || CONFIG/llm/provider || "") .to_s) .to_lower))
 
   (if_not (provider_supports_images? selected_provider)
     (return #"The current model provider (#{selected_provider}) does not support image inputs.")
@@ -737,7 +737,8 @@
     (return {^content image_error ^tool_calls []})
   )
 
-  (if_not (provider_has_credentials)
+  (var has_credentials (provider_has_credentials))
+  (if_not has_credentials
     (if (images/.size > 0)
       (log .warn #"LLM image call rejected in mock mode (provider=#{CONFIG/llm/provider})")
       (return {^content #"Image inputs require configured #{(if (CONFIG/llm/provider == "anthropic") "Anthropic" elif (CONFIG/llm/provider == "openai") "OpenAI" else "LLM")} credentials." ^tool_calls []})

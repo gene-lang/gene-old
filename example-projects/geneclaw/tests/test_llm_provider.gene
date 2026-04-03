@@ -1,5 +1,6 @@
 #!/usr/bin/env gene run
 
+(import get_system_prompt from "workspace_state")
 (import build_openai_request build_openai_codex_request build_anthropic_request error_message_from_response normalize_anthropic_response normalize_openai_response provider_supports_images? validate_image_inputs from "llm_provider")
 
 (var tools_spec [
@@ -31,6 +32,9 @@
 (assert (((provider_supports_images? "openai") .to_s) == "true"))
 (assert (((provider_supports_images? "anthropic") .to_s) == "true"))
 (assert (((provider_supports_images? "bogus") .to_s) == "false"))
+(var empty_images_check (validate_image_inputs []))
+(assert (empty_images_check/ok == true))
+(assert (empty_images_check/error == ""))
 (var invalid_provider_check (validate_image_inputs [image_attachment] "bogus"))
 (var invalid_provider_json (gene/json/stringify invalid_provider_check))
 (assert (invalid_provider_json .include? "\"ok\":false"))
@@ -64,8 +68,9 @@
 
 (var codex_request (build_openai_codex_request codex_history "Continue based on the tool results above." tools_spec [image_attachment]))
 (var codex_request_json (gene/json/stringify codex_request))
+(var system_prompt (get_system_prompt))
 
-(assert (codex_request/instructions == "You are GeneClaw, a capable AI agent. You can use tools to complete tasks. After receiving a tool result, provide a natural response. For general conversation, respond normally without tool calls."))
+(assert (codex_request/instructions == system_prompt))
 (assert (codex_request/tools/.size == 1))
 (assert (codex_request/tools/0/type == "function"))
 (assert (codex_request/tools/0/name == "list_files"))
@@ -112,7 +117,7 @@
 (var request (build_anthropic_request history "Continue based on the tool results above." tools_spec [image_attachment]))
 (var anthropic_request_json (gene/json/stringify request))
 
-(assert (request/system == "You are GeneClaw, a capable AI agent. You can use tools to complete tasks. After receiving a tool result, provide a natural response. For general conversation, respond normally without tool calls."))
+(assert (request/system == system_prompt))
 (assert (request/tools/.size == 1))
 (assert (request/tools/0/name == "list_files"))
 (assert (request/tools/0/input_schema/properties/path/type == "string"))
