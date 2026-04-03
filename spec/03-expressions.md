@@ -5,8 +5,15 @@
 Every construct in Gene returns a value. There are no statements.
 
 ```gene
-(var x (if (a > b) then a else b))   # if returns a value
-(var y (do (step1) (step2) result))   # do returns last expression
+(var x (if (3 > 2) then "left" else "right"))
+(println x)
+(var y (do
+  (var n 1)
+  (n += 2)
+  n))
+(println y)
+# => left
+# => 3
 ```
 
 ## 3.2 Arithmetic Operators
@@ -14,43 +21,71 @@ Every construct in Gene returns a value. There are no statements.
 Infix within parentheses:
 
 ```gene
-(x + y)       # Addition
-(x - y)       # Subtraction
-(x * y)       # Multiplication
-(x / y)       # Division
-(x % y)       # Modulo
-(a + b * c)   # Precedence respected: * before +
+(println (10 + 3))
+(println (10 - 3))
+(println (10 * 3))
+(println (10 / 3))
+(println (10 % 3))
+(println (2 + 3 * 4))
+# => 13
+# => 7
+# => 30
+# => 3.3333333333333335
+# => 1
+# => 14
 ```
 
 ## 3.3 Augmented Assignment
 
 ```gene
-(x += 5)      # x = x + 5
-(x -= 2)      # x = x - 2
-(x *= 3)      # x = x * 3
-(x /= 2)      # x = x / 2
-(x %= 5)      # x = x % 5
+(var x 10)
+(x += 5)
+(println x)
+(x -= 2)
+(println x)
+(x *= 3)
+(println x)
+(x /= 2)
+(println x)
+(x %= 5)
+(println x)
+# => 15
+# => 13
+# => 39
+# => 19.5
+# => 4.5
 ```
 
 ## 3.4 Comparison Operators
 
 ```gene
-(x == y)      # Equal
-(x != y)      # Not equal
-(x > y)       # Greater than
-(x < y)       # Less than
-(x >= y)      # Greater or equal
-(x <= y)      # Less or equal
+(println (3 == 3))
+(println (3 != 4))
+(println (5 > 2))
+(println (5 < 2))
+(println (5 >= 5))
+(println (4 <= 3))
+# => true
+# => true
+# => true
+# => false
+# => true
+# => false
 ```
 
 ## 3.5 Logical Operators
 
 ```gene
-(x && y)      # Logical AND (short-circuit)
-(x || y)      # Logical OR (short-circuit)
-(x &|& y)     # Logical XOR
-(! x)         # Logical NOT
-(a && b || c) # Precedence: && before ||
+(println (true && true))
+(println (true || false))
+(println (true &|& false))
+(println (! false))
+(println (false || true && false))
+# => true
+# => true
+# => true
+# => true
+# => false
 ```
 
 Precedence (high to low): `*/%` → `+-` → comparisons → `&&` → `&|&` → `||`
@@ -58,8 +93,12 @@ Precedence (high to low): `*/%` → `+-` → comparisons → `&&` → `&|&` → 
 ## 3.6 Assignment
 
 ```gene
-(var x 10)    # Declaration + binding
-(x = 20)      # Reassignment
+(var x 10)
+(println x)
+(x = 20)
+(println x)
+# => 10
+# => 20
 ```
 
 ## 3.7 `do` Blocks
@@ -70,7 +109,9 @@ Sequence expressions, returning the last:
 (var result (do
   (var a 5)
   (var b 8)
-  (a + b)))     # => 13
+  (a + b)))
+(println result)
+# => 13
 ```
 
 ## 3.8 `ifel` (Inline Conditional)
@@ -78,7 +119,8 @@ Sequence expressions, returning the last:
 Fixed-arity conditional expression:
 
 ```gene
-(ifel (x > 10) "big" "small")
+(println (ifel (7 > 10) "big" "small"))
+# => small
 ```
 
 ---

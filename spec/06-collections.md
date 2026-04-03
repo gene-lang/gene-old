@@ -74,7 +74,46 @@ m/.size
 cfg/host/!         # Returns value or throws if missing/nil
 ```
 
-## 6.3 Gene Values (S-Expressions as Data)
+## 6.3 Ranges
+
+Ranges are lazy numeric sequences. `(start .. end)` is inclusive with an implicit step of `1`. Use `(range start end step)` for stepped or descending ranges.
+
+```gene
+(println (0 .. 3))
+(println (range 1 5 2))
+(println (range 5 1 -2))
+# => 0..3
+# => 1..5 step 2
+# => 5..1 step -2
+```
+
+### Iterators
+```gene
+(var it ((range 1 5 2) .iter))
+(println (typeof it))
+(println (it .has_next))
+(println (it .next))
+(println (it .next_pair))
+(println (it .next))
+(println (it .has_next))
+# => RangeIterator
+# => true
+# => 1
+# => [1 3]
+# => 5
+# => false
+```
+
+### `for` Loops
+```gene
+(for x in (range 1 5 2)
+  (println x))
+# => 1
+# => 3
+# => 5
+```
+
+## 6.4 Gene Values (S-Expressions as Data)
 
 Gene values are the homoiconic core — code and data share the same structure.
 
@@ -99,7 +138,7 @@ g/.children    # => ["child1", "child2"]
 # => (list 1 2 3)
 ```
 
-## 6.4 Selectors (Overview)
+## 6.5 Selectors (Overview)
 
 Collections participate in Gene's selector system, but selectors are substantial enough to have their own section: see [17. Selectors](17-selectors.md).
 
@@ -112,7 +151,7 @@ people/0/name         # Nested array + map access
 (data .@users/0/name) # Method shorthand
 ```
 
-## 6.5 Immutability
+## 6.6 Immutability
 
 Arrays, maps, and Gene values can be made immutable (details implementation-dependent).
 

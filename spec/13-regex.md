@@ -3,16 +3,22 @@
 ## 13.1 Regex Literals
 
 ```gene
-(var re #/(\d+)/)
-(var re_i #/pattern/i)      # Case-insensitive
-(var re_m #/pattern/m)      # Multiline (. matches newline)
+(println #/(\d+)/)
+(println #/pattern/i)
+(println #/line.*/m)
+# => #/(\d+)/
+# => #/pattern/i
+# => #/line.*/m
 ```
 
 ### With Replacement
 ```gene
-(var re_sub #/(\d)/[\\1]/)   # Pattern + replacement in one literal
-("a1b2" .replace re_sub)     # => "a[1]b2" (uses embedded replacement)
-("a1b2" .replace_all re_sub) # => "a[1]b[2]"
+(println #/(\d)/[\\1]/)
+(println ("a1b2" .replace #/(\d)/[\\1]/))
+(println ("a1b2" .replace_all #/(\d)/[\\1]/))
+# => #/(\d)/[\1]/
+# => a[1]b2
+# => a[1]b[2]
 ```
 
 ## 13.2 Matching
@@ -21,71 +27,100 @@
 (var re #/(\d+)/)
 
 # Match — returns RegexpMatch or nil
-(re .match "abc123def")
+(println (re .match "abc123def"))
 
 # Process — same as match
-(re .process "abc123def")
+(println (re .process "abc123def"))
 
 # Find — returns matched substring
-(re .find "abc123def")       # => "123"
+(println (re .find "abc123def"))
 
 # Find all
-(re .find_all "a1b2c3")     # => ["1", "2", "3"]
+(println (re .find_all "a1b2c3"))
 
 # Scan — non-overlapping matches
-(re .scan "a1b2c3")
+(println (re .scan "a1b2c3"))
+# => VkRegexMatch
+# => VkRegexMatch
+# => 123
+# => [1 2 3]
+# => [1 2 3]
 ```
 
-## 13.3 RegexpMatch Properties
+## 13.3 Capture Groups and Match Data
 
 ```gene
-(var m (#/(\w+)@(\w+)/ .match "user@host"))
-m/.value            # => "user@host"
-m/.captures         # => ["user", "host"]
-m/.named_captures   # => {} (if no named groups)
-m/.start            # Start offset (UTF-8 chars)
-m/.end              # End offset (exclusive)
-m/.pre_match        # Text before match
-m/.post_match       # Text after match
+(var m (#/(?P<user>\w+)@(?P<host>\w+)/ .match "say user@host now"))
+(println m/value)
+(println m/captures)
+(println m/named_captures)
+(println m/start)
+(println m/end)
+(println m/pre_match)
+(println m/post_match)
+# => user@host
+# => [user host]
+# => {^user user ^host host}
+# => 4
+# => 13
+# => say 
+# =>  now
 ```
+
+`m/start` and `m/end` are UTF-8 character offsets, with `end` exclusive.
 
 ## 13.4 Replacement
 
 ```gene
 # Replace first
-("hello world" .replace #/world/ "Gene")
+(println ("hello world" .replace #/world/ "Gene"))
 
 # Replace all
-("a1b2c3" .replace_all #/(\d)/ "[\\1]")   # => "a[1]b[2]c[3]"
+(println ("a1b2c3" .replace_all #/(\d)/ "[\\1]"))
 
 # Aliases
-("text" .sub #/pattern/ "replacement")      # Same as replace
-("text" .gsub #/pattern/ "replacement")     # Same as replace_all
+(println ("text" .sub #/e/ "E"))
+(println ("text" .gsub #/t/ "T"))
+(println ("alice@example" .replace #/(?P<user>\w+)@(?P<host>\w+)/ "<\\k<user>>"))
+# => hello Gene
+# => a[1]b[2]c[3]
+# => tExt
+# => TexT
+# => <alice>
 ```
 
 ## 13.5 String Methods with Regex
 
 ```gene
-("hello" .match #/h(.+)/)        # Returns RegexpMatch
-("hello" .contain #/ell/)        # => true
-("a,b,,c" .split #/,+/)          # => ["a", "b", "c"]
-("hello" .find #/l+/)            # => "ll"
-("abc123" .find_all #/\d/)       # => ["1", "2", "3"]
+(println ("hello" .match #/h(.+)/))
+(println ("hello" .contain #/ell/))
+(println ("a,b,,c" .split #/,+/))
+(println ("hello" .find #/l+/))
+(println ("abc123" .find_all #/\d/))
+# => VkRegexMatch
+# => true
+# => [a b c]
+# => ll
+# => [1 2 3]
 ```
 
 ## 13.6 Regex Constructor
 
 ```gene
-(var re (new gene/Regexp "pattern"))
-(var re_i (new gene/Regexp ^^i "pattern"))      # Case-insensitive
-(var re_im (new gene/Regexp ^^i ^^m "pattern")) # Multiple flags
+(println (new Regexp "pattern"))
+(println (new Regexp ^^i "pattern"))
+(println (new Regexp ^^i ^^m "line.*"))
+# => #/pattern/
+# => #/pattern/i
+# => #/line.*/im
 ```
+
+Gene does not use a separate `g` flag. Global behavior comes from the collection-style methods: `.find_all`, `.scan`, and `.replace_all`.
 
 ---
 
 ## Potential Improvements
 
-- **Named capture groups**: Named groups like `(?P<name>\w+)` should work but their accessibility through `.named_captures` is inconsistent.
 - **Regex interpolation**: No way to build regex patterns from strings at runtime without using the constructor. A `#/#{pattern}/` form would help.
 - **Global match state**: Regex objects don't maintain match position state for incremental matching.
 - **Unicode categories**: No support for `\p{Letter}` Unicode property escapes in patterns.

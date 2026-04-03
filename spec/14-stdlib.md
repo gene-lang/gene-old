@@ -99,20 +99,87 @@ $env/HOME              # Read env var
 (has_env "KEY")        # Check existence
 ```
 
-## 14.7 Time
+## 14.7 Date and Time
 
+### Constructors
 ```gene
-(var now (gene/now))
-now/.year
-now/.month
-now/.day
-
-(gene/today)
-(gene/yesterday)
-(gene/tomorrow)
+(println (typeof (gene/today)))
+(println (typeof (gene/yesterday)))
+(println (typeof (gene/tomorrow)))
+(println (typeof (gene/now)))
+# => VkDate
+# => VkDate
+# => VkDate
+# => VkDateTime
 ```
 
-## 14.8 JSON
+### Accessors
+
+Supported accessors are:
+
+| Type | Accessors |
+|------|-----------|
+| `Date` | `.year`, `.month`, `.day` |
+| `DateTime` | `.year`, `.month`, `.day`, `.hour`, `.minute`, `.second`, `.to_i` |
+
+```gene
+(var d (gene/today))
+(println ((d .year) > 2000))
+(println (((d .month) >= 1) && ((d .month) <= 12)))
+(println (((d .day) >= 1) && ((d .day) <= 31)))
+
+(var dt (gene/now))
+(println (((dt .hour) >= 0) && ((dt .hour) < 24)))
+(println (((dt .minute) >= 0) && ((dt .minute) < 60)))
+(println (((dt .second) >= 0) && ((dt .second) < 60)))
+(println ((dt .to_i) > 0))
+# => true
+# => true
+# => true
+# => true
+# => true
+# => true
+# => true
+```
+
+### Formatting
+
+Printing is the currently exposed formatting API:
+
+- `Date` renders as `YYYY-M-D`
+- `DateTime` renders as `YYYY-M-D H:M:S`
+
+### Parsing, Arithmetic, and Timezones
+
+- No date or datetime parsing API is currently exposed.
+- No date arithmetic API is currently exposed.
+- No timezone accessor or conversion API is currently exposed.
+- `DateTime` stores timezone data internally, but the current Gene surface only exposes the accessors above plus `.to_i`.
+
+## 14.8 Bytes
+
+Byte-oriented helpers currently hang off `String`. They produce `VkBytes` values, but Bytes itself is still mostly opaque to Gene code.
+
+### String Byte Helpers
+```gene
+(println ("hé" .bytesize))
+(println (typeof ("ABC" .bytes)))
+(println ("ABC" .each_byte))
+(println ("hé" .byteslice 0 1))
+# => 3
+# => VkBytes
+# => [65 66 67]
+# => VkBytes
+```
+
+Aliases:
+
+- `.bytes` and `.to_bytes` are equivalent
+- `.byteslice` and `.byte_slice` are equivalent
+
+Standalone binary, hex, and base64 literals are not yet fully user-facing even though the runtime has `VkBytes`, `VkByte`, and related internal types.
+
+## 14.9 JSON
 
 ```gene
 # Plain JSON
@@ -124,21 +191,21 @@ now/.day
 (gene/json/deserialize json_string)    # JSON with #GENE# tags → Gene value
 ```
 
-## 14.9 Base64
+## 14.10 Base64
 
 ```gene
 (gene/base64_encode "hello")    # => "aGVsbG8="
 (gene/base64_decode "aGVsbG8=") # => "hello"
 ```
 
-## 14.10 Assertions
+## 14.11 Assertions
 
 ```gene
 (assert (x > 0))
 (assert (x > 0) "x must be positive")
 ```
 
-## 14.11 HTTP Client
+## 14.12 HTTP Client
 
 ```gene
 (var resp (await (http_get "https://example.com")))
@@ -150,7 +217,7 @@ resp/headers   # Response headers
 # Also: http_put, http_patch, http_delete
 ```
 
-## 14.12 HTTP Server
+## 14.13 HTTP Server
 
 ```gene
 (start_server 8080 (fn [req]
@@ -160,7 +227,7 @@ resp/headers   # Response headers
 
 Request properties: `method`, `path`, `url`, `params`, `headers`, `body`
 
-## 14.13 Database Clients
+## 14.14 Database Clients
 
 ### SQLite
 ```gene
@@ -182,7 +249,7 @@ Request properties: `method`, `path`, `url`, `params`, `headers`, `body`
 
 Results: arrays of arrays `[[col1 col2] [col1 col2] ...]`
 
-## 14.14 System & Processes
+## 14.15 System & Processes
 
 ```gene
 (cwd)
@@ -204,7 +271,8 @@ Results: arrays of arrays `[[col1 col2] [col1 col2] ...]`
 - **Missing map methods**: No dedicated `.entries`, `.has_key?` alias, or `.delete` helper.
 - **Functional utilities**: No `compose`, `partial`, `identity`, `constantly` built-ins.
 - **Math library**: Core helpers include `min`, `max`, `floor`, `ceil`, `round`, and `random`, but trig/log functions are still absent.
-- **Date/time**: `gene/now`, `gene/today`, `gene/yesterday`, and `gene/tomorrow` exist with Date/DateTime accessors, but there is still no parsing, formatting, arithmetic API, or timezone control.
+- **Date/time**: Core constructors and accessors exist, but there is still no direct Date/DateTime literal construction, parsing API, arithmetic API, or timezone control.
+- **Bytes**: `VkBytes` exists and string byte helpers work, but raw Bytes values remain mostly opaque and there is no complete standalone bytes API yet.
 - **File system**: No directory listing, file existence check, path manipulation, or file metadata.
 - **Process/system**: `system/Process`, `system/exec`, and `system/shell` exist, but process support is still Unix/macOS-focused and there is no richer filesystem/process management layer yet.
 - **Networking**: HTTP exists but no raw TCP/UDP sockets exposed to Gene code.

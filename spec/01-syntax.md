@@ -141,6 +141,21 @@ Special forms:
 - `obj/.method` — no-arg method call shorthand
 - `map/key/!` — assert non-nil (throws if missing)
 
+## 1.10 Range Syntax
+
+Ranges use the infix `..` form inside a Gene expression. The two-endpoint form is inclusive. Stepped ranges use the `range` constructor.
+
+```gene
+(var closed (0 .. 3))
+(println closed)
+(var stepped (range 1 5 2))
+(println stepped)
+# => 0..3
+# => 1..5 step 2
+```
+
+`(start .. end)` is shorthand for `(range start end)` with an implicit step of `1`. A `start..end:step` literal is not currently implemented; use `(range start end step)` instead.
+
 ---
 
 ## Potential Improvements

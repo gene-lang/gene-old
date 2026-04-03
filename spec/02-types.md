@@ -30,7 +30,47 @@ Gene uses a NaN-boxed 64-bit representation. Every value is one of the following
 | `Thread`    | Concurrent execution                  |
 | `Regex`     | Compiled regular expression           |
 | `Range`     | Numeric range (lazy)                  |
+| `Date`      | Calendar date                         |
+| `DateTime`  | Date + time snapshot                  |
+| `Bytes`     | Byte sequence                         |
 | `Enum`      | Enumeration type                      |
+
+### Range
+
+Ranges are lazy numeric sequences. `(start .. end)` creates an inclusive range with step `1`; `(range start end step)` creates a stepped range.
+
+```gene
+(println (typeof (0 .. 3)))
+(println (range 1 5 2))
+# => VkRange
+# => 1..5 step 2
+```
+
+### Date and DateTime
+
+`Date` and `DateTime` are runtime-backed value types exposed through `gene/today`, `gene/yesterday`, `gene/tomorrow`, and `gene/now`.
+
+The parser also reserves `YYYY-MM-DD` and `YYYY-MM-DDTHH:MM:SS` for Date/DateTime literals, but direct literal evaluation is not yet wired through end-to-end. Use the stdlib constructors above in current user code.
+
+```gene
+(println (typeof (gene/today)))
+(println (typeof (gene/now)))
+(println (((gene/now) .to_i) > 0))
+# => VkDate
+# => VkDateTime
+# => true
+```
+
+### Bytes
+
+`Bytes` values exist in the runtime as `VkBytes`, but the standalone literal forms are not yet user-facing. The parser-reserved binary/hex/base64 prefixes (`0!`, `0*`, `0#`) are still incomplete, so current programs usually obtain bytes through string helpers.
+
+```gene
+(println (typeof ("ABC" .bytes)))
+(println ("ABC" .each_byte))
+# => VkBytes
+# => [65 66 67]
+```
 
 ## 2.2 Type Annotations
 
@@ -125,6 +165,8 @@ Color/red     # Access member
 ## Potential Improvements
 
 - **Generic classes**: Only generic functions are supported. Generic classes (`class Stack:T`) are not yet implemented.
+- **Date/DateTime literals**: The parser recognizes date and datetime token shapes, but direct literal evaluation is still incomplete. Construction currently goes through stdlib helpers such as `gene/today` and `gene/now`.
+- **Bytes ergonomics**: `VkBytes` exists, but direct literals, indexing, and richer byte-oriented methods are not fully surfaced to Gene code yet.
 - **Type bounds/constraints**: No way to express `T: Comparable` or similar constraints on generic type parameters.
 - **Inference completeness**: Type inference still falls back to `Any` in some complex binding positions, notably destructuring parameters and other non-trivial patterns.
 - **Union type narrowing**: Flow-sensitive narrowing works in `if` branches and ADT-aware `case/when` arms, but not in every control-flow form or arbitrary predicate.
