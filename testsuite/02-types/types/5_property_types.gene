@@ -2,8 +2,8 @@
 
 # Typed properties with correct values
 (class Point
-  (prop x: Int)
-  (prop y: Int)
+  (field x: Int)
+  (field y: Int)
   (ctor [a b] (/x = a) (/y = b)))
 (var p (new Point 1 2))
 (println p/x)
@@ -24,7 +24,7 @@
 
 # Int->Float coercion on property
 (class Holder
-  (prop val: Float)
+  (field val: Float)
   (ctor [v] (/val = v)))
 (var h (new Holder 3))
 (println h/val)
@@ -32,7 +32,7 @@
 
 # Constructor type violation caught
 (class Bad
-  (prop x: Int)
+  (field x: Int)
   (ctor [a] (/x = a)))
 (try
   (new Bad "wrong")
@@ -50,7 +50,7 @@ catch *
 
 # Untyped property accepts anything
 (class Flex
-  (prop x)
+  (field x)
   (ctor [a] (/x = a)))
 (var f (new Flex "hello"))
 (println f/x)

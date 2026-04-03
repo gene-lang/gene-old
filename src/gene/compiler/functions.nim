@@ -272,13 +272,22 @@ proc compile_method_definition(self: Compiler, gene: ptr Gene) =
   
   fn_value.gene.children.add(method_args)
 
+  var body_start = 2
+  if gene.children.len > body_start and gene.children[body_start].kind == VkSymbol and gene.children[body_start].str == "->":
+    if gene.children.len <= body_start + 1:
+      not_allowed("Missing return type after ->")
+    body_start += 2
+  if gene.children.len > body_start and gene.children[body_start].kind == VkSymbol and gene.children[body_start].str == "!":
+    if gene.children.len <= body_start + 1:
+      not_allowed("Missing effects list after !")
+    body_start += 2
+
+  if body_start >= gene.children.len:
+    return
+
   # Add the body
-  if gene.children.len == 2:
-    # No body provided - default to nil
-    fn_value.gene.children.add(NIL)
-  else:
-    for i in 2..<gene.children.len:
-      fn_value.gene.children.add(gene.children[i])
+  for i in 2..<gene.children.len:
+    fn_value.gene.children.add(gene.children[i])
   
   # Compile the function definition
   self.compile_fn(fn_value, define_binding = false)
@@ -332,24 +341,70 @@ proc compile_constructor_definition(self: Compiler, gene: ptr Gene) =
   self.emit(Instruction(kind: IkDefineConstructor))
 
 proc compile_prop_definition(self: Compiler, gene: ptr Gene) =
-  ## Compile property definition: (prop x) or (prop x: Type)
+  ## Compile property definition: (field x) or (field x: Type)
   if gene.children.len == 0:
     not_allowed("prop requires a name")
   var name_val = gene.children[0]
   var type_id: TypeId = NO_TYPE_ID
   if name_val.kind == VkSymbol and name_val.str.ends_with(":"):
-    # (prop x: Int) — name_val is "x:", children[1] is "Int"
+    # (field x: Int) — name_val is "x:", children[1] is "Int"
     let base_name = name_val.str[0..^2]
     if gene.children.len > 1:
       type_id = resolve_type_value_to_id(gene.children[1], self.output.type_descriptors, self.output.type_aliases, self.output.module_path)
     self.emit(Instruction(kind: IkDefineProp, arg0: base_name.to_key().to_value(), arg1: type_id))
   else:
-    # (prop x) — untyped property declaration
+    # (field x) — untyped property declaration
     if name_val.kind != VkSymbol:
       not_allowed("prop name must be a symbol")
     self.emit(Instruction(kind: IkDefineProp, arg0: name_val.str.to_key().to_value(), arg1: NO_TYPE_ID))
 
-proc compile_class_with_container(self: Compiler, class_name: Value, parent_class: Value, container_expr: Value, body_start: int, gene: ptr Gene) =
+proc compile_field_definition(self: Compiler, gene: ptr Gene) =
+  ## Compile field definition: (field name Type)
+  if gene.children.len == 0:
+    not_allowed("field requires a name and type")
+  let name_val = gene.children[0]
+  if name_val.kind != VkSymbol:
+    not_allowed("field name must be a symbol")
+  var field_name = name_val.str
+  if field_name.ends_with(":"):
+    field_name = field_name[0..^2]
+  let type_id =
+    if gene.children.len > 1:
+      resolve_type_value_to_id(gene.children[1], self.output.type_descriptors, self.output.type_aliases, self.output.module_path)
+    else:
+      NO_TYPE_ID
+  self.emit(Instruction(kind: IkDefineProp, arg0: field_name.to_key().to_value(), arg1: type_id))
+
+proc parse_class_header(gene: ptr Gene): tuple[parent_class: Value, interfaces: seq[Value], body_start: int] =
+  result.parent_class = NIL
+  result.body_start = 1
+  while result.body_start < gene.children.len:
+    let child = gene.children[result.body_start]
+    if child.kind == VkSymbol and child.str == "<":
+      if result.body_start + 1 >= gene.children.len:
+        not_allowed("Missing superclass after <")
+      result.parent_class = gene.children[result.body_start + 1]
+      result.body_start += 2
+      continue
+    if child.kind == VkSymbol and child.str == "implements":
+      if result.body_start + 1 >= gene.children.len:
+        not_allowed("Missing interface list after implements")
+      let interfaces_val = gene.children[result.body_start + 1]
+      case interfaces_val.kind
+      of VkSymbol:
+        result.interfaces.add(interfaces_val)
+      of VkArray:
+        for item in array_data(interfaces_val):
+          if item.kind != VkSymbol:
+            not_allowed("implements expects interface symbols")
+          result.interfaces.add(item)
+      else:
+        not_allowed("implements expects an interface symbol or array of interface symbols")
+      result.body_start += 2
+      continue
+    break
+
+proc compile_class_with_container(self: Compiler, class_name: Value, parent_class: Value, implemented_interfaces: seq[Value], container_expr: Value, body_start: int, gene: ptr Gene) =
   ## Helper to compile class with container handling
   ## Implements stack-based approach: compile container → push to stack → create class as member
   let has_container = container_expr != NIL
@@ -396,8 +451,17 @@ proc compile_class_with_container(self: Compiler, class_name: Value, parent_clas
       self.declared_names[^1][local_key] = true
 
   # Compile class body if present
-  if gene.children.len > body_start:
-    let body = new_stream_value(gene.children[body_start..^1])
+  if gene.children.len > body_start or implemented_interfaces.len > 0:
+    let body = new_stream_value()
+    for iface in implemented_interfaces:
+      var implement_gene = new_gene("implement".to_symbol_value())
+      implement_gene.children.add(iface)
+      body.ref.stream.add(implement_gene.to_gene_value())
+    for i in body_start..<gene.children.len:
+      let child = gene.children[i]
+      if child.kind == VkGene and child.gene != nil and child.gene.`type`.kind == VkSymbol and child.gene.`type`.str == "implement":
+        not_allowed("Classes must declare interfaces in the header with implements")
+      body.ref.stream.add(gene.children[i])
     let compiled = compile_init(body,
       local_defs = true,
       module_path = self.output.module_path,
@@ -411,17 +475,10 @@ proc compile_class_with_container(self: Compiler, class_name: Value, parent_clas
 proc compile_class(self: Compiler, gene: ptr Gene) =
   apply_container_to_child(gene, 0)
   let container_expr = gene.props.getOrDefault(container_key(), NIL)
-
-  var body_start = 1
-  var parent_class: Value = NIL
-
-  # Check for inheritance syntax: (class Name < Parent ...)
-  if gene.children.len >= 3 and gene.children[1] == "<".to_symbol_value():
-    body_start = 3
-    parent_class = gene.children[2]
+  let header = parse_class_header(gene)
 
   # Use helper function for actual compilation
-  self.compile_class_with_container(gene.children[0], parent_class, container_expr, body_start, gene)
+  self.compile_class_with_container(gene.children[0], header.parent_class, header.interfaces, container_expr, header.body_start, gene)
 
 proc compile_object(self: Compiler, gene: ptr Gene) =
   if gene.children.len == 0:

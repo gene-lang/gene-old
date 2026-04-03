@@ -1,0 +1,128 @@
+#!/usr/bin/env gene run
+# Expected: FileStream after Readable cast: test.txt
+# Expected: DataBuffer read through adapter: payload
+# Expected: DataBuffer after close through adapter:
+# Expected: DataBuffer through adapter:
+# Expected: === Adapter Feature Test Complete ===
+# Expected: Testing _genevalue:
+# Expected:   Inner value via _genevalue: VkInstance
+# Expected: Testing _geneinternal:
+# Expected:   Stored in _geneinternal: test_value
+# Test file for Interface and Adapter feature
+# This file demonstrates the adapter pattern in Gene
+
+# ============================================================================
+# 1) INTERFACE DEFINITION
+# ============================================================================
+
+# Define a simple interface with methods and properties
+(interface Readable
+  (method read [] -> String)
+  (method close [] -> Nil)
+  (field name String)
+  (field closed Bool)
+)
+
+# Define another interface for demonstration
+(interface Writable
+  (method write [data: String] -> Int)
+  (method flush [] -> Nil)
+)
+
+# ============================================================================
+# 2) INLINE IMPLEMENTATION (inside class)
+# ============================================================================
+
+# When implement is inside the class, the class natively satisfies the interface
+# (Readable obj) returns obj directly — no wrapper, direct access
+
+(class FileStream implements Readable
+  (field name String)
+  (field closed Bool)
+  (method read []
+    "file contents"
+  )
+  (method close []
+    (/closed = true)
+  )
+  (ctor [name]
+    (/name = name)
+    (/closed = false)
+  )
+)
+
+# ============================================================================
+# 3) EXTERNAL IMPLEMENTATION (adapter created)
+# ============================================================================
+
+# A simple class that doesn't implement Readable
+(class DataBuffer
+  (ctor [data]
+    (/data = data)
+    (/position = 0)
+  )
+  
+  (method get_data []
+    /data
+  )
+  
+  (method set_data [new_data]
+    (/data = new_data)
+  )
+)
+
+(implement Readable for DataBuffer
+  (method read []
+    (/_genevalue .get_data)
+  )
+  (method close []
+    (/_genevalue .set_data "")
+  )
+)
+
+(interface DataView
+  (field data String)
+)
+
+(implement DataView for DataBuffer)
+
+# ============================================================================
+# 4) USING INTERFACES
+# ============================================================================
+
+# Create a FileStream - has inline implementation
+(var fs (new FileStream "test.txt"))
+
+# Calling interface on inline implementation returns same object
+(var readable_fs (Readable fs))
+(println "FileStream after Readable cast:" readable_fs/name)
+
+# External implementation returns an adapter wrapper that exposes the interface surface
+(var buffer (new DataBuffer "payload"))
+(var readable_buffer (Readable buffer))
+(println "DataBuffer read through adapter:" readable_buffer/.read)
+(readable_buffer .close)
+(println "DataBuffer after close through adapter:" (buffer .get_data))
+(var as_view (DataView buffer))
+(println "DataBuffer through adapter:" as_view/data)
+
+# ============================================================================
+# 5) TEST OUTPUT
+# ============================================================================
+
+(println "=== Adapter Feature Test Complete ===")
+
+# ============================================================================
+# 6) TEST _genevalue AND _geneinternal
+# ============================================================================
+
+# Test _genevalue for accessing wrapped value
+(println "Testing _genevalue:")
+(var inner_val readable_buffer/_genevalue)
+(println "  Inner value via _genevalue:" inner_val)
+
+# Test _geneinternal for adapter's own data
+(println "Testing _geneinternal:")
+(var internal readable_buffer/_geneinternal)
+(internal/test_key = "test_value")
+(println "  Stored in _geneinternal:" internal/test_key)

@@ -436,6 +436,42 @@ suite "Static type checking":
   """, proc(result: Value) =
     check result.kind == VkInstance
 
+  test_strict_type_ok """
+    (interface Renderable
+      (field name String)
+      (method render [ctx: Any] -> String)
+    )
+    (class Base
+      (field name String)
+      (method render [ctx: Any] -> String
+        name
+      )
+    )
+    (class View < Base implements Renderable)
+  """
+
+  test_strict_type_error """
+    (interface Renderable
+      (method render [ctx: Any] -> String)
+    )
+    (class Broken implements Renderable)
+  """
+
+  test_strict_type_error """
+    (interface Renderable
+      (method render [ctx: Any] -> String)
+    )
+    (class Broken
+      (implement Renderable)
+    )
+  """
+
+  test_strict_type_error """
+    (interface Renderable
+      (method render [Int] -> String)
+    )
+  """
+
   test_vm """
     (var x: (String | Nil) "hi")
     (if (x != nil)

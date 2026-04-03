@@ -292,7 +292,7 @@ test_vm_error """
 
 test_vm_error """
   (interface Readable
-    (method read)
+    (method read [])
   )
   (class DataBuffer
     (ctor []

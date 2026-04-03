@@ -56,6 +56,12 @@ type
     fields*: Table[string, TypeExpr]
     methods*: Table[string, TypeExpr]
     ctor_type*: TypeExpr
+    interfaces*: seq[string]
+
+  InterfaceInfo* = ref object
+    name*: string
+    fields*: Table[string, TypeExpr]
+    methods*: Table[string, TypeExpr]
 
   AdtVariant = object
     name*: string
@@ -81,6 +87,7 @@ type
     types*: Table[string, TypeExpr]
     adts*: Table[string, AdtDef]
     classes*: Table[string, ClassInfo]
+    interfaces*: Table[string, InterfaceInfo]
     current_return*: TypeExpr
     current_class*: string
     init_self_stack*: seq[TypeExpr]
@@ -162,6 +169,8 @@ proc is_known_type_name(self: TypeChecker, name: string): bool {.inline.} =
     return true
   if self.classes.hasKey(name):
     return true
+  if self.interfaces.hasKey(name):
+    return true
   return false
 
 proc key_to_string(key: Key): string {.inline.} =
@@ -218,6 +227,7 @@ proc new_type_checker*(strict: bool = true, module_filename: string = ""): TypeC
     types: initTable[string, TypeExpr](),
     adts: initTable[string, AdtDef](),
     classes: initTable[string, ClassInfo](),
+    interfaces: initTable[string, InterfaceInfo](),
     current_return: ANY_TYPE,
     current_class: "",
     init_self_stack: @[],
@@ -587,6 +597,11 @@ proc get_class_info(self: TypeChecker, name: string): ClassInfo =
     return self.classes[name]
   return nil
 
+proc get_interface_info(self: TypeChecker, name: string): InterfaceInfo =
+  if self.interfaces.hasKey(name):
+    return self.interfaces[name]
+  return nil
+
 proc find_method(self: TypeChecker, cls: ClassInfo, method_name: string): TypeExpr =
   var current = cls
   var visited = initTable[string, bool]()
@@ -614,6 +629,74 @@ proc find_field(self: TypeChecker, cls: ClassInfo, field_name: string): TypeExpr
       break
     current = self.get_class_info(current.parent)
   return nil
+
+proc parse_type_expr(self: TypeChecker, v: Value): TypeExpr
+proc check_expr(self: TypeChecker, v: Value): TypeExpr
+
+proc signature_compatible(self: TypeChecker, actual: TypeExpr, expected: TypeExpr): bool =
+  if actual == nil or expected == nil:
+    return false
+  try:
+    self.unify(self.instantiate_type_vars(actual), self.instantiate_type_vars(expected), "interface conformance")
+    return true
+  except CatchableError:
+    return false
+
+proc parse_interface_list(self: TypeChecker, value: Value): seq[string] =
+  case value.kind
+  of VkSymbol:
+    ensure_user_type_name(value.str, "interface name")
+    result.add(value.str)
+  of VkArray:
+    for item in array_data(value):
+      if item.kind != VkSymbol:
+        raise new_exception(types.Exception, "implements expects interface symbols")
+      ensure_user_type_name(item.str, "interface name")
+      result.add(item.str)
+  else:
+    raise new_exception(types.Exception, "implements expects an interface symbol or array of interface symbols")
+
+proc parse_class_header(self: TypeChecker, gene: ptr Gene): tuple[parent_name: string, interfaces: seq[string], body_start: int] =
+  result.body_start = 1
+  while result.body_start < gene.children.len:
+    let child = gene.children[result.body_start]
+    if child.kind == VkSymbol and child.str == "<":
+      if result.body_start + 1 >= gene.children.len:
+        raise new_exception(types.Exception, "Missing superclass after <")
+      let parent_val = gene.children[result.body_start + 1]
+      if parent_val.kind != VkSymbol:
+        raise new_exception(types.Exception, "Invalid superclass")
+      result.parent_name = parent_val.str
+      discard self.parse_type_expr(parent_val)
+      result.body_start += 2
+      continue
+    if child.kind == VkSymbol and child.str == "implements":
+      if result.body_start + 1 >= gene.children.len:
+        raise new_exception(types.Exception, "Missing interface list after implements")
+      for name in self.parse_interface_list(gene.children[result.body_start + 1]):
+        result.interfaces.add(name)
+      result.body_start += 2
+      continue
+    break
+
+proc check_interface_conformance(self: TypeChecker, cls: ClassInfo, interface_name: string) =
+  let iface = self.get_interface_info(interface_name)
+  if iface == nil:
+    raise new_exception(types.Exception, "Unknown interface: " & interface_name)
+
+  for field_name, field_type in iface.fields:
+    let actual = self.find_field(cls, field_name)
+    if actual == nil:
+      raise new_exception(types.Exception, "Type error: class " & cls.name & " does not implement field " & field_name & " required by interface " & interface_name)
+    if not self.signature_compatible(actual, field_type):
+      raise new_exception(types.Exception, "Type error: field " & field_name & " on " & cls.name & " is incompatible with interface " & interface_name)
+
+  for method_name, method_type in iface.methods:
+    let actual = self.find_method(cls, method_name)
+    if actual == nil:
+      raise new_exception(types.Exception, "Type error: class " & cls.name & " does not implement method " & method_name & " required by interface " & interface_name)
+    if not self.signature_compatible(actual, method_type):
+      raise new_exception(types.Exception, "Type error: method " & method_name & " on " & cls.name & " is incompatible with interface " & interface_name)
 
 proc register_imported_type(self: TypeChecker, name: string, force: bool = false) =
   if name.len == 0:
@@ -942,9 +1025,6 @@ proc try_register_adt(self: TypeChecker, gene: ptr Gene): bool =
     return false
   self.add_adt(name, params, variants)
   return true
-
-proc parse_type_expr(self: TypeChecker, v: Value): TypeExpr
-proc check_expr(self: TypeChecker, v: Value): TypeExpr
 
 proc parse_fn_params(self: TypeChecker, v: Value): seq[ParamType] =
   if v.kind != VkArray:
@@ -1930,7 +2010,7 @@ proc check_ifel(self: TypeChecker, gene: ptr Gene): TypeExpr =
 proc is_infix_special_form(expr_type: Value): bool {.inline.} =
   expr_type.kind == VkSymbol and expr_type.str in [
     "var", "if", "ifel", "fn", "do", "loop", "while", "for", "ns", "class",
-    "try", "throw", "import", "export", "interface", "implement", "comptime", "type",
+    "try", "throw", "import", "export", "interface", "implement", "field", "comptime", "type",
     "object", "$", ".", "->", "@"
   ]
 
@@ -2592,6 +2672,40 @@ proc check_ctor(self: TypeChecker, gene: ptr Gene, class_name: string, cls: Clas
   self.pop_scope()
   return fn_type
 
+proc check_field_decl(self: TypeChecker, gene: ptr Gene, fields: var Table[string, TypeExpr]) =
+  if gene.children.len == 0:
+    raise new_exception(types.Exception, "field requires a name and type")
+  let name_val = gene.children[0]
+  if name_val.kind != VkSymbol:
+    raise new_exception(types.Exception, "field name must be a symbol")
+  var field_name = name_val.str
+  if field_name.endsWith(":"):
+    field_name = field_name[0..^2]
+  ensure_user_value_name(field_name, "field")
+  let field_type =
+    if gene.children.len > 1: self.parse_type_expr(gene.children[1])
+    else: ANY_TYPE
+  fields[field_name] = field_type
+
+proc check_prop_decl(self: TypeChecker, gene: ptr Gene, fields: var Table[string, TypeExpr]) =
+  if gene.children.len == 0:
+    raise new_exception(types.Exception, "prop requires a name")
+  let name_val = gene.children[0]
+  if name_val.kind != VkSymbol:
+    raise new_exception(types.Exception, "prop name must be a symbol")
+
+  var field_name = name_val.str
+  var field_type: TypeExpr = ANY_TYPE
+  if field_name.endsWith(":"):
+    field_name = field_name[0..^2]
+    if gene.children.len > 1:
+      field_type = self.parse_type_expr(gene.children[1])
+  elif gene.children.len > 1:
+    field_type = self.parse_type_expr(gene.children[1])
+
+  ensure_user_value_name(field_name, "field")
+  fields[field_name] = field_type
+
 proc check_method(self: TypeChecker, gene: ptr Gene, class_name: string, cls: ClassInfo): TypeExpr =
   if gene.children.len < 2:
     return ANY_TYPE
@@ -2634,6 +2748,11 @@ proc check_method(self: TypeChecker, gene: ptr Gene, class_name: string, cls: Cl
       body_start += 2
 
   let params = self.parse_param_annotations(args_val)
+  for param in params:
+    if param.binding_name == "_" or param.binding_name.len == 0:
+      raise new_exception(types.Exception, "method parameters must be named")
+    if param.typ == nil and param.binding_name.len > 0 and param.binding_name[0].isUpperAscii:
+      raise new_exception(types.Exception, "method parameters must use names; omitted types default to Any")
   var fn_params: seq[ParamType] = @[]
   self.push_scope()
   self.define_internal("self", TypeExpr(kind: TkNamed, name: class_name))
@@ -2650,6 +2769,11 @@ proc check_method(self: TypeChecker, gene: ptr Gene, class_name: string, cls: Cl
     effects: effects
   )
   cls.methods[method_name] = fn_type
+
+  let has_body = body_start < gene.children.len
+  if not has_body:
+    self.pop_scope()
+    return fn_type
 
   let saved_return = self.current_return
   self.current_return = return_type
@@ -2671,6 +2795,58 @@ proc check_method(self: TypeChecker, gene: ptr Gene, class_name: string, cls: Cl
   self.pop_scope()
   return fn_type
 
+proc check_interface(self: TypeChecker, gene: ptr Gene): TypeExpr =
+  if gene.children.len == 0:
+    raise new_exception(types.Exception, "interface requires a name")
+  let name_val = gene.children[0]
+  if name_val.kind != VkSymbol:
+    raise new_exception(types.Exception, "interface name must be a symbol")
+  let interface_name = name_val.str
+  ensure_user_type_name(interface_name, "interface")
+  var iface = InterfaceInfo(
+    name: interface_name,
+    fields: initTable[string, TypeExpr](),
+    methods: initTable[string, TypeExpr]()
+  )
+  self.interfaces[interface_name] = iface
+
+  let saved_class = self.current_class
+  self.current_class = interface_name
+  defer: self.current_class = saved_class
+
+  for i in 1..<gene.children.len:
+    let child = gene.children[i]
+    if child.kind != VkGene or child.gene == nil or child.gene.`type`.kind != VkSymbol:
+      raise new_exception(types.Exception, "interface body only supports field and method declarations")
+    case child.gene.`type`.str
+    of "field":
+      self.check_field_decl(child.gene, iface.fields)
+    of "method":
+      if child.gene.children.len < 2:
+        raise new_exception(types.Exception, "interface method requires a name and parameter list")
+      let method_name_val = child.gene.children[0]
+      if method_name_val.kind != VkSymbol:
+        raise new_exception(types.Exception, "interface method name must be a symbol")
+      let method_name = split_generic_definition_name(method_name_val.str).base_name
+      let temp_class = ClassInfo(name: interface_name, parent: "", fields: iface.fields, methods: iface.methods, ctor_type: nil, interfaces: @[])
+      let method_type = self.check_method(child.gene, interface_name, temp_class)
+      if child.gene.children.len > 0:
+        var idx = 2
+        if idx < child.gene.children.len and child.gene.children[idx].kind == VkSymbol and child.gene.children[idx].str == "->":
+          idx += 2
+        if idx < child.gene.children.len and child.gene.children[idx].kind == VkSymbol and child.gene.children[idx].str == "!":
+          idx += 2
+        if idx < child.gene.children.len:
+          raise new_exception(types.Exception, "interface methods cannot have a body")
+      iface.methods[method_name] = method_type
+    of "prop":
+      self.warn("Warning: interface prop is deprecated; use field")
+      self.check_prop_decl(child.gene, iface.fields)
+    else:
+      raise new_exception(types.Exception, "unsupported interface member: " & child.gene.`type`.str)
+
+  return TypeExpr(kind: TkNamed, name: interface_name)
+
 proc check_class(self: TypeChecker, gene: ptr Gene): TypeExpr =
   if gene.children.len == 0:
     return ANY_TYPE
@@ -2684,21 +2860,16 @@ proc check_class(self: TypeChecker, gene: ptr Gene): TypeExpr =
   let saved_class = self.current_class
   self.current_class = class_name
   defer: self.current_class = saved_class
-  var body_start = 1
-  var parent_name = ""
-  if gene.children.len >= 3 and gene.children[1] == "<".to_symbol_value():
-    body_start = 3
-    let parent_val = gene.children[2]
-    if parent_val.kind != VkSymbol:
-      raise new_exception(types.Exception, "Invalid superclass for " & class_name)
-    discard self.parse_type_expr(parent_val)
-    parent_name = parent_val.str
+  let header = self.parse_class_header(gene)
+  let body_start = header.body_start
+  let parent_name = header.parent_name
 
   var cls = ClassInfo(
     name: class_name,
     parent: parent_name,
     fields: initTable[string, TypeExpr](),
-    methods: initTable[string, TypeExpr]()
+    methods: initTable[string, TypeExpr](),
+    interfaces: header.interfaces
   )
 
   # ^fields is optional - parse if provided
@@ -2720,6 +2891,8 @@ proc check_class(self: TypeChecker, gene: ptr Gene): TypeExpr =
       let k = child.gene.`type`.str
       if k == "method":
         discard self.check_method(child.gene, class_name, cls)
+      elif k == "field":
+        self.check_field_decl(child.gene, cls.fields)
       elif k == "on_method_missing":
         var lowered = new_gene("method".to_symbol_value())
         lowered.children.add("on_method_missing".to_symbol_value())
@@ -2730,6 +2903,11 @@ proc check_class(self: TypeChecker, gene: ptr Gene): TypeExpr =
         discard self.check_ctor(child.gene, class_name, cls)
       elif k == "ctor!":
         raise new_exception(types.Exception, "Macro-like constructors are not supported; use (ctor [args] ...)")
+      elif k == "implement":
+        raise new_exception(types.Exception, "Classes must declare interfaces in the header with implements")
+      elif k == "prop":
+        self.warn("Warning: prop is deprecated; use field")
+        self.check_prop_decl(child.gene, cls.fields)
       else:
         init_items.add(child)
     else:
@@ -2744,6 +2922,9 @@ proc check_class(self: TypeChecker, gene: ptr Gene): TypeExpr =
       discard self.check_expr(item)
     discard self.init_self_stack.pop()
     self.pop_scope()
+
+  for interface_name in cls.interfaces:
+    self.check_interface_conformance(cls, interface_name)
 
   return TypeExpr(kind: TkNamed, name: class_name)
 
@@ -2963,7 +3144,7 @@ proc check_expr(self: TypeChecker, v: Value): TypeExpr =
       of "ns":
         return self.check_ns(gene)
       of "interface":
-        return ANY_TYPE
+        return self.check_interface(gene)
       of "implement":
         return ANY_TYPE
       of "import":

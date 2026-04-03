@@ -96,14 +96,14 @@ Interfaces declare a visible surface of methods and properties.
 (interface Readable
   (method read)
   (method close)
-  (prop name)
-  (prop closed ^readonly true))
+  (field name)
+  (field closed ^readonly true))
 
 ((Readable .class) .name)   # => "Interface"
 ```
 
 - `(method name)` declares a method on the interface.
-- `(prop name)` declares a property on the interface.
+- `(field name)` declares a property on the interface.
 - `^readonly true` on a property prevents writes through adapter wrappers created from external implementations.
 
 Interface declarations are currently name-based. Extra argument lists, return annotations, or property type tokens written inside an `interface` body are tolerated by the parser, but they are not used for runtime validation today.
@@ -117,7 +117,7 @@ An inline `implement` inside a class declares that the class natively satisfies 
 ```gene
 (interface Readable
   (method read)
-  (prop name))
+  (field name))
 
 (class FileStream
   (implement Readable

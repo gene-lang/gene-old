@@ -68,7 +68,7 @@ Built-in type IDs come from `src/gene/types/descriptors.nim` (`Any=0`, `Int=1`, 
 
 3. Typed class properties
 
-- `(prop x: T)` compiles to `IkDefineProp` with the resolved `TypeId`.
+- `(field x: T)` compiles to `IkDefineProp` with the resolved `TypeId`.
 - Class stores `prop_types` and descriptor table for runtime checks.
 
 4. Type aliases

@@ -6,14 +6,16 @@
 # Expected: adapter_age=36
 
 (interface Readable
-  (method read)
-  (method close)
-  (prop name))
+  (method read [])
+  (method close [])
+  (field name String))
 
-(class FileStream
-  (implement Readable
-    (method read []
-      "file contents"))
+(class FileStream implements Readable
+  (field name String)
+  (method read []
+    "file contents")
+  (method close []
+    void)
   (ctor [name]
     (/name = name)))
 
@@ -42,7 +44,7 @@
 (println "external_after_close=" (buffer .get_data))
 
 (interface Ageable
-  (method age))
+  (method age []))
 
 (implement Ageable for Int
   (ctor [birth_year]

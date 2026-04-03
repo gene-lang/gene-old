@@ -245,6 +245,7 @@ proc compile_import*(self: Compiler, gene: ptr Gene)
 proc compile_export*(self: Compiler, gene: ptr Gene)
 proc compile_interface*(self: Compiler, gene: ptr Gene)
 proc compile_implement*(self: Compiler, gene: ptr Gene)
+proc compile_field_definition(self: Compiler, gene: ptr Gene)
 
 proc is_vmstmt_form(input: Value): bool =
   input.kind == VkGene and

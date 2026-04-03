@@ -768,7 +768,7 @@ proc is_infix_rewrite_eligible(expr_type: Value): bool {.inline.} =
     return true
   expr_type.str notin [
     "var", "if", "ifel", "fn", "do", "loop", "while", "for", "ns", "class",
-    "try", "throw", "import", "export", "interface", "implement", "$", "$vm", "$vmstmt", ".", "->", "@"
+    "try", "throw", "import", "export", "interface", "implement", "field", "$", "$vm", "$vmstmt", ".", "->", "@"
   ]
 
 proc rewrite_infix_expression(left_value: Value, tail: seq[Value]): Value =
@@ -1256,6 +1256,9 @@ proc compile_gene(self: Compiler, input: Value) =
         return
       of "implement":
         self.compile_implement(gene)
+        return
+      of "field":
+        self.compile_field_definition(gene)
         return
       of "type":
         self.compile_type_alias(gene)

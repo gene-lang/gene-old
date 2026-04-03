@@ -10,12 +10,27 @@ proc interface_prop_name(input: Value): string =
     result = result[0..^2]
 
 proc compile_interface_method_decl(self: Compiler, gene: ptr Gene) =
-  if gene.children.len == 0:
-    not_allowed("interface method requires a name")
+  if gene.children.len < 2:
+    not_allowed("interface method requires a name and argument list")
 
   let name = gene.children[0]
   if name.kind notin {VkSymbol, VkString}:
     not_allowed("interface method name must be a symbol or string")
+
+  if gene.children[1].kind != VkArray:
+    not_allowed("interface method requires an array argument list; use [] for no arguments")
+
+  var body_start = 2
+  if body_start < gene.children.len and gene.children[body_start].kind == VkSymbol and gene.children[body_start].str == "->":
+    if body_start + 1 >= gene.children.len:
+      not_allowed("Missing return type after ->")
+    body_start += 2
+  if body_start < gene.children.len and gene.children[body_start].kind == VkSymbol and gene.children[body_start].str == "!":
+    if body_start + 1 >= gene.children.len:
+      not_allowed("Missing effects list after !")
+    body_start += 2
+  if body_start < gene.children.len:
+    not_allowed("interface methods cannot have a body")
 
   self.emit(Instruction(kind: IkInterfaceMethod, arg0: name))
 
@@ -35,6 +50,12 @@ proc compile_interface_prop_decl(self: Compiler, gene: ptr Gene) =
       arg1: (if readonly: 1 else: 0).int32,
     )
   )
+
+proc compile_interface_field_decl(self: Compiler, gene: ptr Gene) =
+  if gene.children.len < 2:
+    not_allowed("field requires a name and type")
+  let field_name = interface_prop_name(gene.children[0])
+  self.emit(Instruction(kind: IkInterfaceProp, arg0: field_name.to_value(), arg1: 0))
 
 proc external_implement_args_with_self(args: Value): Value =
   if args.kind != VkArray:
@@ -121,10 +142,12 @@ proc compile_interface*(self: Compiler, gene: ptr Gene) =
   for i in 1..<gene.children.len:
     let child = gene.children[i]
     if child.kind != VkGene or child.gene == nil or child.gene.type.kind != VkSymbol:
-      not_allowed("interface body only supports method and prop declarations")
+      not_allowed("interface body only supports method and field declarations")
     case child.gene.type.str
     of "method":
       self.compile_interface_method_decl(child.gene)
+    of "field":
+      self.compile_interface_field_decl(child.gene)
     of "prop":
       self.compile_interface_prop_decl(child.gene)
     else:
