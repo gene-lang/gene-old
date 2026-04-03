@@ -1,0 +1,9 @@
+# Machine-readable results (name<TAB>best_seconds)
+fn_call_1arg	0.081832
+fn_call_5args	0.028482
+method_call_1arg	0.213865
+method_call_5args	0.296021
+while_loop	0.096368
+string_ops	0.120279
+native_call_1arg	0.037822
+native_call_5args	0.028155
