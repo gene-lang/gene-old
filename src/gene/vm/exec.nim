@@ -1,6 +1,16 @@
 ## The main exec* proc — the instruction dispatch loop.
 ## Included from vm.nim — shares its scope.
 
+template get_inline_cache(cu: CompilationUnit, pc: int): ptr InlineCache =
+  ## Fast inline cache access. Pre-allocated CUs hit the first branch;
+  ## dynamically compiled CUs fall back to on-demand growth.
+  if pc < cu.inline_caches.len:
+    cu.inline_caches[pc].addr
+  else:
+    while cu.inline_caches.len <= pc:
+      cu.inline_caches.add(InlineCache())
+    cu.inline_caches[pc].addr
+
 proc resolve_local_lookup_value(self: ptr VirtualMachine, key: Key): Value {.inline.} =
   if self == nil or self.frame == nil or self.frame.scope == nil or self.frame.scope.tracker == nil:
     return VOID
@@ -520,42 +530,13 @@ proc exec*(self: ptr VirtualMachine): Value =
           else:
             let name = cast[Key](inst.arg0)
 
-            # Inline cache implementation
-            if self.pc < self.cu.inline_caches.len:
-              # Check if cache hit
-              let cache = self.cu.inline_caches[self.pc].addr
-              if cache.ns != nil and cache.version == cache.ns.version and name in cache.ns.members:
-                # Cache hit - use cached value
-                self.frame.push(cache.ns.members[name])
-              else:
-                # Cache miss - do full lookup
-                let resolved = resolve_namespace_value(self.frame.ns, name)
-                var found = resolved.found
-                var value = resolved.value
-                var found_ns = resolved.owner
-                if not found:
-                  # Try thread-local namespace first (for $thread, $main_thread, etc.)
-                  if self.thread_local_ns != nil:
-                    let thread_resolved = resolve_namespace_value(self.thread_local_ns, name)
-                    found = thread_resolved.found
-                    value = thread_resolved.value
-                    found_ns = thread_resolved.owner
-                if not found:
-                  let symbol_name = get_symbol(symbol_index(name))
-                  not_allowed(symbol_name & " is not defined")
-                # Update cache if we found the value
-                if found_ns != nil:
-                  cache.ns = found_ns
-                  cache.version = found_ns.version
-                  cache.value = value
-
-                self.frame.push(value)
+            # Inline cache implementation (pre-allocated at compile time)
+            let cache = get_inline_cache(self.cu, self.pc)
+            if cache.ns != nil and cache.version == cache.ns.version and name in cache.ns.members:
+              # Cache hit - use cached value
+              self.frame.push(cache.ns.members[name])
             else:
-              # Extend cache array if needed
-              while self.cu.inline_caches.len <= self.pc:
-                self.cu.inline_caches.add(InlineCache())
-
-              # Do full lookup
+              # Cache miss - do full lookup
               let resolved = resolve_namespace_value(self.frame.ns, name)
               var found = resolved.found
               var value = resolved.value
@@ -570,11 +551,11 @@ proc exec*(self: ptr VirtualMachine): Value =
               if not found:
                 let symbol_name = get_symbol(symbol_index(name))
                 not_allowed(symbol_name & " is not defined")
-              # Initialize cache if we found the value
+              # Update cache
               if found_ns != nil:
-                self.cu.inline_caches[self.pc].ns = found_ns
-                self.cu.inline_caches[self.pc].version = found_ns.version
-                self.cu.inline_caches[self.pc].value = value
+                cache.ns = found_ns
+                cache.version = found_ns.version
+                cache.value = value
 
               self.frame.push(value)
 
@@ -1423,15 +1404,21 @@ proc exec*(self: ptr VirtualMachine): Value =
         {.pop.}
       of IkJumpIfFalse:
         {.push checks: off}
-        var value: Value
-        self.frame.pop2(value)
-        if not value.to_bool():
-          let target = inst.arg0.int64.int
-          if target < self.pc:
-            self.poll_event_loop()
-          self.pc = target
-          inst = self.cu.instructions[self.pc].addr
-          continue
+        # Fast-path: inline raw uint64 comparison for common boolean/nil values
+        # instead of calling the full to_bool converter (3 == checks).
+        self.frame.stack_index.dec()
+        let jif_raw = self.frame.stack[self.frame.stack_index].raw
+        self.frame.stack[self.frame.stack_index].raw = 0  # clear slot
+        if jif_raw != TRUE.raw:
+          # Not TRUE — check if falsy (FALSE, NIL, VOID)
+          if jif_raw == FALSE.raw or jif_raw == NIL.raw or jif_raw == VOID.raw:
+            let target = inst.arg0.int64.int
+            if target < self.pc:
+              self.poll_event_loop()
+            self.pc = target
+            inst = self.cu.instructions[self.pc].addr
+            continue
+          # else: truthy non-boolean value (int, string, etc.) — don't jump
         {.pop.}
 
       of IkJumpIfMatchSuccess:
@@ -3756,12 +3743,7 @@ proc exec*(self: ptr VirtualMachine): Value =
 
         let class = v.get_class()
         var cache: ptr InlineCache
-        if self.pc < self.cu.inline_caches.len:
-          cache = self.cu.inline_caches[self.pc].addr
-        else:
-          while self.cu.inline_caches.len <= self.pc:
-            self.cu.inline_caches.add(InlineCache())
-          cache = self.cu.inline_caches[self.pc].addr
+        cache = get_inline_cache(self.cu, self.pc)
 
         var meth: Method
         if cache.class != nil and cache.class == class and cache.class_version == class.version and cache.cached_method != nil:
@@ -5598,12 +5580,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           if class.is_nil:
             not_allowed("Object has no class for method call")
           var cache: ptr InlineCache
-          if self.pc < self.cu.inline_caches.len:
-            cache = self.cu.inline_caches[self.pc].addr
-          else:
-            while self.cu.inline_caches.len <= self.pc:
-              self.cu.inline_caches.add(InlineCache())
-            cache = self.cu.inline_caches[self.pc].addr
+          cache = get_inline_cache(self.cu, self.pc)
 
           var meth: Method
           if cache.class != nil and cache.class == class and cache.class_version == class.version and cache.cached_method != nil:
@@ -5756,12 +5733,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           if class.is_nil:
             not_allowed("Object has no class for method call")
           var cache: ptr InlineCache
-          if self.pc < self.cu.inline_caches.len:
-            cache = self.cu.inline_caches[self.pc].addr
-          else:
-            while self.cu.inline_caches.len <= self.pc:
-              self.cu.inline_caches.add(InlineCache())
-            cache = self.cu.inline_caches[self.pc].addr
+          cache = get_inline_cache(self.cu, self.pc)
 
           var meth: Method
           if cache.class != nil and cache.class == class and cache.class_version == class.version and cache.cached_method != nil:
@@ -5924,12 +5896,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           if class.is_nil:
             not_allowed("Object has no class for method call")
           var cache: ptr InlineCache
-          if self.pc < self.cu.inline_caches.len:
-            cache = self.cu.inline_caches[self.pc].addr
-          else:
-            while self.cu.inline_caches.len <= self.pc:
-              self.cu.inline_caches.add(InlineCache())
-            cache = self.cu.inline_caches[self.pc].addr
+          cache = get_inline_cache(self.cu, self.pc)
 
           var meth: Method
           if cache.class != nil and cache.class == class and cache.class_version == class.version and cache.cached_method != nil:

@@ -614,6 +614,8 @@ proc compile*(input: seq[Value], eager_functions: bool): CompilationUnit =
   self.output.optimize_noops()  # Optimize BEFORE resolving jumps
   self.output.peephole_optimize()  # Apply peephole optimizations
   self.output.update_jumps()
+  # Pre-allocate inline caches so method dispatch never resizes at runtime
+  self.output.inline_caches.setLen(self.output.instructions.len)
   result = self.output
 
 proc compile*(input: seq[Value]): CompilationUnit =
@@ -696,6 +698,7 @@ proc compile*(f: Function, eager_functions: bool) =
   self.output.optimize_noops()  # Optimize BEFORE resolving jumps
   self.output.peephole_optimize()  # Apply peephole optimizations
   self.output.update_jumps()
+  self.output.inline_caches.setLen(self.output.instructions.len)
   self.output.kind = CkFunction
   self.finalize_nested_type_context(f.matcher)
   f.body_compiled = self.output
@@ -751,6 +754,7 @@ proc compile*(b: Block, eager_functions: bool) =
   self.output.optimize_noops()  # Optimize BEFORE resolving jumps
   self.output.peephole_optimize()  # Apply peephole optimizations
   self.output.update_jumps()
+  self.output.inline_caches.setLen(self.output.instructions.len)
   self.finalize_nested_type_context(b.matcher)
   b.body_compiled = self.output
   b.body_compiled.matcher = b.matcher
