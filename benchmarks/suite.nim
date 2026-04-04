@@ -115,11 +115,11 @@ when isMainModule:
 {unroll("(typeof 42)")})
   """)
 
-  # --- 8. Native fn call (5 args) — println is native, but noisy; use format ---
-  runBench("native_call_5args", fmt"""
-    (fn nf5 [a b c d e] (a + b + c + d + e))
+  # --- 8. Native method call (1 arg) — array .push ---
+  runBench("native_method_1arg", fmt"""
+    (var arr [])
     (repeat {REPEATS}
-{unroll("(nf5 1 2 3 4 5)")})
+{unroll("(arr .push 1)")})
   """)
 
   echo repeat('-', 65)
