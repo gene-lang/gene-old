@@ -1,9 +1,9 @@
-# Pre-optimization baseline (fixed unrolled benchmarks, no VM changes)
-fn_call_1arg	0.057862
-fn_call_5args	0.112836
-method_call_1arg	0.148139
-method_call_5args	0.223460
-while_loop	0.099567
-string_ops	0.141365
-native_call_1arg	0.013267
-native_method_1arg	0.093598
+# Machine-readable results (name<TAB>best_seconds)
+fn_call_1arg	0.053555
+fn_call_5args	0.080147
+method_call_1arg	0.088636
+method_call_5args	0.134505
+while_loop	0.071122
+string_ops	0.136672
+native_call_1arg	0.013617
+native_method_1arg	0.091316
