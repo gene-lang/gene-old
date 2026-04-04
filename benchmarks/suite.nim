@@ -1,7 +1,8 @@
 ## Comprehensive benchmark suite for Gene VM performance experiments.
-## Usage: nim c -d:release --mm:orc --opt:speed -r benchmarks/suite.nim
+## Uses unrolled call blocks inside `repeat` (like call_burst.nim)
+## to minimize loop overhead and isolate the cost of each operation.
 ##
-## Outputs a machine-readable results table to stdout.
+## Usage: nim c -d:release --mm:orc --opt:speed -r benchmarks/suite.nim
 
 when isMainModule:
   import times, strformat, os, strutils
@@ -11,36 +12,41 @@ when isMainModule:
   import ../src/gene/compiler
   import ../src/gene/vm
 
-  const WARMUP_RUNS = 1
-  const BENCH_RUNS  = 3
+  const REPEATS = 5000
+  const OPS_PER_REPEAT = 100  # unrolled calls per repeat
+  const TOTAL_OPS = REPEATS * OPS_PER_REPEAT
+  const BENCH_RUNS = 3
 
   type BenchResult = object
     name: string
-    best: float       # seconds
+    best: float
     opsPerSec: float
 
   var results: seq[BenchResult]
 
-  proc bench(name: string, code: string, expectedOps: int) =
+  proc unroll(line: string, n: int = OPS_PER_REPEAT): string =
+    var lines: seq[string]
+    for _ in 0..<n:
+      lines.add("    " & line)
+    lines.join("\n")
+
+  proc runBench(name: string, code: string, totalOps: int = TOTAL_OPS) =
     let parsed = read_all(code)
     let compiled = compile(parsed)
 
     # Warmup
-    for _ in 0..<WARMUP_RUNS:
-      init_app_and_vm()
-      init_stdlib()
-      let ns = new_namespace("bench")
-      VM.frame.update(new_frame(ns))
-      VM.cu = compiled
-      discard VM.exec()
+    init_app_and_vm()
+    init_stdlib()
+    VM.frame.update(new_frame(new_namespace("w")))
+    VM.cu = compiled
+    discard VM.exec()
 
-    # Timed runs — take best of N
+    # Timed — best of N
     var best = float.high
     for _ in 0..<BENCH_RUNS:
       init_app_and_vm()
       init_stdlib()
-      let ns = new_namespace("bench")
-      VM.frame.update(new_frame(ns))
+      VM.frame.update(new_frame(new_namespace("b")))
       VM.cu = compiled
       let t0 = cpuTime()
       discard VM.exec()
@@ -48,7 +54,7 @@ when isMainModule:
       if elapsed < best:
         best = elapsed
 
-    let ops = float(expectedOps) / best
+    let ops = float(totalOps) / best
     results.add(BenchResult(name: name, best: best, opsPerSec: ops))
     echo fmt"{name:<35s} {best*1000:>10.3f} ms   {ops:>14.0f} ops/s"
 
@@ -56,51 +62,41 @@ when isMainModule:
   echo repeat('-', 65)
 
   # --- 1. Function call (1 arg) ---
-  bench("fn_call_1arg", """
-    (fn inc [n] (n + 1))
-    (var i 0)
-    (while (i < 500000)
-      (i = (inc i)))
-    i
-  """, 500_000)
+  runBench("fn_call_1arg", fmt"""
+    (fn f1 [n] (n + 1))
+    (repeat {REPEATS}
+{unroll("(f1 42)")})
+  """)
 
   # --- 2. Function call (5 args) ---
-  bench("fn_call_5args", """
-    (fn sum5 [a b c d e] (a + b + c + d + e))
-    (var i 0)
-    (while (i < 500000)
-      (i = (i + (sum5 1 1 1 1 1))))
-    i
-  """, 500_000)
+  runBench("fn_call_5args", fmt"""
+    (fn f5 [a b c d e] (a + b + c + d + e))
+    (repeat {REPEATS}
+{unroll("(f5 1 2 3 4 5)")})
+  """)
 
   # --- 3. Method call (1 arg) ---
-  bench("method_call_1arg", """
-    (class Counter
-      (ctor [n] (/n = n))
-      (method inc [v] (/n = (/n + v)) /n))
-    (var c (new Counter 0))
-    (var i 0)
-    (while (i < 500000)
-      (c .inc 1)
-      (i = (i + 1)))
-    i
-  """, 500_000)
+  runBench("method_call_1arg", fmt"""
+    (class C
+      (ctor [] (/n = 0))
+      (method m1 [v] (/n = (/n + v))))
+    (var c (new C))
+    (repeat {REPEATS}
+{unroll("(c .m1 1)")})
+  """)
 
   # --- 4. Method call (5 args) ---
-  bench("method_call_5args", """
-    (class Acc
+  runBench("method_call_5args", fmt"""
+    (class C
       (ctor [] (/n = 0))
-      (method add5 [a b c d e] (/n = (/n + a + b + c + d + e)) /n))
-    (var a (new Acc))
-    (var i 0)
-    (while (i < 500000)
-      (a .add5 1 1 1 1 1)
-      (i = (i + 1)))
-    i
-  """, 500_000)
+      (method m5 [a b c d e] (/n = (/n + a + b + c + d + e))))
+    (var c (new C))
+    (repeat {REPEATS}
+{unroll("(c .m5 1 2 3 4 5)")})
+  """)
 
   # --- 5. While loop (tight) ---
-  bench("while_loop", """
+  runBench("while_loop", """
     (var i 0)
     (while (i < 2000000)
       (i = (i + 1)))
@@ -108,34 +104,23 @@ when isMainModule:
   """, 2_000_000)
 
   # --- 6. String operations ---
-  bench("string_ops", """
-    (var i 0)
-    (while (i < 200000)
-      (var s "hello")
-      (var u (s .to_upper))
-      (var l (u .to_lower))
-      (i = (i + 1)))
-    i
-  """, 200_000)
+  runBench("string_ops", fmt"""
+    (repeat {REPEATS}
+{unroll("(var s \"hello\") (s .to_upper)")})
+  """)
 
   # --- 7. Native fn call (1 arg) — typeof ---
-  bench("native_call_1arg", """
-    (var i 0)
-    (while (i < 500000)
-      (typeof i)
-      (i = (i + 1)))
-    i
-  """, 500_000)
+  runBench("native_call_1arg", fmt"""
+    (repeat {REPEATS}
+{unroll("(typeof 42)")})
+  """)
 
-  # --- 8. Native fn call (5 args) — arithmetic expression ---
-  bench("native_call_5args", """
-    (fn wrap5 [a b c d e]
-      (a + b + c + d + e))
-    (var i 0)
-    (while (i < 500000)
-      (i = (i + (wrap5 1 1 1 1 1))))
-    i
-  """, 500_000)
+  # --- 8. Native fn call (5 args) — println is native, but noisy; use format ---
+  runBench("native_call_5args", fmt"""
+    (fn nf5 [a b c d e] (a + b + c + d + e))
+    (repeat {REPEATS}
+{unroll("(nf5 1 2 3 4 5)")})
+  """)
 
   echo repeat('-', 65)
   echo ""
@@ -160,7 +145,7 @@ when isMainModule:
               echo fmt"  {bName:<35s} {pct:>+6.1f}%{marker}"
       echo ""
 
-  # Machine-readable table (for saving as baseline)
+  # Machine-readable table
   echo "# Machine-readable results (name<TAB>best_seconds)"
   for r in results:
     echo r.name & "\t" & fmt"{r.best:.6f}"
