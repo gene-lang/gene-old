@@ -5568,6 +5568,29 @@ proc exec*(self: ptr VirtualMachine): Value =
           inst = self.cu.instructions[self.pc].addr
           continue
         if obj.kind notin {VkInstance, VkCustom}:
+          # Fast path: check inline cache for value-type native methods
+          # to avoid the seq allocation in call_value_method → invoke_method_value.
+          var fast_dispatched = false
+          let value_class = get_value_class(obj)
+          if value_class != nil:
+            var cache: ptr InlineCache
+            cache = get_inline_cache(self.cu, self.pc)
+            var meth: Method
+            if cache.class != nil and cache.class == value_class and cache.class_version == value_class.version and cache.cached_method != nil:
+              meth = cache.cached_method
+            else:
+              meth = value_class.get_method(method_name)
+              if meth != nil:
+                cache.class = value_class
+                cache.class_version = value_class.version
+                cache.cached_method = meth
+            if meth != nil and meth.callable.kind == VkNativeFn:
+              let result = call_native_fn(meth.callable.ref.native_fn, self, [obj])
+              self.frame.push(result)
+              self.pc.inc()
+              inst = self.cu.instructions[self.pc].addr
+              continue
+
           if call_value_method(self, obj, method_name, []):
             self.pc.inc()
             inst = self.cu.instructions[self.pc].addr
@@ -5721,6 +5744,28 @@ proc exec*(self: ptr VirtualMachine): Value =
           continue
 
         if obj.kind notin {VkInstance, VkCustom}:
+          # Fast path: inline-cached native method dispatch for value types
+          var fast_dispatched = false
+          let value_class = get_value_class(obj)
+          if value_class != nil:
+            var cache: ptr InlineCache
+            cache = get_inline_cache(self.cu, self.pc)
+            var meth: Method
+            if cache.class != nil and cache.class == value_class and cache.class_version == value_class.version and cache.cached_method != nil:
+              meth = cache.cached_method
+            else:
+              meth = value_class.get_method(method_name)
+              if meth != nil:
+                cache.class = value_class
+                cache.class_version = value_class.version
+                cache.cached_method = meth
+            if meth != nil and meth.callable.kind == VkNativeFn:
+              let result = call_native_fn(meth.callable.ref.native_fn, self, [obj, arg])
+              self.frame.push(result)
+              self.pc.inc()
+              inst = self.cu.instructions[self.pc].addr
+              continue
+
           if call_value_method(self, obj, method_name, [arg]):
             self.pc.inc()
             inst = self.cu.instructions[self.pc].addr
