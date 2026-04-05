@@ -1404,21 +1404,17 @@ proc exec*(self: ptr VirtualMachine): Value =
         {.pop.}
       of IkJumpIfFalse:
         {.push checks: off}
-        # Fast-path: inline raw uint64 comparison for common boolean/nil values
-        # instead of calling the full to_bool converter (3 == checks).
-        self.frame.stack_index.dec()
-        let jif_raw = self.frame.stack[self.frame.stack_index].raw
-        self.frame.stack[self.frame.stack_index].raw = 0  # clear slot
-        if jif_raw != TRUE.raw:
-          # Not TRUE — check if falsy (FALSE, NIL, VOID)
-          if jif_raw == FALSE.raw or jif_raw == NIL.raw or jif_raw == VOID.raw:
+        # Fast-path: raw uint64 comparison for common boolean/nil values
+        # instead of calling the full to_bool converter.
+        let jif_val = self.frame.pop()
+        if jif_val.raw != TRUE.raw:
+          if jif_val.raw == FALSE.raw or jif_val.raw == NIL.raw or jif_val.raw == VOID.raw:
             let target = inst.arg0.int64.int
             if target < self.pc:
               self.poll_event_loop()
             self.pc = target
             inst = self.cu.instructions[self.pc].addr
             continue
-          # else: truthy non-boolean value (int, string, etc.) — don't jump
         {.pop.}
 
       of IkJumpIfMatchSuccess:
@@ -5571,7 +5567,6 @@ proc exec*(self: ptr VirtualMachine): Value =
         if obj.kind notin {VkInstance, VkCustom}:
           # Fast path: check inline cache for value-type native methods
           # to avoid the seq allocation in call_value_method → invoke_method_value.
-          var fast_dispatched = false
           let value_class = get_value_class(obj)
           if value_class != nil:
             var cache: ptr InlineCache
@@ -5615,7 +5610,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             meth = class.get_method(method_key_0)
             if meth != nil:
               cache.class = class
-              cache.class_version = cache.class.version
+              cache.class_version = class.version
               cache.cached_method = meth
 
           if meth != nil:
@@ -5699,7 +5694,7 @@ proc exec*(self: ptr VirtualMachine): Value =
               continue
             not_allowed("Method " & method_name_0() & " not found on instance")
         of VkString, VkArray, VkMap, VkRange, VkGene, VkNamespace, VkFuture, VkGenerator, VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock:
-          # Use template to get class (dead code for value types — handled by fast path above)
+          # Fallback for value types when fast path didn't fire (e.g. method not found)
           let value_class = get_value_class(obj)
           if value_class == nil:
             not_allowed($obj.kind & " class not initialized")
@@ -5745,7 +5740,6 @@ proc exec*(self: ptr VirtualMachine): Value =
 
         if obj.kind notin {VkInstance, VkCustom}:
           # Fast path: inline-cached native method dispatch for value types
-          var fast_dispatched = false
           let value_class = get_value_class(obj)
           if value_class != nil:
             var cache: ptr InlineCache
@@ -5882,7 +5876,7 @@ proc exec*(self: ptr VirtualMachine): Value =
               continue
             not_allowed("Method " & method_name_1() & " not found on instance")
         of VkString, VkArray, VkMap, VkRange, VkGene, VkNamespace, VkFuture, VkGenerator, VkFunction, VkNativeFn, VkNativeMethod, VkBoundMethod, VkBlock:
-          # Use template to get class (dead code — handled by fast path above)
+          # Fallback for value types when fast path didn't fire (e.g. method not found)
           let value_class = get_value_class(obj)
           if value_class == nil:
             not_allowed($obj.kind & " class not initialized")
