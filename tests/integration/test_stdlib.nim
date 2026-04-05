@@ -1,6 +1,6 @@
 import unittest
-import ../src/gene/vm
-import ../src/gene/types except Exception
+import gene/vm
+import gene/types except Exception
 import ../helpers
 
 test_vm """

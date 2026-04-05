@@ -4,7 +4,7 @@ import db_connector/db_postgres
 
 import ../helpers
 import gene/types except Exception
-import ../src/genex/postgres
+import genex/postgres
 
 # PostgreSQL connection test
 # Note: These tests require a running PostgreSQL server
