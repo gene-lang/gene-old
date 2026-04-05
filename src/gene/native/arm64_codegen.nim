@@ -50,6 +50,8 @@ type
     callArgBaseOffset*: int32
     callArgSlots*: int32
     ctxSaveOffset*: int32
+    # Read cache: caller-saved X9-X15 map to HIR registers (-1 = empty)
+    readCache*: array[7, int32]
 
 const
   INSN_STP_FP_LR = 0xA9BF7BFD'u32  # stp x29, x30, [sp, #-16]!
@@ -397,7 +399,9 @@ proc newCodegenContext*(fn: HirFunction): CodegenContext =
     recursiveCallFixups: @[],
     callArgBaseOffset: 0,
     callArgSlots: 0,
-    ctxSaveOffset: 0
+    ctxSaveOffset: 0,
+    readCache: [CACHE_EMPTY, CACHE_EMPTY, CACHE_EMPTY, CACHE_EMPTY,
+                CACHE_EMPTY, CACHE_EMPTY, CACHE_EMPTY]
   )
 
   for i in 0..<fn.regCount:
@@ -432,124 +436,183 @@ proc storeRegF64*(ctx: CodegenContext, hirReg: HirReg, src: DReg) =
   ## Store FP D-register to HIR register on stack
   ctx.buf.emitFStr(src, ctx.regOffset(hirReg))
 
+const
+  CACHE_REGS = [X9, X10, X11, X12, X13, X14, X15]
+  CACHE_EMPTY = -1'i32
+
+proc invalidateCache*(ctx: CodegenContext) {.inline.} =
+  for i in 0..<ctx.readCache.len:
+    ctx.readCache[i] = CACHE_EMPTY
+
+proc cacheFind(ctx: CodegenContext, hirReg: HirReg): int {.inline.} =
+  ## Returns cache slot index if hirReg is cached, -1 otherwise.
+  let r = int32(hirReg)
+  for i in 0..<ctx.readCache.len:
+    if ctx.readCache[i] == r:
+      return i
+  return -1
+
+proc cacheAllocSlot(ctx: CodegenContext): int {.inline.} =
+  ## Find a free cache slot, or evict slot 0 (simple round-robin).
+  for i in 0..<ctx.readCache.len:
+    if ctx.readCache[i] == CACHE_EMPTY:
+      return i
+  return 0  # evict first slot (no dirty tracking needed — write-through)
+
+proc cachedLoad*(ctx: CodegenContext, dst: Arm64Reg, hirReg: HirReg) =
+  ## Load HIR register into dst, using cache if available.
+  let slot = ctx.cacheFind(hirReg)
+  if slot >= 0:
+    # Cache hit: mov dst, cacheReg
+    ctx.buf.emitMovRegReg(dst, CACHE_REGS[slot])
+  else:
+    # Cache miss: load from stack
+    ctx.buf.emitLdrReg(dst, ctx.regOffset(hirReg))
+    # Populate cache
+    let s = ctx.cacheAllocSlot()
+    ctx.readCache[s] = int32(hirReg)
+    ctx.buf.emitMovRegReg(CACHE_REGS[s], dst)
+
+proc cachedStore*(ctx: CodegenContext, hirReg: HirReg, src: Arm64Reg) =
+  ## Store src to HIR register on stack (write-through) and update cache.
+  ctx.buf.emitStrReg(src, ctx.regOffset(hirReg))
+  # Update or populate cache entry
+  var slot = ctx.cacheFind(hirReg)
+  if slot < 0:
+    slot = ctx.cacheAllocSlot()
+  ctx.readCache[slot] = int32(hirReg)
+  ctx.buf.emitMovRegReg(CACHE_REGS[slot], src)
+
+proc cacheInvalidateReg*(ctx: CodegenContext, hirReg: HirReg) {.inline.} =
+  ## Remove a specific HIR register from cache (e.g. after overwrite by FP op).
+  let slot = ctx.cacheFind(hirReg)
+  if slot >= 0:
+    ctx.readCache[slot] = CACHE_EMPTY
+
 proc genOp*(ctx: CodegenContext, op: HirOp)
 
 proc genConstI64*(ctx: CodegenContext, op: HirOp) =
   ctx.buf.emitMovImm64(X0, op.constI64)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genAddI64*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(X0, op.binLeft)
-  ctx.loadReg(X1, op.binRight)
+  ctx.cachedLoad(X0, op.binLeft)
+  ctx.cachedLoad(X1, op.binRight)
   ctx.buf.emitAddRegReg(X0, X0, X1)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genSubI64*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(X0, op.binLeft)
-  ctx.loadReg(X1, op.binRight)
+  ctx.cachedLoad(X0, op.binLeft)
+  ctx.cachedLoad(X1, op.binRight)
   ctx.buf.emitSubRegReg(X0, X0, X1)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genMulI64*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(X0, op.binLeft)
-  ctx.loadReg(X1, op.binRight)
+  ctx.cachedLoad(X0, op.binLeft)
+  ctx.cachedLoad(X1, op.binRight)
   ctx.buf.emitMulRegReg(X0, X0, X1)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genDivI64*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(X0, op.binLeft)
-  ctx.loadReg(X1, op.binRight)
+  ctx.cachedLoad(X0, op.binLeft)
+  ctx.cachedLoad(X1, op.binRight)
   ctx.buf.emitSdivRegReg(X0, X0, X1)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genModI64*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(X0, op.binLeft)
-  ctx.loadReg(X1, op.binRight)
+  ctx.cachedLoad(X0, op.binLeft)
+  ctx.cachedLoad(X1, op.binRight)
   ctx.buf.emitSdivRegReg(X2, X0, X1)
   ctx.buf.emitMsubRegRegReg(X0, X2, X1, X0)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genNegI64*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(X0, op.unaryArg)
+  ctx.cachedLoad(X0, op.unaryArg)
   ctx.buf.emitNegReg(X0, X0)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genLeI64*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(X0, op.binLeft)
-  ctx.loadReg(X1, op.binRight)
+  ctx.cachedLoad(X0, op.binLeft)
+  ctx.cachedLoad(X1, op.binRight)
   ctx.buf.emitCmpRegReg(X0, X1)
   ctx.buf.emitCsetLe(X0)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genLtI64*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(X0, op.binLeft)
-  ctx.loadReg(X1, op.binRight)
+  ctx.cachedLoad(X0, op.binLeft)
+  ctx.cachedLoad(X1, op.binRight)
   ctx.buf.emitCmpRegReg(X0, X1)
   ctx.buf.emitCsetLt(X0)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genGeI64*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(X0, op.binLeft)
-  ctx.loadReg(X1, op.binRight)
+  ctx.cachedLoad(X0, op.binLeft)
+  ctx.cachedLoad(X1, op.binRight)
   ctx.buf.emitCmpRegReg(X0, X1)
   ctx.buf.emitCsetGe(X0)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genGtI64*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(X0, op.binLeft)
-  ctx.loadReg(X1, op.binRight)
+  ctx.cachedLoad(X0, op.binLeft)
+  ctx.cachedLoad(X1, op.binRight)
   ctx.buf.emitCmpRegReg(X0, X1)
   ctx.buf.emitCsetGt(X0)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genEqI64*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(X0, op.binLeft)
-  ctx.loadReg(X1, op.binRight)
+  ctx.cachedLoad(X0, op.binLeft)
+  ctx.cachedLoad(X1, op.binRight)
   ctx.buf.emitCmpRegReg(X0, X1)
   ctx.buf.emitCsetEq(X0)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genNeI64*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(X0, op.binLeft)
-  ctx.loadReg(X1, op.binRight)
+  ctx.cachedLoad(X0, op.binLeft)
+  ctx.cachedLoad(X1, op.binRight)
   ctx.buf.emitCmpRegReg(X0, X1)
   ctx.buf.emitCsetNe(X0)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genConstF64*(ctx: CodegenContext, op: HirOp) =
   ## Load float64 constant: movimm64 → GPR, fmov GPR → D-reg, store
   ctx.buf.emitMovImm64(X0, cast[int64](op.constF64))
   ctx.buf.emitFmovFromGpr(D0, X0)
   ctx.storeRegF64(op.dest, D0)
+  ctx.cacheInvalidateReg(op.dest)
 
 proc genAddF64*(ctx: CodegenContext, op: HirOp) =
   ctx.loadRegF64(D0, op.binLeft)
   ctx.loadRegF64(D1, op.binRight)
   ctx.buf.emitFadd(D0, D0, D1)
   ctx.storeRegF64(op.dest, D0)
+  ctx.cacheInvalidateReg(op.dest)
 
 proc genSubF64*(ctx: CodegenContext, op: HirOp) =
   ctx.loadRegF64(D0, op.binLeft)
   ctx.loadRegF64(D1, op.binRight)
   ctx.buf.emitFsub(D0, D0, D1)
   ctx.storeRegF64(op.dest, D0)
+  ctx.cacheInvalidateReg(op.dest)
 
 proc genMulF64*(ctx: CodegenContext, op: HirOp) =
   ctx.loadRegF64(D0, op.binLeft)
   ctx.loadRegF64(D1, op.binRight)
   ctx.buf.emitFmul(D0, D0, D1)
   ctx.storeRegF64(op.dest, D0)
+  ctx.cacheInvalidateReg(op.dest)
 
 proc genDivF64*(ctx: CodegenContext, op: HirOp) =
   ctx.loadRegF64(D0, op.binLeft)
   ctx.loadRegF64(D1, op.binRight)
   ctx.buf.emitFdiv(D0, D0, D1)
   ctx.storeRegF64(op.dest, D0)
+  ctx.cacheInvalidateReg(op.dest)
 
 proc genModF64*(ctx: CodegenContext, op: HirOp) =
   ctx.loadRegF64(D0, op.binLeft)
   ctx.loadRegF64(D1, op.binRight)
   ctx.buf.emitMovImm64(X8, cast[int64](cast[pointer](c_fmod)))
+  ctx.invalidateCache()  # blr clobbers caller-saved regs
   ctx.buf.emitBlr(X8)
   ctx.storeRegF64(op.dest, D0)
 
@@ -557,64 +620,66 @@ proc genNegF64*(ctx: CodegenContext, op: HirOp) =
   ctx.loadRegF64(D0, op.unaryArg)
   ctx.buf.emitFneg(D0, D0)
   ctx.storeRegF64(op.dest, D0)
+  ctx.cacheInvalidateReg(op.dest)
 
 proc genLeF64*(ctx: CodegenContext, op: HirOp) =
   ctx.loadRegF64(D0, op.binLeft)
   ctx.loadRegF64(D1, op.binRight)
   ctx.buf.emitFcmp(D0, D1)
   ctx.buf.emitCsetFloatLe(X0)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genLtF64*(ctx: CodegenContext, op: HirOp) =
   ctx.loadRegF64(D0, op.binLeft)
   ctx.loadRegF64(D1, op.binRight)
   ctx.buf.emitFcmp(D0, D1)
   ctx.buf.emitCsetFloatLt(X0)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genGeF64*(ctx: CodegenContext, op: HirOp) =
   ctx.loadRegF64(D0, op.binLeft)
   ctx.loadRegF64(D1, op.binRight)
   ctx.buf.emitFcmp(D0, D1)
   ctx.buf.emitCsetFloatGe(X0)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genGtF64*(ctx: CodegenContext, op: HirOp) =
   ctx.loadRegF64(D0, op.binLeft)
   ctx.loadRegF64(D1, op.binRight)
   ctx.buf.emitFcmp(D0, D1)
   ctx.buf.emitCsetFloatGt(X0)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genEqF64*(ctx: CodegenContext, op: HirOp) =
   ctx.loadRegF64(D0, op.binLeft)
   ctx.loadRegF64(D1, op.binRight)
   ctx.buf.emitFcmp(D0, D1)
   ctx.buf.emitCsetFloatEq(X0)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genNeF64*(ctx: CodegenContext, op: HirOp) =
   ctx.loadRegF64(D0, op.binLeft)
   ctx.loadRegF64(D1, op.binRight)
   ctx.buf.emitFcmp(D0, D1)
   ctx.buf.emitCsetFloatNe(X0)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genBr*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(X0, op.brCond)
+  ctx.cachedLoad(X0, op.brCond)
+  ctx.invalidateCache()  # Control flow boundary
   ctx.buf.emitCbz(X0, op.brElse)
   ctx.buf.emitB(op.brThen)
 
 proc genJump*(ctx: CodegenContext, op: HirOp) =
+  ctx.invalidateCache()  # Control flow boundary
   ctx.buf.emitB(op.jumpTarget)
 
 proc genRet*(ctx: CodegenContext, op: HirOp) =
   if ctx.fn.returnType == HtF64:
-    # Load float, bitcast to int64 for uniform ABI return
     ctx.loadRegF64(D0, op.retValue)
     ctx.buf.emitFmovToGpr(X0, D0)
   else:
-    ctx.loadReg(X0, op.retValue)
+    ctx.cachedLoad(X0, op.retValue)
   ctx.buf.emitLdrReg(X19, ctx.ctxSaveOffset)
   if ctx.stackSize > 0:
     ctx.buf.emitAddSpImm(ctx.stackSize)
@@ -627,23 +692,25 @@ proc genCall*(ctx: CodegenContext, op: HirOp) =
     raise newException(ValueError, "Too many arguments for native call: " & $op.callArgs.len)
   ctx.buf.emitMovRegReg(X0, X19)
   for i in 0..<op.callArgs.len:
-    ctx.loadReg(argRegs[i], op.callArgs[i])
+    ctx.cachedLoad(argRegs[i], op.callArgs[i])
   if op.callTarget != ctx.fn.name:
     raise newException(ValueError, "External native calls not supported: " & op.callTarget)
+  ctx.invalidateCache()  # bl clobbers caller-saved regs
   let offset = ctx.buf.currentOffset()
   ctx.buf.emitU32(0x9400_0000'u32)  # bl placeholder
   ctx.recursiveCallFixups.add(offset)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genCallVM*(ctx: CodegenContext, op: HirOp) =
   if op.callVmArgs.len > ctx.callArgSlots:
     raise newException(ValueError, "Too many arguments for trampoline call: " & $op.callVmArgs.len)
 
   for i in 0..<op.callVmArgs.len:
-    ctx.loadReg(X0, op.callVmArgs[i])
+    ctx.cachedLoad(X0, op.callVmArgs[i])
     let offset = ctx.callArgBaseOffset + int32(i) * 8
     ctx.buf.emitStrReg(X0, offset)
 
+  ctx.invalidateCache()  # blr clobbers caller-saved regs
   ctx.buf.emitMovRegReg(X0, X19)
   ctx.buf.emitMovImm64(X1, op.callVmDescIdx.int64)
   ctx.buf.emitAddRegImm(X2, SP, ctx.callArgBaseOffset)
@@ -651,19 +718,19 @@ proc genCallVM*(ctx: CodegenContext, op: HirOp) =
   ctx.buf.emitLdrRegBase(X8, X19, NativeCtxOffsetTrampoline)
   ctx.buf.emitBlr(X8)
 
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genBoxString*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(X0, op.unaryArg)
+  ctx.cachedLoad(X0, op.unaryArg)
   ctx.buf.emitMovImm64(X1, cast[int64](STRING_TAG_U64))
   ctx.buf.emitOrrRegReg(X0, X0, X1)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genUnboxString*(ctx: CodegenContext, op: HirOp) =
-  ctx.loadReg(X0, op.unaryArg)
+  ctx.cachedLoad(X0, op.unaryArg)
   ctx.buf.emitMovImm64(X1, cast[int64](PAYLOAD_MASK_U64))
   ctx.buf.emitAndRegReg(X0, X0, X1)
-  ctx.storeReg(op.dest, X0)
+  ctx.cachedStore(op.dest, X0)
 
 proc genOp*(ctx: CodegenContext, op: HirOp) =
   case op.kind
@@ -725,6 +792,7 @@ proc genPrologue*(ctx: CodegenContext) =
 
 proc genBlock*(ctx: CodegenContext, blk: HirBlock) =
   ctx.buf.markLabel(blk.id)
+  ctx.invalidateCache()  # Block boundary: predecessors may differ
   for op in blk.ops:
     ctx.genOp(op)
 

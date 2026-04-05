@@ -4510,7 +4510,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             self.frame.push(new_generator_value(f, @[]))
           else:
             var native_result: Value
-            if self.try_native_call(f, @[], native_result):
+            if self.try_native_call0(f, native_result):
               self.frame.push(native_result)
             else:
               if f.body_compiled == nil:
@@ -4695,7 +4695,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             self.frame.push(new_generator_value(f, @[arg]))
           else:
             var native_result: Value
-            if self.try_native_call(f, @[arg], native_result):
+            if self.try_native_call1(f, arg, native_result):
               self.frame.push(native_result)
             else:
               if f.body_compiled == nil:

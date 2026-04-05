@@ -156,6 +156,26 @@ proc native_args_supported(f: Function, args: seq[Value]): bool =
       return false
   true
 
+proc native_args_supported0(f: Function): bool {.inline.} =
+  if f.matcher.is_nil or not f.matcher.has_type_annotations:
+    return false
+  f.matcher.children.len == 0
+
+proc native_args_supported1(f: Function, arg: Value): bool {.inline.} =
+  if f.matcher.is_nil or not f.matcher.has_type_annotations:
+    return false
+  if f.matcher.children.len != 1:
+    return false
+  let tid = f.matcher.children[0].type_id
+  if tid == BUILTIN_TYPE_INT_ID:
+    return arg.kind == VkInt
+  elif tid == BUILTIN_TYPE_FLOAT_ID:
+    return arg.kind == VkFloat
+  elif tid == BUILTIN_TYPE_STRING_ID:
+    return arg.kind == VkString
+  else:
+    return false
+
 proc effective_native_tier(self: ptr VirtualMachine): NativeCompileTier {.inline.} =
   if self == nil:
     return NctNever
@@ -177,6 +197,26 @@ proc native_call_supported(self: ptr VirtualMachine, f: Function, args: seq[Valu
   if tier == NctNever:
     return false
   if not native_args_supported(f, args):
+    return false
+  if tier == NctFullyTyped and not native_has_fully_typed_boundary(f):
+    return false
+  true
+
+proc native_call_supported0(self: ptr VirtualMachine, f: Function): bool {.inline.} =
+  let tier = self.effective_native_tier()
+  if tier == NctNever:
+    return false
+  if not native_args_supported0(f):
+    return false
+  if tier == NctFullyTyped and not native_has_fully_typed_boundary(f):
+    return false
+  true
+
+proc native_call_supported1(self: ptr VirtualMachine, f: Function, arg: Value): bool {.inline.} =
+  let tier = self.effective_native_tier()
+  if tier == NctNever:
+    return false
+  if not native_args_supported1(f, arg):
     return false
   if tier == NctFullyTyped and not native_has_fully_typed_boundary(f):
     return false

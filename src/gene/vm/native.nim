@@ -83,13 +83,10 @@ proc native_trampoline*(
     retain(result_val)
     return cast[int64](result_val.raw)
 
-proc try_native_call(self: ptr VirtualMachine, f: Function, args: seq[Value], out_value: var Value): bool =
-  if self.effective_native_tier() == NctNever:
-    return false
+proc prepare_native_ctx(self: ptr VirtualMachine, f: Function, out_ctx: var NativeContext): bool {.inline.} =
+  ## Shared preamble: ensure native code is compiled and set up NativeContext.
+  ## Returns false if native execution is not available for this function.
   if f.is_generator or f.async or f.is_macro_like:
-    return false
-  if not native_call_supported(self, f, args):
-    # Tier/guard miss deoptimizes this call to the VM bytecode path.
     return false
   if not f.native_ready:
     if f.native_failed:
@@ -104,55 +101,22 @@ proc try_native_call(self: ptr VirtualMachine, f: Function, args: seq[Value], ou
       release_descriptors(f.native_descriptors)
     f.native_entry = compiled.entry
     f.native_ready = true
-    # Determine if return value is float (from HIR inference or explicit annotation)
     f.native_return_float = compiled.returnFloat
     f.native_return_string = compiled.returnString
     f.native_return_value = compiled.returnValue
     f.native_descriptors = compiled.descriptors
 
-  var ctx = NativeContext(
+  out_ctx = NativeContext(
     vm: self,
     trampoline: cast[pointer](native_trampoline),
     descriptors: nil,
     descriptor_count: f.native_descriptors.len.int32
   )
   if f.native_descriptors.len > 0:
-    ctx.descriptors = cast[ptr UncheckedArray[CallDescriptor]](f.native_descriptors[0].addr)
+    out_ctx.descriptors = cast[ptr UncheckedArray[CallDescriptor]](f.native_descriptors[0].addr)
+  true
 
-  var marshaled_args: seq[system.int64] = newSeq[system.int64](args.len)
-  for i in 0..<args.len:
-    marshaled_args[i] = arg_to_i64(args[i], native_arg_type_id(f, i))
-
-  var result_i64: int64
-  case args.len
-  of 0:
-    result_i64 = cast[NativeFn0](f.native_entry)(addr ctx)
-  of 1:
-    result_i64 = cast[NativeFn1](f.native_entry)(addr ctx, marshaled_args[0])
-  of 2:
-    result_i64 = cast[NativeFn2](f.native_entry)(addr ctx, marshaled_args[0], marshaled_args[1])
-  of 3:
-    result_i64 = cast[NativeFn3](f.native_entry)(addr ctx, marshaled_args[0], marshaled_args[1], marshaled_args[2])
-  of 4:
-    result_i64 = cast[NativeFn4](f.native_entry)(
-      addr ctx, marshaled_args[0], marshaled_args[1], marshaled_args[2], marshaled_args[3]
-    )
-  of 5:
-    result_i64 = cast[NativeFn5](f.native_entry)(
-      addr ctx, marshaled_args[0], marshaled_args[1], marshaled_args[2], marshaled_args[3], marshaled_args[4]
-    )
-  of 6:
-    result_i64 = cast[NativeFn6](f.native_entry)(
-      addr ctx, marshaled_args[0], marshaled_args[1], marshaled_args[2], marshaled_args[3], marshaled_args[4], marshaled_args[5]
-    )
-  of 7:
-    result_i64 = cast[NativeFn7](f.native_entry)(
-      addr ctx, marshaled_args[0], marshaled_args[1], marshaled_args[2], marshaled_args[3],
-      marshaled_args[4], marshaled_args[5], marshaled_args[6]
-    )
-  else:
-    return false
-  # Unbox result: if return type is float, bitcast int64 back to float64
+proc unbox_native_result(f: Function, result_i64: int64, out_value: var Value) {.inline.} =
   if f.native_return_float:
     out_value = cast[float64](result_i64).to_value()
   elif f.native_return_value:
@@ -162,4 +126,64 @@ proc try_native_call(self: ptr VirtualMachine, f: Function, args: seq[Value], ou
     out_value = cast[Value](STRING_TAG or payload)
   else:
     out_value = result_i64.to_value()
+
+proc try_native_call0(self: ptr VirtualMachine, f: Function, out_value: var Value): bool =
+  if self.effective_native_tier() == NctNever:
+    return false
+  if not native_call_supported0(self, f):
+    return false
+  var ctx: NativeContext
+  if not self.prepare_native_ctx(f, ctx):
+    return false
+  let result_i64 = cast[NativeFn0](f.native_entry)(addr ctx)
+  unbox_native_result(f, result_i64, out_value)
+  true
+
+proc try_native_call1(self: ptr VirtualMachine, f: Function, arg: Value, out_value: var Value): bool =
+  if self.effective_native_tier() == NctNever:
+    return false
+  if not native_call_supported1(self, f, arg):
+    return false
+  var ctx: NativeContext
+  if not self.prepare_native_ctx(f, ctx):
+    return false
+  let a0 = arg_to_i64(arg, native_arg_type_id(f, 0))
+  let result_i64 = cast[NativeFn1](f.native_entry)(addr ctx, a0)
+  unbox_native_result(f, result_i64, out_value)
+  true
+
+proc try_native_call(self: ptr VirtualMachine, f: Function, args: seq[Value], out_value: var Value): bool =
+  if self.effective_native_tier() == NctNever:
+    return false
+  if not native_call_supported(self, f, args):
+    return false
+  var ctx: NativeContext
+  if not self.prepare_native_ctx(f, ctx):
+    return false
+
+  var m: array[8, int64]  # Stack-allocated marshal buffer (max 7 args + headroom)
+  for i in 0..<args.len:
+    m[i] = arg_to_i64(args[i], native_arg_type_id(f, i))
+
+  var result_i64: int64
+  case args.len
+  of 0:
+    result_i64 = cast[NativeFn0](f.native_entry)(addr ctx)
+  of 1:
+    result_i64 = cast[NativeFn1](f.native_entry)(addr ctx, m[0])
+  of 2:
+    result_i64 = cast[NativeFn2](f.native_entry)(addr ctx, m[0], m[1])
+  of 3:
+    result_i64 = cast[NativeFn3](f.native_entry)(addr ctx, m[0], m[1], m[2])
+  of 4:
+    result_i64 = cast[NativeFn4](f.native_entry)(addr ctx, m[0], m[1], m[2], m[3])
+  of 5:
+    result_i64 = cast[NativeFn5](f.native_entry)(addr ctx, m[0], m[1], m[2], m[3], m[4])
+  of 6:
+    result_i64 = cast[NativeFn6](f.native_entry)(addr ctx, m[0], m[1], m[2], m[3], m[4], m[5])
+  of 7:
+    result_i64 = cast[NativeFn7](f.native_entry)(addr ctx, m[0], m[1], m[2], m[3], m[4], m[5], m[6])
+  else:
+    return false
+  unbox_native_result(f, result_i64, out_value)
   true
