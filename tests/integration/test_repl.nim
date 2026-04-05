@@ -1,11 +1,12 @@
 import unittest, tables
 
 import ../helpers
-import ../src/gene/compiler
-import ../src/gene/types except Exception
-import ../src/gene/vm
-import ../src/gene/repl_session
-import ../src/gene/repl_input
+
+import gene/compiler
+import gene/types except Exception
+import gene/vm
+import gene/repl_session
+import gene/repl_input
 
 init_all()
 
