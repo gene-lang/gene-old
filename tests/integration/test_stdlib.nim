@@ -57,15 +57,16 @@ test_vm """
   (a 1 2)
 """, 3
 
-test "Zero-arg native methods reject extra arguments and require explicit grouping in infix comparisons":
+test "Zero-arg native methods warn on extra arguments; explicit grouping works for infix comparisons":
   init_all()
 
-  expect CatchableError:
-    discard VM.exec("""
-      (var a "abc")
-      (a .length 1)
-    """, "stdlib_native_method_extra_arg")
+  # Extra args now produce a compile-time warning (not a runtime error)
+  discard VM.exec("""
+    (var a "abc")
+    (a .length 1)
+  """, "stdlib_native_method_extra_arg")
 
+  # Infix without grouping: > is parsed as extra arg, fails at runtime
   expect CatchableError:
     discard VM.exec("""
       (var a "abc")
