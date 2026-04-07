@@ -7,43 +7,30 @@ import ../types
 
 proc c_fmod(x, y: cdouble): cdouble {.importc: "fmod", header: "<math.h>".}
 
-# Fast integer arithmetic with overflow checking
+# Fast integer arithmetic with always-on overflow checking
 template add_int_fast*(a, b: int64): Value {.dirty.} =
-  # Check for overflow
-  when defined(release):
-    # In release mode, just wrap around
-    (a + b).to_value()
+  let sum = a + b
+  if (b > 0 and sum < a) or (b < 0 and sum > a):
+    raise new_exception(types.Exception, "Integer overflow in addition")
   else:
-    # In debug mode, check for overflow
-    let sum = a + b
-    if (b > 0 and sum < a) or (b < 0 and sum > a):
-      # Overflow occurred - could upgrade to bigint here
-      raise new_exception(types.Exception, "Integer overflow in addition")
-    else:
-      sum.to_value()
+    sum.to_value()
 
 template sub_int_fast*(a, b: int64): Value {.dirty.} =
-  when defined(release):
-    (a - b).to_value()
+  let diff = a - b
+  if (b > 0 and diff > a) or (b < 0 and diff < a):
+    raise new_exception(types.Exception, "Integer overflow in subtraction")
   else:
-    let diff = a - b
-    if (b > 0 and diff > a) or (b < 0 and diff < a):
-      raise new_exception(types.Exception, "Integer overflow in subtraction")
-    else:
-      diff.to_value()
+    diff.to_value()
 
 template mul_int_fast*(a, b: int64): Value {.dirty.} =
-  when defined(release):
-    (a * b).to_value()
-  else:
-    if a != 0 and b != 0:
-      let product = a * b
-      if product div a != b:
-        raise new_exception(types.Exception, "Integer overflow in multiplication")
-      else:
-        product.to_value()
+  if a != 0 and b != 0:
+    let product = a * b
+    if product div a != b:
+      raise new_exception(types.Exception, "Integer overflow in multiplication")
     else:
-      0.to_value()
+      product.to_value()
+  else:
+    0.to_value()
 
 template div_int_fast*(a, b: int64): Value {.dirty.} =
   if b == 0:
@@ -148,12 +135,15 @@ proc pow_int_fast*(base, exp: int64): Value =
     var e = exp
     while e > 0:
       if (e and 1) == 1:
+        let old_res = res
         res *= b
-        # Check for overflow
-        when not defined(release):
-          if b != 0 and res div b != (res div b):
-            raise new_exception(types.Exception, "Integer overflow in power")
-      b *= b
+        if b != 0 and res div b != old_res:
+          raise new_exception(types.Exception, "Integer overflow in power")
+      if e > 1:
+        let old_b = b
+        b *= b
+        if old_b != 0 and b div old_b != old_b:
+          raise new_exception(types.Exception, "Integer overflow in power")
       e = e shr 1
     return res.to_value()
 
@@ -197,7 +187,10 @@ template shr_int_fast*(a, b: int64): Value {.dirty.} =
 
 # Unary operations
 template neg_int_fast*(a: int64): Value {.dirty.} =
-  (-a).to_value()
+  if a == low(int64):
+    raise new_exception(types.Exception, "Integer overflow in negation")
+  else:
+    (-a).to_value()
 
 template neg_float_fast*(a: float64): Value {.dirty.} =
   (-a).to_value()

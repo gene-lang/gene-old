@@ -2336,7 +2336,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           of VkInt:
             case second.kind:
               of VkInt:
-                self.frame.push(first.int64 + second.int64)
+                self.frame.push(add_int_fast(first.int64, second.int64))
               of VkFloat:
                 self.frame.push(add_mixed(first.int64, second.float))
               else:
@@ -2531,7 +2531,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         let index = inst.arg0.int64.int
         let current = self.frame.scope.members[index]
         if current.kind == VkInt:
-          self.frame.scope.members[index] = (current.int64 + 1).to_value()
+          self.frame.scope.members[index] = add_int_fast(current.int64, 1'i64)
           let updated = self.frame.scope.members[index]
           self.validate_local_type_constraint(self.frame.scope.tracker, index, updated)
           self.frame.push(updated)
@@ -2583,7 +2583,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         let index = inst.arg0.int64.int
         let current = self.frame.scope.members[index]
         if current.kind == VkInt:
-          self.frame.scope.members[index] = (current.int64 - 1).to_value()
+          self.frame.scope.members[index] = sub_int_fast(current.int64, 1'i64)
           let updated = self.frame.scope.members[index]
           self.validate_local_type_constraint(self.frame.scope.tracker, index, updated)
           self.frame.push(updated)
@@ -4400,7 +4400,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         var sum_result = case current.kind:
           of VkInt:
             case val.kind:
-              of VkInt: (current.int64 + val.int64).to_value()
+              of VkInt: add_int_fast(current.int64, val.int64)
               of VkFloat: add_mixed(current.int64, val.float)
               else: current  # Fallback
           of VkFloat:
@@ -4420,7 +4420,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         let local_idx = inst.arg0.int64.int
         let current = self.frame.scope.members[local_idx]
         if current.kind == VkInt:
-          self.frame.scope.members[local_idx] = (current.int64 + 1).to_value()
+          self.frame.scope.members[local_idx] = add_int_fast(current.int64, 1'i64)
         let updated = self.frame.scope.members[local_idx]
         self.validate_local_type_constraint(self.frame.scope.tracker, local_idx, updated)
         self.frame.push(updated)
@@ -4432,7 +4432,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         let local_idx = inst.arg0.int64.int
         let current = self.frame.scope.members[local_idx]
         if current.kind == VkInt:
-          self.frame.scope.members[local_idx] = (current.int64 - 1).to_value()
+          self.frame.scope.members[local_idx] = sub_int_fast(current.int64, 1'i64)
         let updated = self.frame.scope.members[local_idx]
         self.validate_local_type_constraint(self.frame.scope.tracker, local_idx, updated)
         self.frame.push(updated)

@@ -158,7 +158,19 @@ Ranges use the infix `..` form inside a Gene expression. The two-endpoint form i
 
 ---
 
+## Integer Range and Overflow
+
+Integers are signed 64-bit values (range: −9,223,372,036,854,775,808 to 9,223,372,036,854,775,807). Small integers within ±2^47 are stored as NaN-boxed immediates (no heap allocation); larger values auto-promote to heap-allocated references transparently.
+
+Arithmetic overflow (exceeding the int64 range) raises an exception:
+
+```gene
+(+ 9223372036854775807 1)   # => Exception: Integer overflow in addition
+(- -9223372036854775808 1)  # => Exception: Integer overflow in subtraction
+(* 9223372036854775807 2)   # => Exception: Integer overflow in multiplication
+```
+
 ## Potential Improvements
 
 - **Raw strings**: No raw string literal (no escape processing). Useful for regex patterns and file paths.
-- **Integer overflow**: 48-bit integers (from NaN-boxing) silently overflow. No bigint support. Should at least document the range clearly and consider runtime overflow detection.
+- **Bigint support**: No arbitrary-precision integers. Overflow throws instead of promoting to bigint. Consider adding a bigint type for programs that need unbounded integer arithmetic.

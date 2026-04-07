@@ -330,7 +330,7 @@ proc parse_string(self: var Parser, start: char, triple_mode: bool = false): Tok
           add(self.str, '\b')
           inc(pos, 2)
         of 'f':
-          add(self.str, '\b')
+          add(self.str, '\f')
           inc(pos, 2)
         of 'n':
           add(self.str, '\L')
