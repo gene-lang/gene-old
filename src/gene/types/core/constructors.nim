@@ -311,15 +311,36 @@ proc new_datetime_value*(dt: DateTime): Value =
   r.dt_hour = dt.hour.int8
   r.dt_minute = dt.minute.int8
   r.dt_second = dt.second.int8
+  r.dt_microsecond = 0
   r.dt_timezone = (dt.utcOffset div 60).int16
+  r.dt_tz_name = ""
   result = r.to_ref_value()
 
-proc new_time_value*(hour: int, minute: int, second: int, microsecond: int = 0): Value =
+proc new_datetime_value*(year, month, day, hour, minute, second: int,
+                         microsecond: int = 0, offset_minutes: int = 0,
+                         tz_name: string = ""): Value =
+  let r = new_ref(VkDateTime)
+  r.dt_year = year.int16
+  r.dt_month = month.int8
+  r.dt_day = day.int8
+  r.dt_hour = hour.int8
+  r.dt_minute = minute.int8
+  r.dt_second = second.int8
+  r.dt_microsecond = microsecond.int32
+  r.dt_timezone = offset_minutes.int16
+  r.dt_tz_name = tz_name
+  result = r.to_ref_value()
+
+proc new_time_value*(hour: int, minute: int, second: int = 0,
+                     microsecond: int = 0, offset_minutes: int = 0,
+                     tz_name: string = ""): Value =
   let r = new_ref(VkTime)
   r.time_hour = hour.int8
   r.time_minute = minute.int8
   r.time_second = second.int8
   r.time_microsecond = microsecond.int32
+  r.time_tz_offset = offset_minutes.int16
+  r.time_tz_name = tz_name
   result = r.to_ref_value()
 
 proc new_selector_value*(segments: openArray[Value]): Value =

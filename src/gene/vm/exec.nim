@@ -2728,6 +2728,18 @@ proc exec*(self: ptr VirtualMachine): Value =
                 self.frame.replace(lt_float_fast(first.float, second.float))
               else:
                 not_allowed("Cannot compare " & $first.kind & " < " & $second.kind)
+          of VkDate:
+            if second.kind == VkDate:
+              self.frame.replace(if cmp_date(first, second) < 0: TRUE else: FALSE)
+            else: not_allowed("Cannot compare " & $first.kind & " < " & $second.kind)
+          of VkDateTime:
+            if second.kind == VkDateTime:
+              self.frame.replace(if cmp_datetime(first, second) < 0: TRUE else: FALSE)
+            else: not_allowed("Cannot compare " & $first.kind & " < " & $second.kind)
+          of VkTime:
+            if second.kind == VkTime:
+              self.frame.replace(if cmp_time(first, second) < 0: TRUE else: FALSE)
+            else: not_allowed("Cannot compare " & $first.kind & " < " & $second.kind)
           else:
             not_allowed("Cannot compare " & $first.kind & " < " & $second.kind)
         {.pop.}
@@ -2867,6 +2879,18 @@ proc exec*(self: ptr VirtualMachine): Value =
                 self.frame.push(lte_float_fast(first.float, second.float))
               else:
                 not_allowed("Cannot compare " & $first.kind & " <= " & $second.kind)
+          of VkDate:
+            if second.kind == VkDate:
+              self.frame.push(if cmp_date(first, second) <= 0: TRUE else: FALSE)
+            else: not_allowed("Cannot compare " & $first.kind & " <= " & $second.kind)
+          of VkDateTime:
+            if second.kind == VkDateTime:
+              self.frame.push(if cmp_datetime(first, second) <= 0: TRUE else: FALSE)
+            else: not_allowed("Cannot compare " & $first.kind & " <= " & $second.kind)
+          of VkTime:
+            if second.kind == VkTime:
+              self.frame.push(if cmp_time(first, second) <= 0: TRUE else: FALSE)
+            else: not_allowed("Cannot compare " & $first.kind & " <= " & $second.kind)
           else:
             not_allowed("Cannot compare " & $first.kind & " <= " & $second.kind)
 
@@ -2891,6 +2915,18 @@ proc exec*(self: ptr VirtualMachine): Value =
                 self.frame.push(gt_float_fast(first.float, second.float))
               else:
                 not_allowed("Cannot compare " & $first.kind & " > " & $second.kind)
+          of VkDate:
+            if second.kind == VkDate:
+              self.frame.push(if cmp_date(first, second) > 0: TRUE else: FALSE)
+            else: not_allowed("Cannot compare " & $first.kind & " > " & $second.kind)
+          of VkDateTime:
+            if second.kind == VkDateTime:
+              self.frame.push(if cmp_datetime(first, second) > 0: TRUE else: FALSE)
+            else: not_allowed("Cannot compare " & $first.kind & " > " & $second.kind)
+          of VkTime:
+            if second.kind == VkTime:
+              self.frame.push(if cmp_time(first, second) > 0: TRUE else: FALSE)
+            else: not_allowed("Cannot compare " & $first.kind & " > " & $second.kind)
           else:
             not_allowed("Cannot compare " & $first.kind & " > " & $second.kind)
 
@@ -2915,6 +2951,18 @@ proc exec*(self: ptr VirtualMachine): Value =
                 self.frame.push(gte_float_fast(first.float, second.float))
               else:
                 not_allowed("Cannot compare " & $first.kind & " >= " & $second.kind)
+          of VkDate:
+            if second.kind == VkDate:
+              self.frame.push(if cmp_date(first, second) >= 0: TRUE else: FALSE)
+            else: not_allowed("Cannot compare " & $first.kind & " >= " & $second.kind)
+          of VkDateTime:
+            if second.kind == VkDateTime:
+              self.frame.push(if cmp_datetime(first, second) >= 0: TRUE else: FALSE)
+            else: not_allowed("Cannot compare " & $first.kind & " >= " & $second.kind)
+          of VkTime:
+            if second.kind == VkTime:
+              self.frame.push(if cmp_time(first, second) >= 0: TRUE else: FALSE)
+            else: not_allowed("Cannot compare " & $first.kind & " >= " & $second.kind)
           else:
             not_allowed("Cannot compare " & $first.kind & " >= " & $second.kind)
 

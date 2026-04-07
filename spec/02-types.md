@@ -46,20 +46,43 @@ Ranges are lazy numeric sequences. `(start .. end)` creates an inclusive range w
 # => 1..5 step 2
 ```
 
-### Date and DateTime
+### Date, DateTime, and Time
 
-`Date` and `DateTime` are runtime-backed value types exposed through `gene/today`, `gene/yesterday`, `gene/tomorrow`, and `gene/now`.
-
-The parser also reserves `YYYY-MM-DD` and `YYYY-MM-DDTHH:MM:SS` for Date/DateTime literals, but direct literal evaluation is not yet wired through end-to-end. Use the stdlib constructors above in current user code.
+Date, DateTime, and Time are first-class literal types following ISO 8601, RFC 3339,
+and RFC 9557 standards. Years must be 4 digits. Timezone abbreviations (EDT, PST) are
+not supported — use IANA zone names or UTC offsets.
 
 ```gene
-(println (typeof (gene/today)))
-(println (typeof (gene/now)))
-(println (((gene/now) .to_i) > 0))
-# => VkDate
-# => VkDateTime
-# => true
+# Date literals
+(var d 2024-01-23)
+(println d)                              # => 2024-01-23
+(println (d .year) (d .month) (d .day))  # => 2024 1 23
+
+# DateTime literals
+(println 2024-01-23T20:10)               # => 2024-01-23T20:10
+(println 2024-01-23T20:10:10)            # => 2024-01-23T20:10:10
+(println 2024-01-23T20:10:10.123)        # => 2024-01-23T20:10:10.123
+(println 2024-01-23T20:10:10Z)           # => 2024-01-23T20:10:10Z
+(println 2024-01-23T20:10:10+05:30[Asia/Kolkata])
+                                         # => 2024-01-23T20:10:10+05:30[Asia/Kolkata]
+
+# Time literals
+(println 10:10)                          # => 10:10
+(println 10:10:10.123)                   # => 10:10:10.123
+(println 10:10:10Z)                      # => 10:10:10Z
+(println 10:00[America/New_York])        # => 10:00[America/New_York]
+
+# Accessors
+(var dt 2024-01-23T20:10:10+05:30[Asia/Kolkata])
+(println (dt .timezone))                 # => Asia/Kolkata
+(println (dt .offset))                   # => 330
+
+# Comparison
+(println (< 2024-01-01 2024-12-31))      # => true
+(println (> 10:30 10:00))                # => true
 ```
+
+Stdlib functions: `gene/today`, `gene/now`, `gene/yesterday`, `gene/tomorrow`.
 
 ### Bytes
 
@@ -165,7 +188,7 @@ Color/red     # Access member
 ## Potential Improvements
 
 - **Generic classes**: Only generic functions are supported. Generic classes (`class Stack:T`) are not yet implemented.
-- **Date/DateTime literals**: The parser recognizes date and datetime token shapes, but direct literal evaluation is still incomplete. Construction currently goes through stdlib helpers such as `gene/today` and `gene/now`.
+- **Duration/Period arithmetic**: Date/time literals and comparisons are implemented, but arithmetic (adding durations, computing date differences) is not yet supported.
 - **Bytes ergonomics**: `VkBytes` exists, but direct literals, indexing, and richer byte-oriented methods are not fully surfaced to Gene code yet.
 - **Type bounds/constraints**: No way to express `T: Comparable` or similar constraints on generic type parameters.
 - **Inference completeness**: Type inference still falls back to `Any` in some complex binding positions, notably destructuring parameters and other non-trivial patterns.

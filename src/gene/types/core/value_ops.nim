@@ -360,6 +360,32 @@ proc `==`*(a, b: Value): bool {.gcsafe, noSideEffect.} =
       # Instances compare by identity
       elif tag1 == INSTANCE_TAG and tag2 == INSTANCE_TAG:
         return (u1 and PAYLOAD_MASK) == (u2 and PAYLOAD_MASK)
+      # Date/time structural comparison
+      elif tag1 == REF_TAG and tag2 == REF_TAG and a.ref.kind == b.ref.kind:
+        case a.ref.kind:
+          of VkDate:
+            return a.ref.date_year == b.ref.date_year and
+                   a.ref.date_month == b.ref.date_month and
+                   a.ref.date_day == b.ref.date_day
+          of VkDateTime:
+            return a.ref.dt_year == b.ref.dt_year and
+                   a.ref.dt_month == b.ref.dt_month and
+                   a.ref.dt_day == b.ref.dt_day and
+                   a.ref.dt_hour == b.ref.dt_hour and
+                   a.ref.dt_minute == b.ref.dt_minute and
+                   a.ref.dt_second == b.ref.dt_second and
+                   a.ref.dt_microsecond == b.ref.dt_microsecond and
+                   a.ref.dt_timezone == b.ref.dt_timezone and
+                   a.ref.dt_tz_name == b.ref.dt_tz_name
+          of VkTime:
+            return a.ref.time_hour == b.ref.time_hour and
+                   a.ref.time_minute == b.ref.time_minute and
+                   a.ref.time_second == b.ref.time_second and
+                   a.ref.time_microsecond == b.ref.time_microsecond and
+                   a.ref.time_tz_offset == b.ref.time_tz_offset and
+                   a.ref.time_tz_name == b.ref.time_tz_name
+          else:
+            return a.ref == b.ref
       # Only references can be equal with different bit patterns
       elif tag1 == REF_TAG and tag2 == REF_TAG:
         return a.ref == b.ref
@@ -518,6 +544,66 @@ proc format_regex_literal(self: Value): string =
     result &= escape_regex_segment(self.ref.regex_replacement) & "/"
   result &= regex_flags_to_string(self.ref.regex_flags)
 
+proc pad2(v: int): string {.inline.} =
+  if v < 10: "0" & $v else: $v
+
+proc pad4(v: int): string {.inline.} =
+  if v < 10: "000" & $v
+  elif v < 100: "00" & $v
+  elif v < 1000: "0" & $v
+  else: $v
+
+proc format_microseconds(us: int32): string =
+  if us == 0: return ""
+  var s = $us
+  while s.len < 6: s = "0" & s
+  # Trim trailing zeros
+  var last = s.len - 1
+  while last > 0 and s[last] == '0': dec(last)
+  "." & s[0..last]
+
+proc format_tz_offset(offset_minutes: int16): string =
+  if offset_minutes == 0: return "Z"
+  let sign = if offset_minutes < 0: "-" else: "+"
+  let abs_min = abs(offset_minutes.int)
+  let h = abs_min div 60
+  let m = abs_min mod 60
+  sign & pad2(h) & ":" & pad2(m)
+
+proc format_date(r: ptr Reference): string =
+  pad4(r.date_year.int) & "-" & pad2(r.date_month.int) & "-" & pad2(r.date_day.int)
+
+proc format_datetime(r: ptr Reference): string =
+  result = pad4(r.dt_year.int) & "-" & pad2(r.dt_month.int) & "-" & pad2(r.dt_day.int) &
+           "T" & pad2(r.dt_hour.int) & ":" & pad2(r.dt_minute.int)
+  if r.dt_second != 0 or r.dt_microsecond != 0 or r.dt_timezone != 0 or r.dt_tz_name.len > 0:
+    result &= ":" & pad2(r.dt_second.int)
+  result &= format_microseconds(r.dt_microsecond)
+  # Timezone: only show if tz_name is set (includes "UTC" for Z) or offset is non-zero
+  if r.dt_tz_name == "UTC" and r.dt_timezone == 0:
+    result &= "Z"
+  elif r.dt_timezone != 0:
+    result &= format_tz_offset(r.dt_timezone)
+    if r.dt_tz_name.len > 0 and r.dt_tz_name != "UTC":
+      result &= "[" & r.dt_tz_name & "]"
+  elif r.dt_tz_name.len > 0:
+    # Has zone name but zero offset (unusual but valid)
+    result &= "Z[" & r.dt_tz_name & "]"
+
+proc format_time(r: ptr Reference): string =
+  result = pad2(r.time_hour.int) & ":" & pad2(r.time_minute.int)
+  if r.time_second != 0 or r.time_microsecond != 0 or r.time_tz_offset != 0 or r.time_tz_name.len > 0:
+    result &= ":" & pad2(r.time_second.int)
+  result &= format_microseconds(r.time_microsecond)
+  if r.time_tz_name == "UTC" and r.time_tz_offset == 0:
+    result &= "Z"
+  elif r.time_tz_name.len > 0 and r.time_tz_name != "UTC":
+    if r.time_tz_offset != 0:
+      result &= format_tz_offset(r.time_tz_offset)
+    result &= "[" & r.time_tz_name & "]"
+  elif r.time_tz_offset != 0:
+    result &= format_tz_offset(r.time_tz_offset)
+
 proc str_no_quotes*(self: Value): string {.gcsafe.} =
   {.cast(gcsafe).}:
     case self.kind:
@@ -595,12 +681,11 @@ proc str_no_quotes*(self: Value): string {.gcsafe.} =
       of VkRegex:
         result = format_regex_literal(self)
       of VkDate:
-        result = $self.ref.date_year & "-" & $self.ref.date_month & "-" & $self.ref.date_day
+        result = format_date(self.ref)
       of VkDateTime:
-        result = $self.ref.dt_year & "-" & $self.ref.dt_month & "-" & $self.ref.dt_day &
-                 " " & $self.ref.dt_hour & ":" & $self.ref.dt_minute & ":" & $self.ref.dt_second
+        result = format_datetime(self.ref)
       of VkTime:
-        result = $self.ref.time_hour & ":" & $self.ref.time_minute & ":" & $self.ref.time_second
+        result = format_time(self.ref)
       of VkFuture:
         result = "<Future " & $self.ref.future.state & ">"
       of VkEnum:
@@ -695,12 +780,11 @@ proc `$`*(self: Value): string {.gcsafe.} =
       of VkRegex:
         result = format_regex_literal(self)
       of VkDate:
-        result = $self.ref.date_year & "-" & $self.ref.date_month & "-" & $self.ref.date_day
+        result = format_date(self.ref)
       of VkDateTime:
-        result = $self.ref.dt_year & "-" & $self.ref.dt_month & "-" & $self.ref.dt_day &
-                 " " & $self.ref.dt_hour & ":" & $self.ref.dt_minute & ":" & $self.ref.dt_second
+        result = format_datetime(self.ref)
       of VkTime:
-        result = $self.ref.time_hour & ":" & $self.ref.time_minute & ":" & $self.ref.time_second
+        result = format_time(self.ref)
       of VkFuture:
         result = "<Future " & $self.ref.future.state & ">"
       of VkEnum:

@@ -70,12 +70,16 @@ type
         dt_hour*: int8
         dt_minute*: int8
         dt_second*: int8
-        dt_timezone*: int16
+        dt_microsecond*: int32
+        dt_timezone*: int16    # offset in minutes, 0 for naive/UTC
+        dt_tz_name*: string    # IANA zone name, "" if not specified
       of VkTime:
         time_hour*: int8
         time_minute*: int8
         time_second*: int8
         time_microsecond*: int32
+        time_tz_offset*: int16  # offset in minutes, 0 if unresolved
+        time_tz_name*: string   # IANA zone name, "" if not specified
       of VkTimezone:
         tz_offset*: int16
         tz_name*: string

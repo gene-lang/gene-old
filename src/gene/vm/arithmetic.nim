@@ -198,6 +198,45 @@ template neg_float_fast*(a: float64): Value {.dirty.} =
 template not_int_fast*(a: int64): Value {.dirty.} =
   (not a).to_value()
 
+# Date/time comparison helpers (returns -1, 0, or 1)
+proc cmp_date*(a, b: Value): int =
+  let ar = a.ref
+  let br = b.ref
+  if ar.date_year != br.date_year: return cmp(ar.date_year, br.date_year)
+  if ar.date_month != br.date_month: return cmp(ar.date_month, br.date_month)
+  return cmp(ar.date_day, br.date_day)
+
+proc cmp_datetime*(a, b: Value): int =
+  let ar = a.ref
+  let br = b.ref
+  # Both naive or both have tz — if mixed, caller should error
+  # Normalize to UTC if both have offsets
+  var a_min = ar.dt_hour.int * 60 + ar.dt_minute.int
+  var b_min = br.dt_hour.int * 60 + br.dt_minute.int
+  let a_has_tz = ar.dt_tz_name.len > 0 or ar.dt_timezone != 0
+  let b_has_tz = br.dt_tz_name.len > 0 or br.dt_timezone != 0
+  if a_has_tz and b_has_tz:
+    a_min -= ar.dt_timezone.int
+    b_min -= br.dt_timezone.int
+  elif a_has_tz != b_has_tz:
+    raise new_exception(types.Exception, "Cannot compare naive and offset-aware datetimes")
+  # Compare date parts first
+  if ar.dt_year != br.dt_year: return cmp(ar.dt_year, br.dt_year)
+  if ar.dt_month != br.dt_month: return cmp(ar.dt_month, br.dt_month)
+  if ar.dt_day != br.dt_day: return cmp(ar.dt_day, br.dt_day)
+  # Compare normalized time
+  if a_min != b_min: return cmp(a_min, b_min)
+  if ar.dt_second != br.dt_second: return cmp(ar.dt_second, br.dt_second)
+  return cmp(ar.dt_microsecond, br.dt_microsecond)
+
+proc cmp_time*(a, b: Value): int =
+  let ar = a.ref
+  let br = b.ref
+  if ar.time_hour != br.time_hour: return cmp(ar.time_hour, br.time_hour)
+  if ar.time_minute != br.time_minute: return cmp(ar.time_minute, br.time_minute)
+  if ar.time_second != br.time_second: return cmp(ar.time_second, br.time_second)
+  return cmp(ar.time_microsecond, br.time_microsecond)
+
 # Helper to check if values are numeric and get their values
 template is_numeric*(v: Value): bool =
   v.kind in {VkInt, VkFloat}

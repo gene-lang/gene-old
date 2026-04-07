@@ -1531,23 +1531,190 @@ proc read_number(self: var Parser): Value =
     var c = self.buf[self.bufpos]
     case c:
     of '-':
-      var s = self.str & self.read_token(false, [':'])
-      if s.contains(':'):
-        # var date = parse(s, DATETIME_FORMAT, utc())
-        # result = new_gene_datetime(date)
-        todo("datetime")
+      # Date or DateTime literal: YYYY-MM-DD[THH:MM[:SS[.frac]][tz]]
+      let year = parseInt(self.str)
+      if year < 1000 or year > 9999:
+        raise new_exception(ParseError, "Date literal requires 4-digit year, got: " & self.str)
+      var pos = self.bufpos
+      # Read -MM-DD
+      if self.buf[pos] != '-': raise new_exception(ParseError, "Expected '-' in date literal")
+      inc(pos)
+      if self.buf[pos] notin Digits or self.buf[pos+1] notin Digits:
+        raise new_exception(ParseError, "Expected 2-digit month in date literal")
+      let month = (ord(self.buf[pos]) - ord('0')) * 10 + (ord(self.buf[pos+1]) - ord('0'))
+      pos += 2
+      if self.buf[pos] != '-': raise new_exception(ParseError, "Expected '-' in date literal")
+      inc(pos)
+      if self.buf[pos] notin Digits or self.buf[pos+1] notin Digits:
+        raise new_exception(ParseError, "Expected 2-digit day in date literal")
+      let day = (ord(self.buf[pos]) - ord('0')) * 10 + (ord(self.buf[pos+1]) - ord('0'))
+      pos += 2
+      # Validate date fields
+      if month < 1 or month > 12:
+        raise new_exception(ParseError, "Invalid month: " & $month)
+      if day < 1 or day > 31:
+        raise new_exception(ParseError, "Invalid day: " & $day)
+      self.bufpos = pos
+      if self.buf[pos] == 'T':
+        # DateTime literal
+        inc(self.bufpos)
+        var hour, minute, second: int
+        var microsecond: int = 0
+        var offset_minutes: int = 0
+        var tz_name: string = ""
+        var has_tz: bool = false
+        # Read HH:MM
+        pos = self.bufpos
+        if self.buf[pos] notin Digits or self.buf[pos+1] notin Digits:
+          raise new_exception(ParseError, "Expected 2-digit hour in datetime literal")
+        hour = (ord(self.buf[pos]) - ord('0')) * 10 + (ord(self.buf[pos+1]) - ord('0'))
+        pos += 2
+        if self.buf[pos] != ':': raise new_exception(ParseError, "Expected ':' after hour in datetime literal")
+        inc(pos)
+        if self.buf[pos] notin Digits or self.buf[pos+1] notin Digits:
+          raise new_exception(ParseError, "Expected 2-digit minute in datetime literal")
+        minute = (ord(self.buf[pos]) - ord('0')) * 10 + (ord(self.buf[pos+1]) - ord('0'))
+        pos += 2
+        # Optional :SS
+        if self.buf[pos] == ':':
+          inc(pos)
+          if self.buf[pos] notin Digits or self.buf[pos+1] notin Digits:
+            raise new_exception(ParseError, "Expected 2-digit second in datetime literal")
+          second = (ord(self.buf[pos]) - ord('0')) * 10 + (ord(self.buf[pos+1]) - ord('0'))
+          pos += 2
+        # Optional .fraction (1-6 digits)
+        if self.buf[pos] == '.':
+          inc(pos)
+          var frac_str = ""
+          while self.buf[pos] in Digits and frac_str.len < 6:
+            frac_str.add(self.buf[pos])
+            inc(pos)
+          if frac_str.len == 0:
+            raise new_exception(ParseError, "Expected digits after '.' in datetime literal")
+          while frac_str.len < 6: frac_str.add('0')
+          microsecond = parseInt(frac_str)
+        # Optional timezone: Z, +HH:MM, -HH:MM, then optional [Zone/Name]
+        if self.buf[pos] == 'Z':
+          inc(pos)
+          has_tz = true
+          offset_minutes = 0
+          tz_name = "UTC"  # Distinguish Z from naive (no tz)
+        elif self.buf[pos] in {'+', '-'}:
+          has_tz = true
+          let tz_sign = if self.buf[pos] == '-': -1 else: 1
+          inc(pos)
+          if self.buf[pos] notin Digits or self.buf[pos+1] notin Digits:
+            raise new_exception(ParseError, "Expected 2-digit hour in timezone offset")
+          let tz_h = (ord(self.buf[pos]) - ord('0')) * 10 + (ord(self.buf[pos+1]) - ord('0'))
+          pos += 2
+          if self.buf[pos] != ':': raise new_exception(ParseError, "Expected ':' in timezone offset")
+          inc(pos)
+          if self.buf[pos] notin Digits or self.buf[pos+1] notin Digits:
+            raise new_exception(ParseError, "Expected 2-digit minute in timezone offset")
+          let tz_m = (ord(self.buf[pos]) - ord('0')) * 10 + (ord(self.buf[pos+1]) - ord('0'))
+          pos += 2
+          if tz_h > 23 or tz_m > 59:
+            raise new_exception(ParseError, "Invalid timezone offset")
+          offset_minutes = tz_sign * (tz_h * 60 + tz_m)
+        elif self.buf[pos] == '[':
+          raise new_exception(ParseError, "DateTime literal requires offset or Z before [Zone/Name]")
+        # Optional [Zone/Name] after offset — overrides "UTC" from Z
+        if has_tz and self.buf[pos] == '[':
+          inc(pos)
+          tz_name = ""
+          while self.buf[pos] != ']' and self.buf[pos] != '\0':
+            tz_name.add(self.buf[pos])
+            inc(pos)
+          if self.buf[pos] != ']':
+            raise new_exception(ParseError, "Unterminated timezone name bracket")
+          inc(pos)
+          if not tz_name.contains('/'):
+            raise new_exception(ParseError, "IANA timezone name must contain '/': " & tz_name)
+        # Validate time fields
+        if hour > 23: raise new_exception(ParseError, "Invalid hour: " & $hour)
+        if minute > 59: raise new_exception(ParseError, "Invalid minute: " & $minute)
+        if second > 59: raise new_exception(ParseError, "Invalid second: " & $second)
+        self.bufpos = pos
+        result = new_datetime_value(year, month, day, hour, minute, second,
+                                    microsecond, offset_minutes, tz_name)
       else:
-        # var date = parse(s, DATE_FORMAT, utc())
-        # result = new_gene_date(date)
-        todo("date")
+        # Plain date
+        result = new_date_value(year, month, day)
     of ':':
-      # var s = self.str & self.read_token(false, [':'])
-      # var parts = s.split(":")
-      # var hour = parts[0].parse_int()
-      # var min = parts[1].parse_int()
-      # var sec = parts[2].parse_int()
-      # result = new_gene_time(hour, min, sec)
-      todo("time")
+      # Time literal: HH:MM[:SS[.frac]][tz]
+      let hour = parseInt(self.str)
+      var pos = self.bufpos
+      # Read :MM
+      if self.buf[pos] != ':': raise new_exception(ParseError, "Expected ':' in time literal")
+      inc(pos)
+      if self.buf[pos] notin Digits or self.buf[pos+1] notin Digits:
+        raise new_exception(ParseError, "Expected 2-digit minute in time literal")
+      let minute = (ord(self.buf[pos]) - ord('0')) * 10 + (ord(self.buf[pos+1]) - ord('0'))
+      pos += 2
+      var second: int = 0
+      var microsecond: int = 0
+      var offset_minutes: int = 0
+      var tz_name: string = ""
+      var has_tz: bool = false
+      # Optional :SS
+      if self.buf[pos] == ':':
+        inc(pos)
+        if self.buf[pos] notin Digits or self.buf[pos+1] notin Digits:
+          raise new_exception(ParseError, "Expected 2-digit second in time literal")
+        second = (ord(self.buf[pos]) - ord('0')) * 10 + (ord(self.buf[pos+1]) - ord('0'))
+        pos += 2
+      # Optional .fraction (1-6 digits)
+      if self.buf[pos] == '.':
+        inc(pos)
+        var frac_str = ""
+        while self.buf[pos] in Digits and frac_str.len < 6:
+          frac_str.add(self.buf[pos])
+          inc(pos)
+        if frac_str.len == 0:
+          raise new_exception(ParseError, "Expected digits after '.' in time literal")
+        while frac_str.len < 6: frac_str.add('0')
+        microsecond = parseInt(frac_str)
+      # Optional timezone: Z, +HH:MM, -HH:MM, or [Zone/Name]
+      if self.buf[pos] == 'Z':
+        inc(pos)
+        has_tz = true
+        offset_minutes = 0
+        tz_name = "UTC"  # Distinguish Z from no-tz
+      elif self.buf[pos] in {'+', '-'}:
+        has_tz = true
+        let tz_sign = if self.buf[pos] == '-': -1 else: 1
+        inc(pos)
+        if self.buf[pos] notin Digits or self.buf[pos+1] notin Digits:
+          raise new_exception(ParseError, "Expected 2-digit hour in timezone offset")
+        let tz_h = (ord(self.buf[pos]) - ord('0')) * 10 + (ord(self.buf[pos+1]) - ord('0'))
+        pos += 2
+        if self.buf[pos] != ':': raise new_exception(ParseError, "Expected ':' in timezone offset")
+        inc(pos)
+        if self.buf[pos] notin Digits or self.buf[pos+1] notin Digits:
+          raise new_exception(ParseError, "Expected 2-digit minute in timezone offset")
+        let tz_m = (ord(self.buf[pos]) - ord('0')) * 10 + (ord(self.buf[pos+1]) - ord('0'))
+        pos += 2
+        if tz_h > 23 or tz_m > 59:
+          raise new_exception(ParseError, "Invalid timezone offset")
+        offset_minutes = tz_sign * (tz_h * 60 + tz_m)
+      # [Zone/Name] — allowed on bare time without preceding offset
+      if self.buf[pos] == '[':
+        inc(pos)
+        tz_name = ""
+        while self.buf[pos] != ']' and self.buf[pos] != '\0':
+          tz_name.add(self.buf[pos])
+          inc(pos)
+        if self.buf[pos] != ']':
+          raise new_exception(ParseError, "Unterminated timezone name bracket")
+        inc(pos)
+        if not tz_name.contains('/'):
+          raise new_exception(ParseError, "IANA timezone name must contain '/': " & tz_name)
+      # Validate time fields
+      if hour > 23: raise new_exception(ParseError, "Invalid hour: " & $hour)
+      if minute > 59: raise new_exception(ParseError, "Invalid minute: " & $minute)
+      if second > 59: raise new_exception(ParseError, "Invalid second: " & $second)
+      self.bufpos = pos
+      result = new_time_value(hour, minute, second, microsecond, offset_minutes, tz_name)
     of '/':
       if not isDigit(self.buf[self.bufpos+1]):
         let e = err_info(self)
