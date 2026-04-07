@@ -4018,6 +4018,7 @@ proc init_gene_namespace*() =
   stdlib_collections.init_collection_classes(object_class)
 
   stdlib_dates.init_date_classes(object_class)
+  stdlib_dates.init_bytes_class(object_class)
   init_io_handle_class(object_class)
 
   stdlib_json.init_json_namespace()

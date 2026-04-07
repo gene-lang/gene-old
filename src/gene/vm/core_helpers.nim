@@ -336,6 +336,8 @@ template get_value_class(val: Value): Class =
     safe_class_value(App.app.datetime_class)
   of VkTime:
     safe_class_value(App.app.time_class)
+  of VkBytes:
+    safe_class_value(App.app.bytes_class)
   of VkSet:
     safe_class_value(App.app.hash_set_class)
   of VkSelector:

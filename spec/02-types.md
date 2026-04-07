@@ -86,14 +86,31 @@ Stdlib functions: `gene/today`, `gene/now`, `gene/yesterday`, `gene/tomorrow`.
 
 ### Bytes
 
-`Bytes` values exist in the runtime as `VkBytes`, but the standalone literal forms are not yet user-facing. The parser-reserved binary/hex/base64 prefixes (`0!`, `0*`, `0#`) are still incomplete, so current programs usually obtain bytes through string helpers.
+Byte sequences with three literal forms. Small values (1-6 bytes) are NaN-boxed
+immediates (no heap allocation); larger values use heap storage. `0x` prefix is
+reserved for hex integers.
 
 ```gene
-(println (typeof ("ABC" .bytes)))
-(println ("ABC" .each_byte))
-# => VkBytes
-# => [65 66 67]
+# Literal forms
+(println 0!11110000)              # => 0#f0      (binary)
+(println 0#a0ff)                  # => 0#a0ff    (hex bytes)
+(println 0*AQID)                  # => 0#010203  (base64)
+(println 0xff)                    # => 255       (hex integer, NOT bytes)
+
+# Accessors
+(println (0#abcd .size))          # => 2
+(println (0#abcd .get 0))         # => 171
+(println (0#abcd .to_array))      # => [171 205]
+
+# Equality
+(println (== 0#ff 0#ff))          # => true
+
+# String conversion
+(println (typeof ("ABC" .bytes))) # => VkBytes
 ```
+
+All byte values display as `0#` hex regardless of input format. `~` is a visual
+separator in all three forms (ignored along with following whitespace).
 
 ## 2.2 Type Annotations
 
@@ -189,7 +206,7 @@ Color/red     # Access member
 
 - **Generic classes**: Only generic functions are supported. Generic classes (`class Stack:T`) are not yet implemented.
 - **Duration/Period arithmetic**: Date/time literals and comparisons are implemented, but arithmetic (adding durations, computing date differences) is not yet supported.
-- **Bytes ergonomics**: `VkBytes` exists, but direct literals, indexing, and richer byte-oriented methods are not fully surfaced to Gene code yet.
+- **Bytes operations**: Byte literals and basic accessors (`.size`, `.get`, `.to_array`) are implemented. Bitwise operations, `.slice`, `.concat`, and bytes-to-string conversion are not yet available.
 - **Type bounds/constraints**: No way to express `T: Comparable` or similar constraints on generic type parameters.
 - **Inference completeness**: Type inference still falls back to `Any` in some complex binding positions, notably destructuring parameters and other non-trivial patterns.
 - **Union type narrowing**: Flow-sensitive narrowing works in `if` branches and ADT-aware `case/when` arms, but not in every control-flow form or arbitrary predicate.

@@ -411,6 +411,7 @@ type
     date_class*     : Value
     datetime_class* : Value
     time_class*     : Value
+    bytes_class*    : Value
     timezone_class* : Value
     selector_class* : Value
     exception_class*: Value

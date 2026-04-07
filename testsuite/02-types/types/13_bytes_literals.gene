@@ -1,0 +1,138 @@
+# Bytes literal tests
+
+# Hex bytes
+(var b1 0#ff)
+(assert (== (typeof b1) "VkBytes"))
+(assert (== (b1 .size) 1))
+(assert (== (b1 .get 0) 0#ff))
+(println "Hex 1-byte ok")
+# Expected: Hex 1-byte ok
+
+(var b2 0#a0ff)
+(assert (== (b2 .size) 2))
+(assert (== (b2 .get 0) 0#a0))
+(assert (== (b2 .get 1) 0#ff))
+(println "Hex 2-byte ok")
+# Expected: Hex 2-byte ok
+
+# 4-byte immediate
+(var b4 0#01020304)
+(assert (== (b4 .size) 4))
+(assert (== (b4 .get 0) 0#01))
+(assert (== (b4 .get 3) 0#04))
+(println "Hex 4-byte ok")
+# Expected: Hex 4-byte ok
+
+# 5-byte immediate
+(var b5 0#0102030405)
+(assert (== (b5 .size) 5))
+(assert (== (b5 .get 4) 0#05))
+(println "Hex 5-byte ok")
+# Expected: Hex 5-byte ok
+
+# 6-byte immediate (BYTES6_TAG)
+(var b6 0#010203040506)
+(assert (== (b6 .size) 6))
+(assert (== (b6 .get 0) 0#01))
+(assert (== (b6 .get 5) 0#06))
+(println "Hex 6-byte ok")
+# Expected: Hex 6-byte ok
+
+# 7+ byte heap
+(var b7 0#01020304050607)
+(assert (== (b7 .size) 7))
+(assert (== (b7 .get 6) 0#07))
+(println "Hex 7-byte heap ok")
+# Expected: Hex 7-byte heap ok
+
+# Odd hex digits (left-padded)
+(var bf 0#f)
+(assert (== (bf .size) 1))
+(assert (== (bf .get 0) 0#0f))
+(println "Hex odd-digit ok")
+# Expected: Hex odd-digit ok
+
+# Hex with ~ separator
+(var bs 0#a0~ff)
+(assert (== (bs .size) 2))
+(assert (== (bs .get 0) 0#a0))
+(println "Hex separator ok")
+# Expected: Hex separator ok
+
+# Binary literals
+(var bin1 0!11110000)
+(assert (== (bin1 .size) 1))
+(assert (== (bin1 .get 0) 0#f0))
+(assert (== (bin1 .to_s) "0#f0"))
+(println "Binary 1-byte ok")
+# Expected: Binary 1-byte ok
+
+# Binary partial byte (left-padded with zeros)
+(var bin2 0!111)
+(assert (== (bin2 .size) 1))
+(assert (== (bin2 .get 0) 0#07))
+(println "Binary partial ok")
+# Expected: Binary partial ok
+
+# Binary with separator
+(var bin3 0!1111~0000)
+(assert (== (bin3 .size) 1))
+(assert (== (bin3 .get 0) 0#f0))
+(println "Binary separator ok")
+# Expected: Binary separator ok
+
+# Binary multi-byte
+(var bin4 0!00000001~10000000)
+(assert (== (bin4 .size) 2))
+(assert (== (bin4 .get 0) 0#01))
+(assert (== (bin4 .get 1) 0#80))
+(println "Binary multi-byte ok")
+# Expected: Binary multi-byte ok
+
+# Base64 literals
+(var b64 0*AQID)
+(assert (== (b64 .size) 3))
+(assert (== (b64 .get 0) 0#01))
+(assert (== (b64 .get 1) 0#02))
+(assert (== (b64 .get 2) 0#03))
+(assert (== (b64 .to_s) "0#010203"))
+(println "Base64 ok")
+# Expected: Base64 ok
+
+# Hex integer (0x) - produces integer, NOT bytes
+(assert (== 0xff 255))
+(assert (== 0xA0 160))
+(assert (== 0xFF_FF 65535))
+(assert (== (typeof 0xff) "Int"))
+(println "Hex integer ok")
+# Expected: Hex integer ok
+
+# Equality
+(assert (== 0#ff 0#ff))
+(assert (!= 0#ab 0#cd))
+(assert (== 0#abcd 0#abcd))
+(println "Bytes equality ok")
+# Expected: Bytes equality ok
+
+# to_array
+(var arr (0#abcd .to_array))
+(assert (== (arr .size) 2))
+(var a0 arr/0)
+(var a1 arr/1)
+(assert (== a0 171))
+(assert (== a1 205))
+(println "Bytes to_array ok")
+# Expected: Bytes to_array ok
+
+# Display format - all show as 0# hex
+(assert (== (0#ff .to_s) "0#ff"))
+(assert (== (0!11110000 .to_s) "0#f0"))
+(println "Bytes display ok")
+# Expected: Bytes display ok
+
+# String to bytes
+(var str_bytes ("ABC" .bytes))
+(assert (== (str_bytes .size) 3))
+(assert (== (str_bytes .get 0) 0#41))
+(println "String bytes ok")
+# Expected: String bytes ok

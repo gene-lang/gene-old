@@ -206,6 +206,47 @@ proc init_date_classes*(object_class: Class) =
   time_class.def_native_method("offset", time_offset)
   time_class.def_native_method("timezone", time_timezone)
 
+proc init_bytes_class*(object_class: Class) =
+  var r: ptr Reference
+  let bytes_class = new_class("Bytes")
+  bytes_class.parent = object_class
+  bytes_class.def_native_method("to_s", object_to_s_method)
+  r = new_ref(VkClass)
+  r.class = bytes_class
+  App.app.bytes_class = r.to_ref_value()
+  App.app.gene_ns.ns["Bytes".to_key()] = App.app.bytes_class
+  App.app.global_ns.ns["Bytes".to_key()] = App.app.bytes_class
+
+  proc bytes_size(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
+    let self_val = get_positional_arg(args, 0, has_keyword_args)
+    if self_val.kind != VkBytes: not_allowed("Bytes.size must be called on bytes")
+    bytes_len(self_val).to_value()
+
+  proc bytes_get(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
+    let self_val = get_positional_arg(args, 0, has_keyword_args)
+    if self_val.kind != VkBytes: not_allowed("Bytes.get must be called on bytes")
+    let idx = get_positional_arg(args, 1, has_keyword_args)
+    if idx.kind != VkInt: not_allowed("Bytes.get index must be an integer")
+    let i = idx.to_int().int
+    let n = bytes_len(self_val)
+    if i < 0 or i >= n:
+      not_allowed("Bytes index out of bounds: " & $i & " (size: " & $n & ")")
+    let b = bytes_at(self_val, i)
+    Value(raw: BYTES_TAG or (1u64 shl BYTES_SIZE_SHIFT) or b.uint64)
+
+  proc bytes_to_array(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
+    let self_val = get_positional_arg(args, 0, has_keyword_args)
+    if self_val.kind != VkBytes: not_allowed("Bytes.to_array must be called on bytes")
+    let n = bytes_len(self_val)
+    var arr: seq[Value] = @[]
+    for i in 0 ..< n:
+      arr.add(Value(raw: SMALL_INT_TAG or bytes_at(self_val, i).uint64))
+    new_array_value(arr)
+
+  bytes_class.def_native_method("size", bytes_size)
+  bytes_class.def_native_method("get", bytes_get)
+  bytes_class.def_native_method("to_array", bytes_to_array)
+
 proc init_date_functions*() =
   proc host_now_datetime(): DateTime {.inline.} =
     when defined(gene_wasm):

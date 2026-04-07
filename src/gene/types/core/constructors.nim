@@ -272,9 +272,27 @@ proc new_range_value*(start: Value, `end`: Value, step: Value): Value =
   result = r.to_ref_value()
 
 proc new_bytes_value*(data: openArray[uint8]): Value =
-  let r = new_ref(VkBytes)
-  r.bytes_data = @data
-  result = r.to_ref_value()
+  let n = data.len
+  if n == 0:
+    let r = new_ref(VkBytes)
+    r.bytes_data = @[]
+    return r.to_ref_value()
+  elif n <= 5:
+    var payload = n.uint64 shl BYTES_SIZE_SHIFT
+    for i in 0 ..< n:
+      payload = payload or (data[i].uint64 shl ((n - 1 - i) * 8))
+    return Value(raw: BYTES_TAG or payload)
+  elif n == 6:
+    var payload: uint64 = 0
+    for i in 0 ..< 6:
+      payload = payload or (data[i].uint64 shl ((5 - i) * 8))
+    return Value(raw: BYTES6_TAG or payload)
+  else:
+    let r = new_ref(VkBytes)
+    r.bytes_data = @data
+    return r.to_ref_value()
+
+# bytes_len and bytes_at are defined in value_ops.nim (included before constructors)
 
 proc new_regex_value*(pattern: string, flags: uint8 = 0'u8, replacement: string = "", has_replacement: bool = false): Value =
   let r = new_ref(VkRegex)

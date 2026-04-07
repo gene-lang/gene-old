@@ -3939,6 +3939,8 @@ proc exec*(self: ptr VirtualMachine): Value =
           class_val = App.app.hash_set_class
         of VkTime:
           class_val = App.app.time_class
+        of VkBytes:
+          class_val = App.app.bytes_class
         of VkDate:
           class_val = App.app.date_class
         of VkDateTime:

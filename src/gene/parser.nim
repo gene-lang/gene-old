@@ -1360,26 +1360,12 @@ proc parse_bin(self: var Parser): Value =
       bytes.add(byte)
       byte = 0
     self.bufpos += 1
-  if size mod 8 != 0:
-    # Add last partial byte
-    bytes.add(byte)
-
   if size == 0:
-    not_allowed("parse_bin: input length is zero.")
-  elif size <= 8:
-    todo()
-    # return Value(
-    #   kind: VkByte,
-    #   byte: bytes[0],
-    #   byte_bit_size: size,
-    # )
-  else:
-    todo()
-    # return Value(
-    #   kind: VkBin,
-    #   bin: bytes,
-    #   bin_bit_size: size,
-    # )
+    raise new_exception(ParseError, "parse_bin: no binary digits after 0!")
+  if size mod 8 != 0:
+    # Left-pad partial byte with zeros (right-shift to align)
+    bytes.add(byte)
+  result = new_bytes_value(bytes)
 
 proc parse_hex(self: var Parser): Value =
   var bytes: seq[uint8] = @[]
@@ -1402,25 +1388,12 @@ proc parse_hex(self: var Parser): Value =
     self.bufpos += 1
     ch = self.buf[self.bufpos]
   if size mod 8 != 0:
-    # Add last partial byte
+    # Odd hex digit: left-padded with zero (already correct from shl)
     bytes.add(byte)
 
   if size == 0:
-    not_allowed("parse_bin: input length is zero.")
-  elif size <= 8:
-    todo()
-    # return Value(
-    #   kind: VkByte,
-    #   byte: bytes[0],
-    #   byte_bit_size: size,
-    # )
-  else:
-    todo()
-    # return Value(
-    #   kind: VkBin,
-    #   bin: bytes,
-    #   bin_bit_size: size,
-    # )
+    raise new_exception(ParseError, "parse_hex: no hex digits after 0#")
+  result = new_bytes_value(bytes)
 
 proc add(self: var seq[uint8], str: string) =
   for c in str:
@@ -1447,14 +1420,40 @@ proc parse_base64(self: var Parser): Value =
       s = ""
 
   if s.len > 0:
-    bytes.add(decode(s))
+    try:
+      bytes.add(decode(s))
+    except ValueError:
+      raise new_exception(ParseError, "parse_base64: invalid base64 input")
 
-  todo()
-  # return Value(
-  #   kind: VkBin,
-  #   bin: bytes,
-  #   bin_bit_size: uint(bytes.len * 8),
-  # )
+  if bytes.len == 0:
+    raise new_exception(ParseError, "parse_base64: no data after 0*")
+  result = new_bytes_value(bytes)
+
+proc parse_hex_int(self: var Parser): Value =
+  var pos = self.bufpos
+  var n: int64 = 0
+  var count = 0
+  while true:
+    let ch = self.buf[pos]
+    if ch in '0'..'9':
+      n = n shl 4 or (ord(ch) - ord('0')).int64
+      count += 1
+    elif ch in 'a'..'f':
+      n = n shl 4 or (ord(ch) - ord('a') + 10).int64
+      count += 1
+    elif ch in 'A'..'F':
+      n = n shl 4 or (ord(ch) - ord('A') + 10).int64
+      count += 1
+    elif ch == '_':
+      inc(pos)
+      continue
+    else:
+      break
+    inc(pos)
+  if count == 0:
+    raise new_exception(ParseError, "Expected hex digits after 0x")
+  self.bufpos = pos
+  n.to_value()
 
 proc parse_number(self: var Parser): TokenKind =
   result = TokenKind.TkEof
@@ -1514,12 +1513,15 @@ proc read_number(self: var Parser): Value =
     of '!':
       self.bufpos += 2
       return self.parse_bin()
-    of '*':
-      self.bufpos += 2
-      return self.parse_hex()
     of '#':
       self.bufpos += 2
+      return self.parse_hex()
+    of '*':
+      self.bufpos += 2
       return self.parse_base64()
+    of 'x', 'X':
+      self.bufpos += 2
+      return self.parse_hex_int()
     else:
       discard
 

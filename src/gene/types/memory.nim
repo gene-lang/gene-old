@@ -27,6 +27,13 @@ const SPECIAL_TAG*   = 0xFFF1_0000_0000_0000u64
 const SMALL_INT_TAG* = 0xFFF2_0000_0000_0000u64
 const SYMBOL_TAG*    = 0xFFF3_0000_0000_0000u64
 const POINTER_TAG*   = 0xFFF4_0000_0000_0000u64
+const BYTES_TAG*     = 0xFFF5_0000_0000_0000u64  # 1-5 bytes immediate
+const BYTES6_TAG*    = 0xFFF6_0000_0000_0000u64  # 6 bytes immediate
+
+# BYTES_TAG layout: [tag:16][size:3][unused:5][data:40]
+const BYTES_SIZE_SHIFT* = 45
+const BYTES_SIZE_MASK*  = 0x0000_E000_0000_0000u64  # bits 47-45
+const BYTES_DATA_MASK*  = 0x0000_00FF_FFFF_FFFFu64  # bits 39-0
 
 # Managed types (>= 0xFFF8)
 const ARRAY_TAG*     = 0xFFF8_0000_0000_0000u64

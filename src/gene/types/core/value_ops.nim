@@ -2,6 +2,10 @@
 ## new_ref), Value (==, kind, is_literal, $, str_no_quotes, [], size).
 ## Included from core.nim — shares its scope.
 
+## Forward declarations for bytes helpers (defined below, used by ==)
+proc bytes_len*(v: Value): int {.inline.}
+proc bytes_at*(v: Value, i: int): uint8 {.inline.}
+
 #################### Common ######################
 
 template `==`*(a, b: Key): bool =
@@ -299,6 +303,17 @@ proc `==`*(a, b: Value): bool {.gcsafe, noSideEffect.} =
       if a_is_int and b_is_int:
         return a.to_int() == b.to_int()
 
+      # Bytes: compare structurally across immediate and heap representations
+      let a_is_bytes = tag1 == BYTES_TAG or tag1 == BYTES6_TAG or (tag1 == REF_TAG and a.ref.kind == VkBytes)
+      let b_is_bytes = tag2 == BYTES_TAG or tag2 == BYTES6_TAG or (tag2 == REF_TAG and b.ref.kind == VkBytes)
+      if a_is_bytes and b_is_bytes:
+        let an = bytes_len(a)
+        let bn = bytes_len(b)
+        if an != bn: return false
+        for i in 0 ..< an:
+          if bytes_at(a, i) != bytes_at(b, i): return false
+        return true
+
       # Both strings - compare their content
       if tag1 == STRING_TAG and tag2 == STRING_TAG:
         let str1 = cast[ptr String](u1 and PAYLOAD_MASK)
@@ -468,6 +483,8 @@ proc kind*(v: Value): ValueKind {.inline.} =
       return VkString
     of GENE_TAG:
       return VkGene
+    of BYTES_TAG, BYTES6_TAG:
+      return VkBytes
     else:
       # Uncommon cases - delegate to separate function
       return kind_slow(v, u, tag)
@@ -494,7 +511,7 @@ proc is_literal*(self: Value): bool =
         return true
       of INSTANCE_TAG:
         result = false
-      of SMALL_INT_TAG, STRING_TAG:
+      of SMALL_INT_TAG, STRING_TAG, BYTES_TAG, BYTES6_TAG:
         result = true
       of SPECIAL_TAG:
         # nil, true, false, void, etc. are literals
@@ -604,6 +621,35 @@ proc format_time(r: ptr Reference): string =
   elif r.time_tz_offset != 0:
     result &= format_tz_offset(r.time_tz_offset)
 
+proc bytes_len*(v: Value): int {.inline.} =
+  let tag = v.raw and 0xFFFF_0000_0000_0000u64
+  if tag == BYTES6_TAG: return 6
+  if tag == BYTES_TAG:
+    return int((v.raw and BYTES_SIZE_MASK) shr BYTES_SIZE_SHIFT)
+  return v.ref.bytes_data.len
+
+proc bytes_at*(v: Value, i: int): uint8 {.inline.} =
+  let tag = v.raw and 0xFFFF_0000_0000_0000u64
+  let n = bytes_len(v)
+  if i < 0 or i >= n:
+    not_allowed("Bytes index out of bounds: " & $i & " (size: " & $n & ")")
+  if tag == BYTES6_TAG:
+    return uint8((v.raw shr ((5 - i) * 8)) and 0xFF)
+  elif tag == BYTES_TAG:
+    return uint8((v.raw shr ((n - 1 - i) * 8)) and 0xFF)
+  else:
+    return v.ref.bytes_data[i]
+
+proc format_bytes(v: Value): string =
+  let n = bytes_len(v)
+  if n == 0: return "0#"
+  result = "0#"
+  const hex = "0123456789abcdef"
+  for i in 0 ..< n:
+    let b = bytes_at(v, i)
+    result.add(hex[b.int shr 4])
+    result.add(hex[b.int and 0xF])
+
 proc str_no_quotes*(self: Value): string {.gcsafe.} =
   {.cast(gcsafe).}:
     case self.kind:
@@ -686,6 +732,8 @@ proc str_no_quotes*(self: Value): string {.gcsafe.} =
         result = format_datetime(self.ref)
       of VkTime:
         result = format_time(self.ref)
+      of VkBytes:
+        result = format_bytes(self)
       of VkFuture:
         result = "<Future " & $self.ref.future.state & ">"
       of VkEnum:
@@ -785,6 +833,8 @@ proc `$`*(self: Value): string {.gcsafe.} =
         result = format_datetime(self.ref)
       of VkTime:
         result = format_time(self.ref)
+      of VkBytes:
+        result = format_bytes(self)
       of VkFuture:
         result = "<Future " & $self.ref.future.state & ">"
       of VkEnum:
@@ -891,7 +941,8 @@ proc `[]`*(self: Value, i: int): Value =
             if i >= r.bytes_data.len:
               return NIL
             else:
-              return Value(raw: SMALL_INT_TAG or cast[uint64](r.bytes_data[i]))
+              let b = r.bytes_data[i]
+              return Value(raw: BYTES_TAG or (1u64 shl BYTES_SIZE_SHIFT) or b.uint64)
           of VkRange:
             # Calculate the i-th element in the range
             let start_int = r.range_start.int64
@@ -933,6 +984,13 @@ proc `[]`*(self: Value, i: int): Value =
             return rune
           j.inc()
         return NIL
+      of BYTES_TAG, BYTES6_TAG:
+        let n = bytes_len(self)
+        if i >= 0 and i < n:
+          let b = bytes_at(self, i)
+          return Value(raw: BYTES_TAG or (1u64 shl BYTES_SIZE_SHIFT) or b.uint64)
+        else:
+          return NIL
       else:
         todo($u)
   else:
@@ -995,6 +1053,8 @@ proc size*(self: Value): int =
         return self.str().to_runes().len
       of SYMBOL_TAG:
         return self.str().to_runes().len
+      of BYTES_TAG, BYTES6_TAG:
+        return bytes_len(self)
       else:
         return 0
   else:

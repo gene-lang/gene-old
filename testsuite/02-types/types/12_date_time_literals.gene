@@ -1,0 +1,157 @@
+# Date, DateTime, and Time literal tests
+
+# Date literals
+(var d 2024-01-23)
+(assert (== (typeof d) "VkDate"))
+(assert (== (d .year) 2024))
+(assert (== (d .month) 1))
+(assert (== (d .day) 23))
+(println "Date literal ok")
+# Expected: Date literal ok
+
+# Date to_s round-trip
+(assert (== (d .to_s) "2024-01-23"))
+(println "Date to_s ok")
+# Expected: Date to_s ok
+
+# DateTime naive
+(var dt 2024-01-23T20:10:10)
+(assert (== (dt .year) 2024))
+(assert (== (dt .hour) 20))
+(assert (== (dt .minute) 10))
+(assert (== (dt .second) 10))
+(assert (== (dt .to_s) "2024-01-23T20:10:10"))
+(println "DateTime naive ok")
+# Expected: DateTime naive ok
+
+# DateTime without seconds
+(var dt2 2024-01-23T20:10)
+(assert (== (dt2 .to_s) "2024-01-23T20:10"))
+(println "DateTime no-seconds ok")
+# Expected: DateTime no-seconds ok
+
+# DateTime with fractional seconds
+(var dt3 2024-01-23T20:10:10.123)
+(assert (== (dt3 .microsecond) 123000))
+(assert (== (dt3 .to_s) "2024-01-23T20:10:10.123"))
+(println "DateTime fractional ok")
+# Expected: DateTime fractional ok
+
+# DateTime with microseconds
+(var dt4 2024-01-23T20:10:10.123456)
+(assert (== (dt4 .microsecond) 123456))
+(println "DateTime microseconds ok")
+# Expected: DateTime microseconds ok
+
+# DateTime UTC
+(var dt5 2024-01-23T20:10:10Z)
+(assert (== (dt5 .timezone) "UTC"))
+(assert (== (dt5 .offset) 0))
+(assert (== (dt5 .to_s) "2024-01-23T20:10:10Z"))
+(println "DateTime UTC ok")
+# Expected: DateTime UTC ok
+
+# DateTime with positive offset
+(var dt6 2024-01-23T20:10:10+05:30)
+(assert (== (dt6 .offset) 330))
+(assert (== (dt6 .to_s) "2024-01-23T20:10:10+05:30"))
+(println "DateTime offset+ ok")
+# Expected: DateTime offset+ ok
+
+# DateTime with negative offset
+(var dt7 2024-01-23T20:10:10-08:00)
+(assert (== (dt7 .offset) -480))
+(assert (== (dt7 .to_s) "2024-01-23T20:10:10-08:00"))
+(println "DateTime offset- ok")
+# Expected: DateTime offset- ok
+
+# DateTime with IANA zone
+(var dt8 2024-01-23T20:10:10+05:30[Asia/Kolkata])
+(assert (== (dt8 .timezone) "Asia/Kolkata"))
+(assert (== (dt8 .offset) 330))
+(assert (== (dt8 .to_s) "2024-01-23T20:10:10+05:30[Asia/Kolkata]"))
+(println "DateTime IANA zone ok")
+# Expected: DateTime IANA zone ok
+
+# DateTime Z with IANA zone
+(var dt9 2024-01-23T20:10:10Z[America/New_York])
+(assert (== (dt9 .timezone) "America/New_York"))
+(assert (== (dt9 .to_s) "2024-01-23T20:10:10Z[America/New_York]"))
+(println "DateTime Z+zone ok")
+# Expected: DateTime Z+zone ok
+
+# Time literals
+(var t1 10:30)
+(assert (== (t1 .hour) 10))
+(assert (== (t1 .minute) 30))
+(assert (== (t1 .to_s) "10:30"))
+(println "Time HH:MM ok")
+# Expected: Time HH:MM ok
+
+# Time with seconds
+(var t2 10:30:45)
+(assert (== (t2 .second) 45))
+(assert (== (t2 .to_s) "10:30:45"))
+(println "Time HH:MM:SS ok")
+# Expected: Time HH:MM:SS ok
+
+# Time with fractional seconds
+(var t3 10:30:45.123)
+(assert (== (t3 .microsecond) 123000))
+(assert (== (t3 .to_s) "10:30:45.123"))
+(println "Time fractional ok")
+# Expected: Time fractional ok
+
+# Time UTC
+(var t4 10:30:45Z)
+(assert (== (t4 .to_s) "10:30:45Z"))
+(println "Time UTC ok")
+# Expected: Time UTC ok
+
+# Time with offset
+(var t5 10:30:45+05:00)
+(assert (== (t5 .to_s) "10:30:45+05:00"))
+(println "Time offset ok")
+# Expected: Time offset ok
+
+# Time with IANA zone (bare, no offset required)
+(var t6 10:00[America/New_York])
+(assert (== (t6 .timezone) "America/New_York"))
+(assert (== (t6 .to_s) "10:00:00[America/New_York]"))
+(println "Time IANA zone ok")
+# Expected: Time IANA zone ok
+
+# Date comparison
+(assert (< 2024-01-01 2024-12-31))
+(assert (> 2024-12-31 2024-01-01))
+(assert (== 2024-01-23 2024-01-23))
+(assert (<= 2024-01-01 2024-01-01))
+(assert (>= 2024-12-31 2024-01-01))
+(println "Date comparison ok")
+# Expected: Date comparison ok
+
+# Time comparison
+(assert (< 10:00 10:30))
+(assert (> 10:30 10:00))
+(assert (== 10:10:10 10:10:10))
+(println "Time comparison ok")
+# Expected: Time comparison ok
+
+# DateTime comparison
+(assert (< 2024-01-01T00:00:00 2024-01-01T12:00:00))
+(assert (== 2024-01-23T20:10:10 2024-01-23T20:10:10))
+(println "DateTime comparison ok")
+# Expected: DateTime comparison ok
+
+# Naive datetime has nil offset/timezone
+(var naive 2024-01-23T20:10:10)
+(assert (== (naive .offset) nil))
+(assert (== (naive .timezone) nil))
+(println "Naive nil tz ok")
+# Expected: Naive nil tz ok
+
+# gene/today and gene/now still work
+(assert (> ((gene/today) .year) 2000))
+(assert (> ((gene/now) .year) 2000))
+(println "Stdlib date fns ok")
+# Expected: Stdlib date fns ok
