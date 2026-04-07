@@ -237,6 +237,74 @@ proc cmp_time*(a, b: Value): int =
   if ar.time_second != br.time_second: return cmp(ar.time_second, br.time_second)
   return cmp(ar.time_microsecond, br.time_microsecond)
 
+# Bitwise operations on bytes
+proc bytes_and*(a, b: Value): Value =
+  let an = bytes_len(a)
+  let bn = bytes_len(b)
+  if an != bn:
+    raise new_exception(types.Exception, "Bitwise AND requires same-size bytes (got " & $an & " and " & $bn & ")")
+  var result_bytes: seq[uint8] = @[]
+  for i in 0 ..< an:
+    result_bytes.add(bytes_at(a, i) and bytes_at(b, i))
+  new_bytes_value(result_bytes)
+
+proc bytes_or*(a, b: Value): Value =
+  let an = bytes_len(a)
+  let bn = bytes_len(b)
+  if an != bn:
+    raise new_exception(types.Exception, "Bitwise OR requires same-size bytes (got " & $an & " and " & $bn & ")")
+  var result_bytes: seq[uint8] = @[]
+  for i in 0 ..< an:
+    result_bytes.add(bytes_at(a, i) or bytes_at(b, i))
+  new_bytes_value(result_bytes)
+
+proc bytes_xor*(a, b: Value): Value =
+  let an = bytes_len(a)
+  let bn = bytes_len(b)
+  if an != bn:
+    raise new_exception(types.Exception, "Bitwise XOR requires same-size bytes (got " & $an & " and " & $bn & ")")
+  var result_bytes: seq[uint8] = @[]
+  for i in 0 ..< an:
+    result_bytes.add(bytes_at(a, i) xor bytes_at(b, i))
+  new_bytes_value(result_bytes)
+
+proc bytes_not*(a: Value): Value =
+  let n = bytes_len(a)
+  var result_bytes: seq[uint8] = @[]
+  for i in 0 ..< n:
+    result_bytes.add(not bytes_at(a, i))
+  new_bytes_value(result_bytes)
+
+proc bytes_shl*(a: Value, amount: int): Value =
+  let n = bytes_len(a)
+  if amount < 0:
+    raise new_exception(types.Exception, "Shift amount must be non-negative")
+  var result_bytes = newSeq[uint8](n)
+  let byte_shift = amount div 8
+  let bit_shift = amount mod 8
+  for i in 0 ..< n:
+    let src = i + byte_shift
+    if src < n:
+      result_bytes[i] = bytes_at(a, src) shl bit_shift
+      if bit_shift > 0 and src + 1 < n:
+        result_bytes[i] = result_bytes[i] or (bytes_at(a, src + 1) shr (8 - bit_shift))
+  new_bytes_value(result_bytes)
+
+proc bytes_shr*(a: Value, amount: int): Value =
+  let n = bytes_len(a)
+  if amount < 0:
+    raise new_exception(types.Exception, "Shift amount must be non-negative")
+  var result_bytes = newSeq[uint8](n)
+  let byte_shift = amount div 8
+  let bit_shift = amount mod 8
+  for i in countdown(n - 1, 0):
+    let src = i - byte_shift
+    if src >= 0:
+      result_bytes[i] = bytes_at(a, src) shr bit_shift
+      if bit_shift > 0 and src - 1 >= 0:
+        result_bytes[i] = result_bytes[i] or (bytes_at(a, src - 1) shl (8 - bit_shift))
+  new_bytes_value(result_bytes)
+
 # Helper to check if values are numeric and get their values
 template is_numeric*(v: Value): bool =
   v.kind in {VkInt, VkFloat}

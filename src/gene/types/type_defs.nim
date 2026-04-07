@@ -790,6 +790,8 @@ type
     IkOr
     IkXor
     IkNot
+    IkShl
+    IkShr
     IkTypeOf
     IkIsType      # (x is Type) — check if value is an instance of type
 

@@ -2991,7 +2991,11 @@ proc exec*(self: ptr VirtualMachine): Value =
       of IkAnd:
         let second = self.frame.pop()
         let first = self.frame.pop()
-        if first.to_bool:
+        if first.kind == VkBytes and second.kind == VkBytes:
+          self.frame.push(bytes_and(first, second))
+        elif first.kind == VkInt and second.kind == VkInt:
+          self.frame.push(and_int_fast(first.int64, second.int64))
+        elif first.to_bool:
           self.frame.push(second)
         else:
           self.frame.push(first)
@@ -2999,7 +3003,11 @@ proc exec*(self: ptr VirtualMachine): Value =
       of IkOr:
         let second = self.frame.pop()
         let first = self.frame.pop()
-        if first.to_bool:
+        if first.kind == VkBytes and second.kind == VkBytes:
+          self.frame.push(bytes_or(first, second))
+        elif first.kind == VkInt and second.kind == VkInt:
+          self.frame.push(or_int_fast(first.int64, second.int64))
+        elif first.to_bool:
           self.frame.push(first)
         else:
           self.frame.push(second)
@@ -3007,17 +3015,45 @@ proc exec*(self: ptr VirtualMachine): Value =
       of IkXor:
         let second = self.frame.pop()
         let first = self.frame.pop()
-        if first.to_bool xor second.to_bool:
+        if first.kind == VkBytes and second.kind == VkBytes:
+          self.frame.push(bytes_xor(first, second))
+        elif first.kind == VkInt and second.kind == VkInt:
+          self.frame.push(xor_int_fast(first.int64, second.int64))
+        elif first.to_bool xor second.to_bool:
           self.frame.push(TRUE)
         else:
           self.frame.push(FALSE)
 
       of IkNot:
         let value = self.frame.pop()
-        if value.to_bool:
+        if value.kind == VkBytes:
+          self.frame.push(bytes_not(value))
+        elif value.kind == VkInt:
+          self.frame.push(not_int_fast(value.int64))
+        elif value.to_bool:
           self.frame.push(FALSE)
         else:
           self.frame.push(TRUE)
+
+      of IkShl:
+        let second = self.frame.pop()
+        let first = self.frame.pop()
+        if first.kind == VkBytes and second.kind == VkInt:
+          self.frame.push(bytes_shl(first, second.int64.int))
+        elif first.kind == VkInt and second.kind == VkInt:
+          self.frame.push(shl_int_fast(first.int64, second.int64))
+        else:
+          not_allowed("Cannot shift " & $first.kind & " by " & $second.kind)
+
+      of IkShr:
+        let second = self.frame.pop()
+        let first = self.frame.pop()
+        if first.kind == VkBytes and second.kind == VkInt:
+          self.frame.push(bytes_shr(first, second.int64.int))
+        elif first.kind == VkInt and second.kind == VkInt:
+          self.frame.push(shr_int_fast(first.int64, second.int64))
+        else:
+          not_allowed("Cannot shift " & $first.kind & " by " & $second.kind)
 
       of IkTypeOf:
         let value = self.frame.pop()

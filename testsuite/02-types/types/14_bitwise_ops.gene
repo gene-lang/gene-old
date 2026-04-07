@@ -1,0 +1,82 @@
+# Bitwise operations on bytes and integers
+
+# Bytes AND
+(assert ((0#ff && 0#0f) == 0#0f))
+(assert ((0#a0ff && 0#ff00) == 0#a000))
+(println "Bytes AND ok")
+# Expected: Bytes AND ok
+
+# Bytes OR
+(assert ((0#a0 || 0#0f) == 0#af))
+(assert ((0#1000 || 0#0001) == 0#1001))
+(println "Bytes OR ok")
+# Expected: Bytes OR ok
+
+# Bytes XOR
+(assert ((0#ff &|& 0#0f) == 0#f0))
+(assert ((0#abcd &|& 0#abcd) == 0#0000))
+(println "Bytes XOR ok")
+# Expected: Bytes XOR ok
+
+# Bytes NOT (unary, stays prefix)
+(assert ((! 0#0f) == 0#f0))
+(assert ((! 0#00) == 0#ff))
+(assert ((! 0#ff) == 0#00))
+(println "Bytes NOT ok")
+# Expected: Bytes NOT ok
+
+# Bytes shift left
+(assert ((0#01 << 4) == 0#10))
+(assert ((0#0001 << 8) == 0#0100))
+(assert ((0#ff << 0) == 0#ff))
+(println "Bytes SHL ok")
+# Expected: Bytes SHL ok
+
+# Bytes shift right
+(assert ((0#f0 >> 4) == 0#0f))
+(assert ((0#0100 >> 8) == 0#0001))
+(assert ((0#ff >> 0) == 0#ff))
+(println "Bytes SHR ok")
+# Expected: Bytes SHR ok
+
+# Integer bitwise AND
+(assert ((0xff && 0x0f) == 15))
+(assert ((255 && 15) == 15))
+(println "Int AND ok")
+# Expected: Int AND ok
+
+# Integer bitwise OR
+(assert ((0xa0 || 0x0f) == 0xaf))
+(println "Int OR ok")
+# Expected: Int OR ok
+
+# Integer bitwise XOR
+(assert ((0xff &|& 0x0f) == 0xf0))
+(println "Int XOR ok")
+# Expected: Int XOR ok
+
+# Integer bitwise NOT (unary)
+(assert ((! 0) == -1))
+(assert ((! -1) == 0))
+(println "Int NOT ok")
+# Expected: Int NOT ok
+
+# Integer shift
+(assert ((1 << 8) == 256))
+(assert ((256 >> 4) == 16))
+(println "Int shift ok")
+# Expected: Int shift ok
+
+# Multi-byte shift across byte boundaries
+(assert ((0#0001 << 1) == 0#0002))
+(assert ((0#8000 >> 1) == 0#4000))
+(println "Cross-byte shift ok")
+# Expected: Cross-byte shift ok
+
+# Logical behavior preserved for non-bytes/non-int
+(assert ((true && false) == false))
+(assert ((false || true) == true))
+(assert ((! false) == true))
+(assert ((! true) == false))
+(println "Logical preserved ok")
+# Expected: Logical preserved ok
