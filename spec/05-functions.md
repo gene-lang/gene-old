@@ -142,9 +142,5 @@ Functions can carry metadata:
 
 ## Potential Improvements
 
-- **Tail call optimization**: Implemented for self-recursive tail calls. The compiler emits `IkTailCall` for calls in tail position; the VM reuses the frame for same-function calls. See `docs/tco-support.md`. Cross-function TCO and `IkUnifiedCall*` paths are not yet optimized.
 - **Partial application / currying**: No built-in `partial` or auto-currying. Must manually create wrapper closures.
-- **Macro hygiene**: Macros using `$caller_eval` are not hygienic — they can capture or shadow caller variables unintentionally. A hygienic macro system would prevent accidental name collisions.
-- **Compile-time macro expansion**: Macros expand at runtime, not compile time. This means macro overhead on every call. Compile-time expansion would eliminate this cost.
-- **Variadic + keyword mixing**: The interaction between `rest...` args and keyword args in the same function signature can be confusing. Clear precedence rules should be documented.
 - **Function composition operators**: No `compose`, `pipe`, or threading macros (like Clojure's `->`, `->>`) built in.

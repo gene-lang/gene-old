@@ -1,0 +1,27 @@
+# Benchmark: Process 10K log lines — count INFO entries
+# Tests: file I/O, string parsing, conditional logic, loop performance
+
+(var start (time/now_us))
+
+# Read the log file
+(var content (File/read "benchmarks/fixtures/sample_100k.glog"))
+(var read_time (- (time/now_us) start))
+
+# Count lines containing " INFO "
+(var count 0)
+(var line_count 0)
+
+# Split by newline and check each line
+(for line in (content .split "\n")
+  (if ((line .size) > 0)
+    (line_count += 1)
+    (if ((line .find "INFO") != nil)
+      (count += 1))))
+
+(var total_time (- (time/now_us) start))
+
+(println "Log processing benchmark:")
+(println "  Total lines:" line_count)
+(println "  INFO lines:" count)
+(println "  File read:" read_time "us")
+(println "  Total time:" total_time "us")
