@@ -73,6 +73,17 @@ Infix within parentheses:
 # => false
 ```
 
+Chained comparisons are supported — `(a < b <= c)` is equivalent to `((a < b) && (b <= c))`:
+
+```gene
+(println (1 < 2 <= 3))
+(println (1 <= 2 <= 3 <= 4))
+(println (5 > 3 > 1))
+# => true
+# => true
+# => true
+```
+
 ## 3.5 Logical Operators
 
 ```gene
@@ -128,7 +139,6 @@ Fixed-arity conditional expression:
 ## Potential Improvements
 
 - **Operator overloading**: Operators like `+`, `==` are not overloadable for user types. Allowing method-based dispatch for operators would enable cleaner DSLs and custom numeric types.
-- **Chained comparisons**: `(1 < x < 10)` is not supported. Must write `((x > 1) && (x < 10))`.
 - **Bitwise operators**: No bitwise AND, OR, XOR, shift operators. Needed for low-level work, protocol implementations, and flag manipulation.
 - **Precedence transparency**: Operator precedence within S-expressions can be surprising since Lisp traditionally has no precedence (explicit nesting). The implicit precedence in `(2 + 3 * 4)` may confuse users coming from either Lisp or C backgrounds.
 - **String concatenation operator**: Strings use `.append` method or interpolation. A `++` or `~` operator for string concatenation would be convenient.

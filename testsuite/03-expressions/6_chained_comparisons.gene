@@ -1,0 +1,49 @@
+# Chained comparison operators
+
+# Basic chains
+(assert (1 < 2 <= 3))
+(assert (1 < 2 <= 2))
+(assert (not (1 < 2 <= 1)))
+(println "Basic chain ok")
+# Expected: Basic chain ok
+
+# Three-way chain
+(assert (1 <= 2 <= 3 <= 4))
+(assert (not (1 <= 2 <= 3 <= 2)))
+(println "Three-way chain ok")
+# Expected: Three-way chain ok
+
+# Greater-than chain
+(assert (5 > 3 > 1))
+(assert (not (5 > 3 > 4)))
+(println "Greater chain ok")
+# Expected: Greater chain ok
+
+# Mixed comparison operators
+(assert (1 < 2 <= 2 < 3))
+(assert (10 >= 5 > 3 >= 3))
+(println "Mixed chain ok")
+# Expected: Mixed chain ok
+
+# With variables
+(var a 1)
+(var b 5)
+(var c 10)
+(assert (a < b < c))
+(assert (not (c < b < a)))
+(println "Variable chain ok")
+# Expected: Variable chain ok
+
+# Single comparison still works
+(assert (3 < 5))
+(assert (not (5 < 3)))
+(assert (3 == 3))
+(assert (3 != 4))
+(println "Single comparison ok")
+# Expected: Single comparison ok
+
+# Non-comparison infix still works
+(assert ((1 + 2 * 3) == 7))
+(assert ((10 - 3 + 1) == 8))
+(println "Arithmetic infix ok")
+# Expected: Arithmetic infix ok

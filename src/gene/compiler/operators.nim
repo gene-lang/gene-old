@@ -773,11 +773,54 @@ proc is_infix_rewrite_eligible(expr_type: Value): bool {.inline.} =
     "try", "throw", "import", "export", "interface", "implement", "field", "$", "$vm", "$vmstmt", ".", "->", "@"
   ]
 
+proc is_comparison_op(op: string): bool {.inline.} =
+  op in ["<", "<=", ">", ">=", "==", "!="]
+
 proc rewrite_infix_expression(left_value: Value, tail: seq[Value]): Value =
   ## Convert infix chains to nested prefix genes using precedence + left associativity.
   ## Example: [1, +, 2, *, 3] => (+ 1 (* 2 3))
+  ## Chained comparisons: (a < b <= c) => (&& (< a b) (<= b c))
   if tail.len mod 2 != 0:
     not_allowed("Incomplete infix expression")
+
+  # Detect chained comparisons: all operators at the same precedence level are comparisons
+  # and there are 2+ comparison operators in sequence
+  if tail.len >= 4:  # at least 2 operators: [op1, val1, op2, val2]
+    var all_cmp = true
+    var cmp_count = 0
+    var i = 0
+    while i < tail.len:
+      let op = normalized_infix_operator(tail[i])
+      if is_comparison_op(op):
+        cmp_count += 1
+      else:
+        all_cmp = false
+      i += 2
+
+    if all_cmp and cmp_count >= 2:
+      # Rewrite chained comparisons: (a < b <= c) => (&& (< a b) (<= b c))
+      var comparisons: seq[Value] = @[]
+      var left = left_value
+      i = 0
+      while i < tail.len:
+        let op = normalized_infix_operator(tail[i])
+        let right = tail[i + 1]
+        let cmp_node = new_gene(op.to_symbol_value())
+        cmp_node.children = @[left, right]
+        comparisons.add(cmp_node.to_gene_value())
+        left = right
+        i += 2
+
+      if comparisons.len == 1:
+        return comparisons[0]
+
+      # Chain with &&
+      var result = comparisons[0]
+      for j in 1 ..< comparisons.len:
+        let and_node = new_gene("&&".to_symbol_value())
+        and_node.children = @[result, comparisons[j]]
+        result = and_node.to_gene_value()
+      return result
 
   var value_stack: seq[Value] = @[left_value]
   var op_stack: seq[string] = @[]
