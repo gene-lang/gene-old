@@ -1,0 +1,21 @@
+# Benchmark: FileReader.read_line loop + .contains
+# Streams lines one at a time, no callback overhead
+
+(var start (time/now_us))
+
+(var reader (File/reader "benchmarks/fixtures/sample_100k.glog"))
+(var count 0)
+(var total 0)
+(var line)
+(while (line = (reader .read_line))
+  (total += 1)
+  (if (line .contains "INFO") (count += 1)))
+(reader .close)
+
+(var total_time ((time/now_us) - start))
+
+(println "FileReader loop:")
+(println "  Total lines:" total)
+(println "  INFO lines:" count)
+(println "  Total time:" total_time "us")
+(println "  Per line:" (total_time / total) "us")

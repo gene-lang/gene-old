@@ -1843,6 +1843,18 @@ proc read_stream*(self: var Parser, buffer: string, stream_handler: StreamHandle
     except ParseEofError:
       break
 
+proc read_stream*(self: var Parser, s: Stream, filename: string, stream_handler: StreamHandler) =
+  self.open(s, filename)
+  defer: self.close()
+  var node = self.read()
+  while true:
+    if not node.is_nil:
+      stream_handler(node)
+    try:
+      node = self.read()
+    except ParseEofError:
+      break
+
 proc read*(s: Stream, filename: string): Value =
   var parser = new_parser()
   return parser.read(s, filename)

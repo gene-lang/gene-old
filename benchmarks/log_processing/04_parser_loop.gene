@@ -1,0 +1,21 @@
+# Benchmark: Parser.read loop — no callback, no split
+# Opens a streaming parser, reads one expression at a time in a while loop
+
+(var start (time/now_us))
+
+(var p (gene/parser "benchmarks/fixtures/sample_100k.glog"))
+(var count 0)
+(var total 0)
+(var entry)
+(while (entry = (p .read))
+  (total += 1)
+  (if (entry/1 == `INFO) (count += 1)))
+(p .close)
+
+(var total_time ((time/now_us) - start))
+
+(println "Parser loop:")
+(println "  Total lines:" total)
+(println "  INFO lines:" count)
+(println "  Total time:" total_time "us")
+(println "  Per line:" (total_time / total) "us")

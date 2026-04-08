@@ -630,6 +630,15 @@ proc init_string_class*(object_class: Class) =
 
   string_class.def_native_method("find", string_find)
 
+  proc string_contains(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    let self_arg = get_positional_arg(args, 0, has_keyword_args)
+    let pattern_val = get_positional_arg(args, 1, has_keyword_args)
+    if self_arg.kind != VkString or pattern_val.kind != VkString:
+      not_allowed("String.contains requires a string argument")
+    if self_arg.str.find(pattern_val.str) >= 0: TRUE else: FALSE
+
+  string_class.def_native_method("contains", string_contains)
+
   proc string_find_all(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
     if get_positional_count(arg_count, has_keyword_args) < 2:
       not_allowed("String.find_all requires a pattern")

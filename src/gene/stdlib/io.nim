@@ -1,4 +1,4 @@
-import tables, os
+import tables, os, strutils
 import ../types
 import ../wasm_host_abi
 
@@ -41,6 +41,90 @@ proc io_file_read_instance*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Val
   if read_result.ok:
     return read_result.content.to_value()
   raise new_exception(types.Exception, "Failed to read file '" & path & "': " & read_result.error)
+
+# File static method: each_line (for File/each_line "path" callback)
+proc io_file_each_line*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
+  if get_positional_count(arg_count, has_keyword_args) < 2:
+    raise new_exception(types.Exception, "File/each_line requires path and callback")
+  let path_arg = get_positional_arg(args, 0, has_keyword_args)
+  let callback = get_positional_arg(args, 1, has_keyword_args)
+  if path_arg.kind != VkString:
+    raise new_exception(types.Exception, "File/each_line requires a string path")
+  let f = open(path_arg.str)
+  defer: f.close()
+  var line: string
+  while f.readLine(line):
+    {.cast(gcsafe).}:
+      discard vm_exec_callable(vm, callback, @[line.to_value()])
+  return NIL
+
+# FileReader: streaming line reader with .read_line method (no callback overhead)
+type
+  FileReaderState = ref object
+    file: File
+    eof: bool
+
+var file_reader_class: Class
+
+proc init_file_reader_class_impl(object_class: Class) =
+  file_reader_class = new_class("FileReader")
+  file_reader_class.parent = object_class
+
+  proc reader_read_line(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    let self_val = get_positional_arg(args, 0, has_keyword_args)
+    let state_val = instance_props(self_val)["__state__".to_key()]
+    let state = cast[FileReaderState](cast[pointer](state_val.raw and PAYLOAD_MASK))
+    if state.eof:
+      return NIL
+    var line: string
+    if state.file.readLine(line):
+      return line.to_value()
+    else:
+      state.eof = true
+      return NIL
+
+  proc reader_close(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    let self_val = get_positional_arg(args, 0, has_keyword_args)
+    let state_val = instance_props(self_val)["__state__".to_key()]
+    let state = cast[FileReaderState](cast[pointer](state_val.raw and PAYLOAD_MASK))
+    if not state.eof:
+      state.file.close()
+      state.eof = true
+    return NIL
+
+  file_reader_class.def_native_method("read_line", reader_read_line)
+  file_reader_class.def_native_method("close", reader_close)
+
+  let fr_ref = new_ref(VkClass)
+  fr_ref.class = file_reader_class
+  App.app.global_ns.ns["FileReader".to_key()] = fr_ref.to_ref_value()
+
+proc open_file_reader*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  let path_arg = get_positional_arg(args, 0, has_keyword_args)
+  if path_arg.kind != VkString:
+    not_allowed("File/reader requires a string path")
+  let state = FileReaderState(file: open(path_arg.str), eof: false)
+  GC_ref(state)
+  {.cast(gcsafe).}:
+    let cls = App.app.global_ns.ns["FileReader".to_key()].ref.class
+    var props = initTable[Key, Value]()
+    props["__state__".to_key()] = cast[pointer](state).to_value()
+    return new_instance_value(cls, props)
+
+# File static method: read_lines (returns array of lines without callback)
+proc io_file_read_lines*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
+  if get_positional_count(arg_count, has_keyword_args) < 1:
+    raise new_exception(types.Exception, "File/read_lines requires a path")
+  let path_arg = get_positional_arg(args, 0, has_keyword_args)
+  if path_arg.kind != VkString:
+    raise new_exception(types.Exception, "File/read_lines requires a string path")
+  var lines: seq[Value] = @[]
+  let f = open(path_arg.str)
+  defer: f.close()
+  var line: string
+  while f.readLine(line):
+    lines.add(line.to_value())
+  return new_array_value(lines)
 
 # File static method: read (for File/read "path" syntax)
 proc io_file_read*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
@@ -298,6 +382,11 @@ proc init_io_namespace*(global_ns: Namespace) =
 
   # Add static methods to class members
   file_class.def_static_method("read", io_file_read)
+  file_class.def_static_method("each_line", io_file_each_line)
+  file_class.def_static_method("read_lines", io_file_read_lines)
+  file_class.def_static_method("reader", open_file_reader)
+
+  init_file_reader_class_impl(App.app.object_class.ref.class)
   file_class.def_static_method("write", io_file_write)
   file_class.def_static_method("append", io_file_append)
   file_class.def_static_method("exists", io_file_exists)

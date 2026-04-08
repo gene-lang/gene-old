@@ -1,0 +1,20 @@
+# Benchmark: File/each_line + .contains — stream line-by-line, no split
+# Closest to the Python string search approach
+
+(var start (time/now_us))
+
+(var count 0)
+(var total 0)
+
+(File/each_line "benchmarks/fixtures/sample_100k.glog" (fn [line: String]
+  (total += 1)
+  (if (line .contains "INFO")
+    (count += 1))))
+
+(var total_time ((time/now_us) - start))
+
+(println "File/each_line + contains:")
+(println "  Total lines:" total)
+(println "  INFO lines:" count)
+(println "  Total time:" total_time "us")
+(println "  Per line:" (total_time / total) "us")

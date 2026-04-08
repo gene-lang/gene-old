@@ -1,5 +1,5 @@
 {.push warning[ResultShadowed]: off.}
-import base64, re, os, strutils, times, asyncdispatch, tables
+import base64, re, os, strutils, streams, times, asyncdispatch, tables
 import std/json as nim_json
 import ../types
 from ../types/runtime_types import coerce_value_to_type, emit_type_warning, runtime_type_name,
@@ -3461,6 +3461,7 @@ proc vm_parse(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count
 proc vm_parse_file(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
   ## (gene/parse_file path callback) — stream-parse a file, call callback for each expression
   ## (gene/parse_file path) — parse all expressions, return as array
+  ## (gene/parse_file path ^count_if [index value]) — native count: count entries where child[index] == value
   let pos_count = get_positional_count(arg_count, has_keyword_args)
   if pos_count < 1:
     not_allowed("gene/parse_file requires at least 1 argument (path)")
@@ -3468,23 +3469,122 @@ proc vm_parse_file(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_
   if path_arg.kind != VkString:
     not_allowed("gene/parse_file path must be a string")
 
-  let read_result = host_read_text_file(path_arg.str)
-  if not read_result.ok:
-    not_allowed("Failed to read file '" & path_arg.str & "': " & read_result.error)
+  # Check for ^count_if optimization: (gene/parse_file path ^count_if [index value])
+  if has_keyword_args:
+    let filter = get_keyword_arg(args, "count_if")
+    if filter != NIL and filter.kind == VkArray and array_data(filter).len == 2:
+      let field_index = array_data(filter)[0].to_int().int
+      let match_value = array_data(filter)[1]
+
+      let file_stream = newFileStream(path_arg.str, fmRead)
+      if file_stream.isNil:
+        not_allowed("Failed to open file '" & path_arg.str & "'")
+
+      var count: int64 = 0
+      var parser = new_parser()
+      {.cast(gcsafe).}:
+        parser.read_stream(file_stream, path_arg.str, proc(node: Value) =
+          if node.kind == VkGene and node.gene != nil and
+             field_index < node.gene.children.len and
+             node.gene.children[field_index] == match_value:
+            count += 1
+        )
+      return count.to_value()
+
+  # Use direct file stream to avoid intermediate string copy
+  let file_stream = newFileStream(path_arg.str, fmRead)
+  if file_stream.isNil:
+    not_allowed("Failed to open file '" & path_arg.str & "'")
 
   if pos_count >= 2:
     # Streaming mode: call callback for each expression
     let callback = get_positional_arg(args, 1, has_keyword_args)
     var parser = new_parser()
     {.cast(gcsafe).}:
-      parser.read_stream(read_result.content, proc(node: Value) =
+      parser.read_stream(file_stream, path_arg.str, proc(node: Value) =
         discard vm_exec_callable(vm, callback, @[node])
       )
     return NIL
   else:
     # Batch mode: return all expressions as array
-    let parsed = read_all(read_result.content)
-    return new_array_value(parsed)
+    var results: seq[Value] = @[]
+    var parser = new_parser()
+    {.cast(gcsafe).}:
+      parser.read_stream(file_stream, path_arg.str, proc(node: Value) =
+        results.add(node)
+      )
+    return new_array_value(results)
+
+# Parser state stored as a ref object behind a pointer
+type
+  GeneParserState = ref object
+    parser: Parser
+    eof: bool
+
+proc init_parser_class*(object_class: Class) =
+  let parser_class = new_class("Parser")
+  parser_class.parent = object_class
+
+  proc parser_read(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    let self_val = get_positional_arg(args, 0, has_keyword_args)
+    if self_val.kind != VkInstance:
+      not_allowed("Parser.read must be called on a Parser instance")
+    let state_val = instance_props(self_val)["__state__".to_key()]
+    if state_val.kind != VkPointer:
+      not_allowed("Parser instance has no state")
+    let state = cast[GeneParserState](cast[pointer](state_val.raw and PAYLOAD_MASK))
+    if state.eof:
+      return NIL
+    try:
+      let node = state.parser.read()
+      if node == PARSER_IGNORE:
+        return NIL
+      return node
+    except ParseEofError:
+      state.eof = true
+      return NIL
+
+  proc parser_close(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+    let self_val = get_positional_arg(args, 0, has_keyword_args)
+    if self_val.kind != VkInstance:
+      not_allowed("Parser.close must be called on a Parser instance")
+    let state_val = instance_props(self_val)["__state__".to_key()]
+    if state_val.kind == VkPointer:
+      let state = cast[GeneParserState](cast[pointer](state_val.raw and PAYLOAD_MASK))
+      state.parser.close()
+      state.eof = true
+    return NIL
+
+  parser_class.def_native_method("read", parser_read)
+  parser_class.def_native_method("close", parser_close)
+
+  var r = new_ref(VkClass)
+  r.class = parser_class
+  App.app.gene_ns.ns["Parser".to_key()] = r.to_ref_value()
+  App.app.global_ns.ns["Parser".to_key()] = r.to_ref_value()
+
+proc vm_open_parser(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  ## (gene/parser "path") — open a file parser, returns Parser instance with .read method
+  let pos_count = get_positional_count(arg_count, has_keyword_args)
+  if pos_count < 1:
+    not_allowed("gene/parser requires a path argument")
+  let path_arg = get_positional_arg(args, 0, has_keyword_args)
+  if path_arg.kind != VkString:
+    not_allowed("gene/parser path must be a string")
+
+  let file_stream = newFileStream(path_arg.str, fmRead)
+  if file_stream.isNil:
+    not_allowed("Failed to open file '" & path_arg.str & "'")
+
+  let state = GeneParserState(parser: new_parser(), eof: false)
+  state.parser.open(file_stream, path_arg.str)
+  GC_ref(state)
+
+  let parser_class_val = App.app.gene_ns.ns["Parser".to_key()]
+  let pcls = parser_class_val.ref.class
+  var props = initTable[Key, Value]()
+  props["__state__".to_key()] = cast[pointer](state).to_value()
+  return new_instance_value(pcls, props)
 
 proc vm_with(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
   # $with sets self to the first argument and executes the body, returns the original value
@@ -3859,6 +3959,7 @@ proc init_gene_core_functions() =
   # not and ... are now handled by compile-time instructions, no need to register
   App.app.gene_ns.ns["parse".to_key()] = vm_parse.to_value()  # $parse resolves via global parse
   App.app.gene_ns.ns["parse_file".to_key()] = NativeFn(vm_parse_file).to_value()
+  App.app.gene_ns.ns["parser".to_key()] = NativeFn(vm_open_parser).to_value()
   App.app.gene_ns.ns["with".to_key()] = vm_with.to_value()    # $with resolves via global with
   App.app.gene_ns.ns["tap".to_key()] = vm_tap.to_value()      # $tap resolves via global tap
   App.app.gene_ns.ns["eval".to_key()] = vm_eval.to_value()    # eval function
@@ -4004,6 +4105,7 @@ proc init_gene_namespace*() =
 
   stdlib_dates.init_date_classes(object_class)
   stdlib_dates.init_bytes_class(object_class)
+  init_parser_class(object_class)
   init_io_handle_class(object_class)
 
   stdlib_json.init_json_namespace()

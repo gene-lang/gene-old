@@ -1,0 +1,28 @@
+# Benchmark: Read all + split + parse each line
+# Loads file, splits by newline, parses each line as Gene expression
+
+(var start (time/now_us))
+
+(var content (File/read "benchmarks/fixtures/sample_100k.glog"))
+(var read_time ((time/now_us) - start))
+
+(var count 0)
+(var line_count 0)
+
+(for line in (content .split "\n")
+  (if ((line .size) > 0)
+    (line_count += 1)
+    (var entry (gene/parse line))
+    (if (entry/1 == `INFO)
+      (count += 1))))
+
+(var total_time ((time/now_us) - start))
+(var parse_time (total_time - read_time))
+
+(println "Read all + split + parse:")
+(println "  Total lines:" line_count)
+(println "  INFO lines:" count)
+(println "  File read:" read_time "us")
+(println "  Parse+process:" parse_time "us")
+(println "  Total time:" total_time "us")
+(println "  Per line:" (total_time / line_count) "us")

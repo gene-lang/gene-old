@@ -1,6 +1,5 @@
-# Benchmark: Stream-parse 100K log lines, count INFO by child[1]
-# Tests: streaming parser, callback dispatch, structural access
-# No full file in memory — parser reads expression by expression
+# Benchmark: Stream parse with callback
+# Parser reads expressions one by one, calls Gene function per expression
 
 (var start (time/now_us))
 
@@ -12,9 +11,9 @@
   (if (entry/1 == `INFO)
     (count += 1))))
 
-(var total_time (- (time/now_us) start))
+(var total_time ((time/now_us) - start))
 
-(println "Log stream-parse benchmark:")
+(println "Stream parse + callback:")
 (println "  Total lines:" line_count)
 (println "  INFO lines:" count)
 (println "  Total time:" total_time "us")
