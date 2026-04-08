@@ -235,9 +235,14 @@ proc compile_method_definition(self: Compiler, gene: ptr Gene) =
     not_allowed("Method definition requires at least name and args")
   
   let name = gene.children[0]
-  if name.kind != VkSymbol:
-    not_allowed("Method name must be a symbol")
-  let parsed_name = split_generic_definition_name(name.str)
+  var name_str: string
+  if name.kind == VkSymbol:
+    name_str = name.str
+  elif name.kind == VkString:
+    name_str = name.str
+  else:
+    not_allowed("Method name must be a symbol or string")
+  let parsed_name = split_generic_definition_name(name_str)
   if parsed_name.base_name.ends_with("!"):
     not_allowed("Macro-like class methods are not supported; use (method name [args] ...) and a standalone fn! if you need quoted arguments")
   let method_name = parsed_name.base_name.to_symbol_value()

@@ -1139,12 +1139,13 @@ proc compile_gene(self: Compiler, input: Value) =
         self.emit(Instruction(kind: IkEq))
         return
       of "!=":
-        # Binary inequality
+        # Binary inequality — compiled as (not (== a b)) to support custom == methods
         if gene.children.len != 2:
           not_allowed("!= requires exactly 2 arguments")
         self.compile(gene.children[0])
         self.compile(gene.children[1])
-        self.emit(Instruction(kind: IkNe))
+        self.emit(Instruction(kind: IkEq))
+        self.emit(Instruction(kind: IkNot))
         return
       of "is":
         # Type check: (x is Int)

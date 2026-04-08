@@ -1,0 +1,55 @@
+# Custom equality via "==" method
+
+(class Point
+  (ctor [x y]
+    (/x = x)
+    (/y = y))
+  (method "==" [other]
+    ((self/x == other/x) && (self/y == other/y))))
+
+# Structural equality via custom method
+(var a (new Point 1 2))
+(var b (new Point 1 2))
+(var c (new Point 3 4))
+
+(assert (a == b))
+(assert (not (a == c)))
+(println "Custom == ok")
+# Expected: Custom == ok
+
+# != uses negation of ==
+(assert (a != c))
+(assert (not (a != b)))
+(println "Custom != ok")
+# Expected: Custom != ok
+
+# Without custom ==, instances compare by identity
+(class Foo
+  (ctor [x] (/x = x)))
+
+(var f1 (new Foo 1))
+(var f2 (new Foo 1))
+(assert (not (f1 == f2)))
+(assert (f1 == f1))
+(println "Identity == ok")
+# Expected: Identity == ok
+
+# Custom == with different types
+(class Money
+  (ctor [amount currency]
+    (/amount = amount)
+    (/currency = currency))
+  (method "==" [other]
+    (if (other is Money)
+      ((self/amount == other/amount) && (self/currency == other/currency))
+    else
+      false)))
+
+(var m1 (new Money 100 "USD"))
+(var m2 (new Money 100 "USD"))
+(var m3 (new Money 100 "EUR"))
+(assert (m1 == m2))
+(assert (not (m1 == m3)))
+(assert (not (m1 == 100)))
+(println "Type-safe == ok")
+# Expected: Type-safe == ok

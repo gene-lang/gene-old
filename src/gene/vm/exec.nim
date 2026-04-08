@@ -2855,7 +2855,18 @@ proc exec*(self: ptr VirtualMachine): Value =
           of IkVarGeValue:
             compare(gte_int_fast, gte_float_fast, ">=")
           of IkVarEqValue:
-            compare(eq_int_fast, eq_float_fast, "==")
+            # Special handling for == to support custom == methods on instances
+            if var_value.kind == VkInstance:
+              let cls = var_value.instance_class
+              let meth = cls.get_method("==")
+              if meth != nil:
+                if self.invoke_method_value(var_value, meth, [literal_value]):
+                  inst = self.cu.instructions[self.pc].addr
+                  continue
+              else:
+                self.frame.push((var_value == literal_value).to_value())
+            else:
+              compare(eq_int_fast, eq_float_fast, "==")
           else:
             discard
         inst = data_inst
@@ -3001,13 +3012,23 @@ proc exec*(self: ptr VirtualMachine): Value =
           self.frame.push(eq_int_fast(first.int64, second.int64))
         elif first.kind == VkFloat and second.kind == VkFloat:
           self.frame.push(eq_float_fast(first.float, second.float))
+        elif first.kind == VkInstance:
+          # Check for custom == method on instance
+          let cls = first.instance_class
+          let meth = cls.get_method("==")
+          if meth != nil:
+            if self.invoke_method_value(first, meth, [second]):
+              # Frame switched — result will be pushed when method returns
+              inst = self.cu.instructions[self.pc].addr
+              continue
+          else:
+            self.frame.push((first == second).to_value())
         else:
           self.frame.push((first == second).to_value())
 
       of IkNe:
         let second = self.frame.pop()
         let first = self.frame.pop()
-        # Use fast path for numeric types
         if first.kind == VkInt and second.kind == VkInt:
           self.frame.push(neq_int_fast(first.int64, second.int64))
         elif first.kind == VkFloat and second.kind == VkFloat:
