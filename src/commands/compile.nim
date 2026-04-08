@@ -20,6 +20,7 @@ type
     emit_debug: bool # Include debug info in GIR
     eager_functions: bool
     type_check: bool
+    pending_eval: bool
 
 proc handle*(cmd: string, args: seq[string]): CommandResult
 
@@ -296,7 +297,11 @@ proc parseArgs(args: seq[string]): CompileOptions =
   for kind, key, value in get_opt(args, short_no_val, long_no_val):
     case kind
     of cmdArgument:
-      result.files.add(key)
+      if result.pending_eval:
+        result.code = key
+        result.pending_eval = false
+      else:
+        result.files.add(key)
     of cmdLongOption, cmdShortOption:
       case key
       of "h", "help":
@@ -304,7 +309,10 @@ proc parseArgs(args: seq[string]): CompileOptions =
       of "a", "addresses":
         result.show_addresses = true
       of "e", "eval":
-        result.code = value
+        if value.len > 0:
+          result.code = value
+        else:
+          result.pending_eval = true
       of "f", "format":
         if value == "":
           stderr.writeLine("Error: Format option requires a value")
