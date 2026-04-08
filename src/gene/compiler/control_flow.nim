@@ -644,6 +644,18 @@ proc compile_assignment(self: Compiler, gene: ptr Gene) =
     if operator != "=":
       let key = `type`.str.to_key()
       let found = self.scope_tracker.locate(key)
+      let rhs = gene.children[1]
+
+      # Fast path: (x += 1) → IkIncVar, (x -= 1) → IkDecVar
+      if found.local_index >= 0 and found.parent_index == 0 and
+         rhs.kind == VkInt and rhs.int64 == 1:
+        if operator == "+=":
+          self.emit(Instruction(kind: IkIncVar, arg0: found.local_index.to_value()))
+          return
+        elif operator == "-=":
+          self.emit(Instruction(kind: IkDecVar, arg0: found.local_index.to_value()))
+          return
+
       if found.local_index >= 0:
         if found.parent_index == 0:
           self.emit(Instruction(kind: IkVarResolve, arg0: found.local_index.to_value()))

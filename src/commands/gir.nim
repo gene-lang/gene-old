@@ -25,13 +25,21 @@ proc appendInstructions(lines: var seq[string], instructions: openArray[Instruct
       line = indentStr & line
     lines.add(line)
 
-    if inst.kind == IkFunction and i + 1 < instructions.len:
-      let dataInst = instructions[i + 1]
-      if dataInst.kind == IkData and dataInst.arg0.kind == VkFunctionDef:
-        let info = to_function_def_info(dataInst.arg0)
+    if inst.kind == IkFunction:
+      # Check arg0 directly (module init functions)
+      if inst.arg0.kind == VkFunctionDef:
+        let info = to_function_def_info(inst.arg0)
         if info.compiled_body.kind == VkCompiledUnit and info.compiled_body.ref.cu != nil:
           lines.add(indentStr & "  function body:")
           appendInstructions(lines, info.compiled_body.ref.cu.instructions, indent + 1)
+      # Check next IkData instruction
+      elif i + 1 < instructions.len:
+        let dataInst = instructions[i + 1]
+        if dataInst.kind == IkData and dataInst.arg0.kind == VkFunctionDef:
+          let info = to_function_def_info(dataInst.arg0)
+          if info.compiled_body.kind == VkCompiledUnit and info.compiled_body.ref.cu != nil:
+            lines.add(indentStr & "  function body:")
+            appendInstructions(lines, info.compiled_body.ref.cu.instructions, indent + 1)
     inc i
 
 proc handle_show(file_path: string): CommandResult =

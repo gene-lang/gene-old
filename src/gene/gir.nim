@@ -386,6 +386,10 @@ proc write_value(stream: Stream, v: Value) =
     stream.write(v.ref.regex_flags)
     stream.write(if v.ref.regex_has_replacement: 1'u8 else: 0'u8)
     stream.write_string(v.ref.regex_replacement)
+  of VkStream:
+    stream.write(v.ref.stream.len.uint32)
+    for item in v.ref.stream:
+      write_value(stream, item)
   of VkFunctionDef:
     writeFunctionDef(stream, v.ref.function_def)
   of VkCompiledUnit:
@@ -454,6 +458,13 @@ proc read_value(stream: Stream): Value =
     let has_replacement = stream.readUint8() == 1'u8
     let replacement = stream.read_string()
     result = new_regex_value(pattern, flags, replacement, has_replacement)
+  of VkStream:
+    let count = stream.readUint32()
+    let r = new_ref(VkStream)
+    r.stream = @[]
+    for _ in 0..<count:
+      r.stream.add(read_value(stream))
+    result = r.to_ref_value()
   of VkFunctionDef:
     let info = readFunctionDef(stream)
     result = info.to_value()
