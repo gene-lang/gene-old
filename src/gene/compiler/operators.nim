@@ -987,6 +987,9 @@ proc compile_gene(self: Compiler, input: Value) =
   
   # Check if type is an arithmetic operator
   if `type`.kind == VkSymbol:
+    # Operands of operators are never in tail position
+    let saved_tail = self.tail_position
+    self.tail_position = false
     case `type`.str:
       of "+":
         if gene.children.len == 0:

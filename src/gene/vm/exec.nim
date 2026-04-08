@@ -501,6 +501,7 @@ proc exec*(self: ptr VirtualMachine): Value =
               continue
 
         # Cross-function tail call — replace current frame with new frame
+        # Only for user-defined functions (must have body_compiled after compile)
         if tco_value.kind == VkFrame:
           let tco_frame2 = tco_value.ref.frame
           if tco_frame2.kind in {FkFunction, FkMethod, FkMacroMethod}:
@@ -508,7 +509,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             if f2.body_compiled == nil:
               f2.compile()
 
-            if is_function_like(self.frame.kind):
+            if is_function_like(self.frame.kind) and f2.body_compiled != nil:
               discard self.frame.pop()
               # Transfer return info from current frame to new frame
               tco_frame2.caller_frame = self.frame.caller_frame

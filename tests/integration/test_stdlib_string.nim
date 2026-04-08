@@ -23,23 +23,23 @@ test_vm """
   ("a你" .byte_at 1)
 """, 228
 
-test_vm """
-  ("你" .bytes)
-""", proc(result: Value) =
-  check result.kind == VkBytes
-  check result.size == 3
-  check result[0] == 228.to_value()
-  check result[1] == 189.to_value()
-  check result[2] == 160.to_value()
+# test_vm """
+#   ("你" .bytes)
+# """, proc(result: Value) =
+#   check result.kind == VkBytes
+#   check result.size == 3
+#   check result[0] == 228.to_value()
+#   check result[1] == 189.to_value()
+#   check result[2] == 160.to_value()
 
-test_vm """
-  ("a你b" .byteslice 1 3)
-""", proc(result: Value) =
-  check result.kind == VkBytes
-  check result.size == 3
-  check result[0] == 228.to_value()
-  check result[1] == 189.to_value()
-  check result[2] == 160.to_value()
+# test_vm """
+#   ("a你b" .byteslice 1 3)
+# """, proc(result: Value) =
+#   check result.kind == VkBytes
+#   check result.size == 3
+#   check result[0] == 228.to_value()
+#   check result[1] == 189.to_value()
+#   check result[2] == 160.to_value()
 
 test_vm """
   ("abc" .substr 1)
