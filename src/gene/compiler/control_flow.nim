@@ -818,12 +818,22 @@ proc compile_assignment(self: Compiler, gene: ptr Gene) =
   else:
     not_allowed($`type`)
 
+proc get_loop_name(gene: ptr Gene): string =
+  let name_key = "name".to_key()
+  if gene.props.has_key(name_key):
+    let name_val = gene.props[name_key]
+    if name_val.kind == VkSymbol:
+      return name_val.str
+    elif name_val.kind == VkString:
+      return name_val.str
+  return ""
+
 proc compile_loop(self: Compiler, gene: ptr Gene) =
   let start_label = new_label()
   let end_label = new_label()
   
   # Track this loop
-  self.loop_stack.add(LoopInfo(start_label: start_label, end_label: end_label, scope_depth: self.started_scope_depth))
+  self.loop_stack.add(LoopInfo(start_label: start_label, end_label: end_label, scope_depth: self.started_scope_depth, name: get_loop_name(gene)))
   
   self.emit(Instruction(kind: IkLoopStart, label: start_label))
   self.compile(gene.children, true)
@@ -841,7 +851,7 @@ proc compile_while(self: Compiler, gene: ptr Gene) =
   let end_label = new_label()
   
   # Track this loop
-  self.loop_stack.add(LoopInfo(start_label: label, end_label: end_label, scope_depth: self.started_scope_depth))
+  self.loop_stack.add(LoopInfo(start_label: label, end_label: end_label, scope_depth: self.started_scope_depth, name: get_loop_name(gene)))
   
   # Mark loop start
   self.emit(Instruction(kind: IkLoopStart, label: label))
@@ -889,7 +899,7 @@ proc compile_repeat(self: Compiler, gene: ptr Gene) =
   self.emit(Instruction(kind: IkRepeatInit, arg0: end_label.to_value()))
 
   # Track this loop (baseline is after evaluating the count expression)
-  self.loop_stack.add(LoopInfo(start_label: start_label, end_label: end_label, scope_depth: self.started_scope_depth))
+  self.loop_stack.add(LoopInfo(start_label: start_label, end_label: end_label, scope_depth: self.started_scope_depth, name: get_loop_name(gene)))
 
   # Mark the start of loop body
   self.emit(Instruction(kind: IkNoop, label: start_label))
@@ -1084,7 +1094,7 @@ proc compile_for(self: Compiler, gene: ptr Gene) =
   let end_label = new_label()
   
   # Track this loop
-  self.loop_stack.add(LoopInfo(start_label: start_label, end_label: end_label, scope_depth: self.started_scope_depth))
+  self.loop_stack.add(LoopInfo(start_label: start_label, end_label: end_label, scope_depth: self.started_scope_depth, name: get_loop_name(gene)))
   
   # Mark loop start
   self.emit(Instruction(kind: IkLoopStart, label: start_label))
@@ -1260,43 +1270,59 @@ proc compile_enum(self: Compiler, gene: ptr Gene) =
   self.scope_tracker.next_index.inc()
   self.emit(Instruction(kind: IkVar, arg0: index.to_value()))
 
+proc find_loop(self: Compiler, gene: ptr Gene): LoopInfo =
+  ## Find the target loop — innermost by default, or by ^from name
+  let from_key = "from".to_key()
+  if gene.props.has_key(from_key):
+    let from_val = gene.props[from_key]
+    var target_name = ""
+    if from_val.kind == VkSymbol:
+      target_name = from_val.str
+    elif from_val.kind == VkString:
+      target_name = from_val.str
+    else:
+      not_allowed("^from must be a symbol or string")
+    # Search loop stack from innermost to outermost
+    for i in countdown(self.loop_stack.len - 1, 0):
+      if self.loop_stack[i].name == target_name:
+        return self.loop_stack[i]
+    not_allowed("No loop named '" & target_name & "' found")
+  else:
+    if self.loop_stack.len == 0:
+      not_allowed("break/continue outside of loop")
+    return self.loop_stack[^1]
+
 proc compile_break(self: Compiler, gene: ptr Gene) =
   if gene.children.len > 0:
     self.compile(gene.children[0])
   else:
     self.emit(Instruction(kind: IkPushNil))
-  
+
   if self.loop_stack.len == 0:
-    # Emit a break with label -1 to indicate no loop
-    # This will be checked at runtime
     self.emit(Instruction(kind: IkBreak, arg0: (-1).to_value()))
   else:
-    let current_loop = self.loop_stack[^1]
-    let unwind_count = self.started_scope_depth.int - current_loop.scope_depth.int
+    let target_loop = self.find_loop(gene)
+    let unwind_count = self.started_scope_depth.int - target_loop.scope_depth.int
     if unwind_count > 0:
       for _ in 0..<unwind_count:
         self.emit(Instruction(kind: IkScopeEnd))
-    # Get the current loop's end label
-    self.emit(Instruction(kind: IkBreak, arg0: current_loop.end_label.to_value()))
+    self.emit(Instruction(kind: IkBreak, arg0: target_loop.end_label.to_value()))
 
 proc compile_continue(self: Compiler, gene: ptr Gene) =
   if gene.children.len > 0:
     self.compile(gene.children[0])
   else:
     self.emit(Instruction(kind: IkPushNil))
-  
+
   if self.loop_stack.len == 0:
-    # Emit a continue with label -1 to indicate no loop
-    # This will be checked at runtime
     self.emit(Instruction(kind: IkContinue, arg0: (-1).to_value()))
   else:
-    let current_loop = self.loop_stack[^1]
-    let unwind_count = self.started_scope_depth.int - current_loop.scope_depth.int
+    let target_loop = self.find_loop(gene)
+    let unwind_count = self.started_scope_depth.int - target_loop.scope_depth.int
     if unwind_count > 0:
       for _ in 0..<unwind_count:
         self.emit(Instruction(kind: IkScopeEnd))
-    # Get the current loop's start label
-    self.emit(Instruction(kind: IkContinue, arg0: current_loop.start_label.to_value()))
+    self.emit(Instruction(kind: IkContinue, arg0: target_loop.start_label.to_value()))
 
 proc compile_throw(self: Compiler, gene: ptr Gene) =
   if gene.children.len > 0:

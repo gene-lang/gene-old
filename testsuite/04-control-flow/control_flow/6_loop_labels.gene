@@ -1,0 +1,55 @@
+# Loop labels: ^name on loops, ^from on break/continue
+
+# Break from outer loop
+(var result 0)
+(loop ^name outer
+  (loop ^name inner
+    (result = 42)
+    (break ^from outer))
+  (result = 99))
+(assert (result == 42))
+(println "Break outer ok")
+# Expected: Break outer ok
+
+# Continue from outer loop skips rest of outer body
+(var count 0)
+(var touched 0)
+(while ^name outer (count < 3)
+  (count += 1)
+  (for ^name inner x in [1 2 3]
+    (if (x == 2)
+      (continue ^from outer)))
+  (touched += 1))
+(assert (count == 3))
+(assert (touched == 0))
+(println "Continue outer ok")
+# Expected: Continue outer ok
+
+# Break with value from named loop
+(var r (loop ^name search
+  (for x in [10 20 30 40 50]
+    (if (x == 30)
+      (break ^from search x)))))
+(assert (r == 30))
+(println "Break value ok")
+# Expected: Break value ok
+
+# Unnamed break/continue still work (innermost loop)
+(var sum 0)
+(for x in [1 2 3 4 5]
+  (if (x == 4) (break))
+  (sum += x))
+(assert (sum == 6))
+(println "Unnamed ok")
+# Expected: Unnamed ok
+
+# Named for loop
+(var found false)
+(for ^name outer i in [1 2 3]
+  (for ^name inner j in [10 20 30]
+    (if ((i == 2) && (j == 20))
+      (found = true)
+      (break ^from outer))))
+(assert found)
+(println "Named for ok")
+# Expected: Named for ok

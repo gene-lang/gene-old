@@ -700,6 +700,7 @@ type
     start_label*: Label
     end_label*: Label
     scope_depth*: int16
+    name*: string           # Optional loop name for ^name / break ^from
 
   MethodAccessMode* = enum
     MamAutoCall
