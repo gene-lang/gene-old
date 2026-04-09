@@ -3921,8 +3921,12 @@ proc exec*(self: ptr VirtualMachine): Value =
 
       of IkThrow:
         {.push checks: off}
-        # Pop value from stack if there is one, otherwise use NIL
-        let value = self.frame.pop()
+        # Pop value from stack, normalize to Exception instance
+        let raw_value = self.frame.pop()
+        var trace: SourceTrace = nil
+        if not self.cu.is_nil and self.pc >= 0 and self.pc < self.cu.instruction_traces.len:
+          trace = self.cu.instruction_traces[self.pc]
+        let value = normalize_exception(raw_value, trace_location(trace))
         if self.dispatch_exception(value, inst):
           continue
         {.pop.}

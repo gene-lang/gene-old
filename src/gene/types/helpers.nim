@@ -222,3 +222,49 @@ proc wrap_nim_exception*(ex: ref CatchableError, location: string = ""): Value =
   props["location".to_key()] = NIL
 
   result = new_instance_value(cls, props)
+
+proc normalize_exception*(value: Value, location: string = ""): Value =
+  ## Ensure the thrown value is an Exception instance.
+  ## If already an Exception, return as-is.
+  ## Otherwise wrap it into an Exception with the value as the message.
+  if value == NIL:
+    # Wrap nil into an Exception with a default message
+    let exception_class_val = App.app.exception_class
+    if exception_class_val == NIL:
+      return value
+    let cls = core.`ref`(exception_class_val).class
+    var props = initTable[Key, Value]()
+    props["message".to_key()] = "nil".to_value()
+    return new_instance_value(cls, props)
+
+  if value.kind == VkInstance:
+    # Check if it's already an Exception instance (or subclass)
+    let exception_class_val = App.app.exception_class
+    if exception_class_val != NIL:
+      let exception_cls = core.`ref`(exception_class_val).class
+      var cls = value.instance_class
+      while cls != nil:
+        if cls == exception_cls:
+          return value  # Already an Exception — keep as-is
+        cls = cls.parent
+    # Instance but not an Exception — wrap it
+    let ecls = core.`ref`(App.app.exception_class).class
+    var props = initTable[Key, Value]()
+    props["message".to_key()] = ($value).to_value()
+    props["cause".to_key()] = value
+    return new_instance_value(ecls, props)
+
+  # Non-instance value (string, int, map, etc.) — wrap into Exception
+  let exception_class_val = App.app.exception_class
+  if exception_class_val == NIL:
+    return value  # Fallback if exception class not initialized
+  let cls = core.`ref`(exception_class_val).class
+  var props = initTable[Key, Value]()
+  if value.kind == VkString:
+    props["message".to_key()] = value
+  else:
+    props["message".to_key()] = ($value).to_value()
+    props["cause".to_key()] = value
+  if location.len > 0:
+    props["location".to_key()] = location.to_value()
+  return new_instance_value(cls, props)

@@ -15,7 +15,7 @@
 [(p .get_x) (p .get_y) (p .sum)]   # => [3 4 7]
 ```
 
-- `/property` reads or writes instance properties
+- `/field` reads or writes instance fields
 - Methods and constructors use array argument lists, just like functions. Use `[]` for zero arguments.
 - Class constructors and methods are always eager. Macro-like OOP forms such as `ctor!`, `new!`, `method name!`, and `super .name!` are not supported; use a standalone `fn!` helper when quoted arguments are needed.
 
@@ -90,7 +90,7 @@ The `^fields` property declares field names and types as metadata.
 
 ## 7.5 Interfaces
 
-Interfaces declare a visible surface of methods and properties.
+Interfaces declare a visible surface of methods and fields.
 
 ```gene
 (interface Readable
@@ -103,10 +103,10 @@ Interfaces declare a visible surface of methods and properties.
 ```
 
 - `(method name)` declares a method on the interface.
-- `(field name)` declares a property on the interface.
-- `^readonly true` on a property prevents writes through adapter wrappers created from external implementations.
+- `(field name)` declares a field on the interface.
+- `^readonly true` on a field prevents writes through adapter wrappers created from external implementations.
 
-Interface declarations are currently name-based. Extra argument lists, return annotations, or property type tokens written inside an `interface` body are tolerated by the parser, but they are not used for runtime validation today.
+Interface declarations are currently name-based. Extra argument lists, return annotations, or field type tokens written inside an `interface` body are tolerated by the parser, but they are not used for runtime validation today.
 
 ## 7.6 Implementations And Adapters
 
@@ -165,7 +165,7 @@ An external `implement` registers an adapter for an existing class.
 For external implementations:
 
 - Calling the interface creates an adapter wrapper.
-- If an interface property or method is declared but not explicitly implemented, the adapter falls back to a same-name member on the wrapped value.
+- If an interface field or method is declared but not explicitly implemented, the adapter falls back to a same-name member on the wrapped value.
 - `_genevalue` refers to the wrapped value.
 - `_geneinternal` exposes adapter-owned supplemental state.
 
@@ -222,7 +222,7 @@ External implementations can define `ctor` to initialize adapter-owned state.
 - `(super .ctor args...)` — call parent constructor
 - Single inheritance only (one parent class)
 
-## 7.8 Property Access
+## 7.8 Field Access
 
 ```gene
 (class Point
@@ -253,16 +253,15 @@ Dynamic/foo   # => "Dynamic/foo"
 
 ## Potential Improvements
 
-- **Interface member typing**: Interface declarations do not yet enforce argument types, return types, or property types at runtime.
+- **Interface member typing**: Interface declarations do not yet enforce argument types, return types, or field types at runtime.
 - **Interface inheritance / composition**: Interfaces are flat declarations; there is no `extends`, mixin, or composition mechanism between interfaces.
-- **External adapter mapping syntax**: Gene-level external implementations support computed methods and adapter constructors, but not explicit rename/hide declarations for methods or properties.
-- **Inline readonly semantics**: `^readonly` on interface properties is enforced on adapter wrappers from external implementations, but inline implementations return the original object and do not add write guards.
+- **External adapter mapping syntax**: Gene-level external implementations support computed methods and adapter constructors, but not explicit rename/hide declarations for methods or fields.
+- **Inline readonly semantics**: `^readonly` on interface fields is enforced on adapter wrappers from external implementations, but inline implementations return the original object and do not add write guards.
 - **Multiple inheritance / mixins**: Only single inheritance is supported. Mixins or trait composition would reduce duplication.
-- **Access control**: All properties and methods are public. No `private`, `protected`, or module-private visibility.
+- **Access control**: All fields and methods are public. No `private`, `protected`, or module-private visibility.
 - **Static methods**: No dedicated `static` method syntax. Must use namespace functions instead.
 - **`on_member_missing` for instances**: Dynamic dispatch only works on namespaces, not class instances.
-- **Property declaration**: Properties are implicitly created by assignment in constructors. An explicit declaration (`^fields`) exists but is metadata only — not enforced.
-- **Abstract methods**: No way to declare a method that subclasses must implement. The base class `(method area [] 0)` gives a default instead of forcing override.
+- **Field declaration**: Fields are implicitly created by assignment in constructors. An explicit declaration (`^fields`) exists but is metadata only — not enforced.
 - **Class reopening**: Cannot add methods to an existing class after definition. Open classes (like Ruby) or extension methods would add flexibility.
 - **Constructor overloading**: Only one constructor per class. No way to provide multiple construction patterns.
 - **Macro-like OOP callables**: Intentionally unsupported. Keeping constructors and methods eager avoids extra inheritance and `super` dispatch complexity.
