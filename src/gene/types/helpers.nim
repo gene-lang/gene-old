@@ -106,8 +106,7 @@ proc init_app_and_vm*() =
   let exception_class_val = exception_ref.to_ref_value()
   App.app.exception_class = exception_class_val
   App.app.global_ns.ref.ns["Exception".to_key()] = exception_class_val
-  # Keep GeneException as alias during migration
-  App.app.global_ns.ref.ns["GeneException".to_key()] = exception_class_val
+  App.app.global_ns.ref.ns["GeneException".to_key()] = exception_class_val  # Legacy alias
 
   # Exception subclass helper
   proc def_exception_subclass(name: string, parent: Class = exception_class): Value =
@@ -242,9 +241,11 @@ proc infer_exception_class*(message: string): Class =
   let base = core.`ref`(App.app.exception_class).class
 
   proc lookup(name: string): Class =
-    let val = App.app.global_ns.ref.ns.get_or_default(name.to_key(), NIL)
-    if val != NIL and val.kind == VkClass:
-      return val.ref.class
+    let key = name.to_key()
+    if App.app.global_ns.ref.ns.members.hasKey(key):
+      let val = App.app.global_ns.ref.ns.members[key]
+      if val.kind == VkClass:
+        return val.ref.class
     return base
 
   if lower.contains("division by zero") or lower.contains("integer overflow") or

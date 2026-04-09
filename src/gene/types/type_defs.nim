@@ -1245,7 +1245,6 @@ type
     map*:  Table[string, int64]
 
   Exception* = object of CatchableError
-    instance*: Value  # instance of Gene exception class
 
   NotDefinedException* = object of Exception
 

@@ -7,9 +7,9 @@
 
 (fn positive_only [a]
   ^examples [[1] -> _
-             [-1] throws GeneException]
+             [-1] throws Exception]
   (if (a <= 0)
-    (throw (new GeneException))
+    (throw (new Exception))
   else
     a)
 )
@@ -18,7 +18,7 @@
   (method withdraw [amount]
     ^intent "Withdraw when amount is positive"
     (if (amount <= 0)
-      (throw (new GeneException))
+      (throw (new Exception))
     else
       amount)
   )
