@@ -326,7 +326,7 @@ proc init_test_module*() =
     if App == NIL or App.kind != VkApplication:
       return
 
-    # Create TestFailure class extending GeneException
+    # Create TestFailure class extending Exception
     {.cast(gcsafe).}:
       let exception_class = if App.app.exception_class.kind == VkClass:
         App.app.exception_class.ref.class

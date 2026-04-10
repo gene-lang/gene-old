@@ -71,6 +71,7 @@ proc dispatch_exception(self: ptr VirtualMachine, value: Value, inst: var ptr In
 
     if handler.catch_pc == CATCH_PC_ASYNC_BLOCK:
       discard self.exception_handlers.pop()
+      self.current_exception = NIL  # Exception is captured in the future
 
       let future_val = new_future_value()
       let future_obj = future_val.ref.future
@@ -86,6 +87,7 @@ proc dispatch_exception(self: ptr VirtualMachine, value: Value, inst: var ptr In
 
     elif handler.catch_pc == CATCH_PC_ASYNC_FUNCTION:
       discard self.exception_handlers.pop()
+      self.current_exception = NIL  # Exception is captured in the future
 
       let future_val = new_future_value()
       let future_obj = future_val.ref.future

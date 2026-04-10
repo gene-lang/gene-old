@@ -106,7 +106,6 @@ proc init_app_and_vm*() =
   let exception_class_val = exception_ref.to_ref_value()
   App.app.exception_class = exception_class_val
   App.app.global_ns.ref.ns["Exception".to_key()] = exception_class_val
-  App.app.global_ns.ref.ns["GeneException".to_key()] = exception_class_val  # Legacy alias
 
   # Exception subclass helper
   proc def_exception_subclass(name: string, parent: Class = exception_class): Value =

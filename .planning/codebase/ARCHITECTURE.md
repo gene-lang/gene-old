@@ -288,7 +288,7 @@
 - Compile errors during bytecode generation
 
 **Runtime errors:**
-- Nim exceptions (ValueError, not_allowed, etc.) propagate as GeneException
+- Nim exceptions (ValueError, not_allowed, etc.) propagate as Exception
 - Exception objects (VkException) caught by try/catch expressions
 - Caught in exception handler stack (`frame.exception_handlers`)
 - Exception normalization in `vm/exceptions.nim`: Infers exception class from message
@@ -296,7 +296,7 @@
 **Patterns:**
 - `try-catch` expressions: `(try (risky_op) (catch e (handle e)))`
 - Exception display with source traces in error messages
-- GeneException.instance field removed (PR e43d791)
+- Exception.instance field removed (PR e43d791)
 
 ## Cross-Cutting Concerns
 

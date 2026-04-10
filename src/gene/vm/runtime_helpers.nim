@@ -19,7 +19,15 @@ proc format_runtime_exception(self: ptr VirtualMachine, value: Value): string =
   var detail: string
   if value.kind == VkInstance:
     let exception_class_val = App.app.exception_class
-    if exception_class_val.kind == VkClass and value.instance_class == exception_class_val.ref.class:
+    var is_exception = false
+    if exception_class_val.kind == VkClass:
+      var cls = value.instance_class
+      while cls != nil:
+        if cls == exception_class_val.ref.class:
+          is_exception = true
+          break
+        cls = cls.parent
+    if is_exception:
       if "message".to_key() in instance_props(value):
         let msg_val = instance_props(value)["message".to_key()]
         detail = if msg_val.kind == VkString: msg_val.str else: $msg_val

@@ -53,7 +53,7 @@ This document sketches how SIMD (Single Instruction, Multiple Data) could be add
 ## Integrating with the VM
 - **Value Handling**: reuse existing array/map storage. Copy data into temporary buffers when necessary; avoid mutating shared arrays unless write-safe.
 - **Garbage Safety**: Ensure SIMD kernels operate on raw pointers only inside `GC_suspend`/`GC_resume`-safe regions if required (depends on ARC/ORC settings).
-- **Error Reporting**: Throw descriptive exceptions (`GeneException`) when SIMD prerequisites fail (e.g. unsupported data type).
+- **Error Reporting**: Throw descriptive exceptions (`Exception`) when SIMD prerequisites fail (e.g. unsupported data type).
 
 ## Future Extensions
 - **Dedicated Vector ValueKinds**: Add types like `VkFloat4` for inline storage and new bytecode ops (e.g. `IkVecAdd`). Requires compiler + VM changes but unlocks broader optimisation.

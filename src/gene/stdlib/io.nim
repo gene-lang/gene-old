@@ -1,4 +1,4 @@
-import tables, os, strutils
+import tables, os
 import ../types
 import ../wasm_host_abi
 

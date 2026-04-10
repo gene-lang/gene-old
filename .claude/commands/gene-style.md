@@ -232,7 +232,7 @@ catch *
   (println "Error:" $ex/message)
 )
 
-# Catch specific type (must be subclass of GeneException)
+# Catch specific type (must be subclass of Exception)
 (try
   (risky-operation)
 catch SomeException
@@ -312,7 +312,7 @@ catch SomeException
    catch *
      $ex/message    # Access exception via $ex
 
-   # Catch specific exception type (must be subclass of GeneException)
+   # Catch specific exception type (must be subclass of Exception)
    catch SomeException
      $ex/message
    ```

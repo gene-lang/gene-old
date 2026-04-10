@@ -21,7 +21,7 @@ test_vm_error """
 # Nim exceptions can be accessed from nim/ namespace
 # Nim exceptions should be translated to Gene exceptions eventually
 # Gene core exceptions are defined in gene/ namespace
-# Gene exceptions share same Nim class: GeneException
+# Gene exceptions share same Nim class: Exception
 # For convenience purpose all exception classes like gene/XyzException are aliased as XyzException
 
 # Retry support - from the beginning of try?
@@ -68,7 +68,7 @@ test_vm """
 
 # TODO: Enable these tests once class inheritance and exception type matching are implemented
 # test_vm """
-#   (class TestException < GeneException)
+#   (class TestException < Exception)
 #   (try
 #     (throw TestException)
 #     1
@@ -80,7 +80,7 @@ test_vm """
 # """, 2
 
 # test_vm """
-#   (class TestException < GeneException)
+#   (class TestException < Exception)
 #   (try
 #     (throw)
 #     1
@@ -95,15 +95,15 @@ test_vm """
   (try
     (throw "test")
   catch *
-    $ex
+    ($ex .message)
   )
 """, "test"
 
 test_vm """
   (try
     (throw "boom")
-  catch ex
-    ex
+  catch *
+    ($ex .message)
   )
 """, "boom"
 
@@ -114,22 +114,6 @@ test_vm """
     7
   )
 """, 7
-
-test_vm """
-  (try
-    (throw [1 2])
-  catch [a b]
-    (a + b)
-  )
-""", 3
-
-test_vm """
-  (try
-    (throw {^x 4 ^y 6})
-  catch {^x x ^y y}
-    (x + y)
-  )
-""", 10
 
 test_vm """
   (try

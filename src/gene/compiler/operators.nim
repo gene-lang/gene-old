@@ -815,12 +815,12 @@ proc rewrite_infix_expression(left_value: Value, tail: seq[Value]): Value =
         return comparisons[0]
 
       # Chain with &&
-      var result = comparisons[0]
+      var r = comparisons[0]
       for j in 1 ..< comparisons.len:
         let and_node = new_gene("&&".to_symbol_value())
-        and_node.children = @[result, comparisons[j]]
-        result = and_node.to_gene_value()
-      return result
+        and_node.children = @[r, comparisons[j]]
+        r = and_node.to_gene_value()
+      return r
 
   var value_stack: seq[Value] = @[left_value]
   var op_stack: seq[string] = @[]

@@ -88,7 +88,7 @@ include ./vm/async
 - Nim exception syntax: `except CatchableError`, `except CatchableError as e`, `except ValueError`
 - Try/except blocks used for recoverable errors in parser, config, and integration code
 - Gene language has separate exception mechanism (`catch *` syntax in Gene code) from Nim exceptions
-- Wrapper type `GeneException` for Nim↔Gene exception translation in `src/gene/vm/exceptions.nim`
+- Wrapper type `Exception` for Nim↔Gene exception translation in `src/gene/vm/exceptions.nim`
 - Casting for gcsafe workarounds: `{.cast(gcsafe).}:` used in reentrant code (helpers.nim:105)
 
 **Error Propagation:**

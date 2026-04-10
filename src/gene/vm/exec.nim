@@ -639,8 +639,8 @@ proc exec*(self: ptr VirtualMachine): Value =
                 r.ns = self.frame.ns
                 self.frame.push(r.to_ref_value())
               elif symbol_str == "$ex":
-                let ex_value = if self.current_exception != NIL: self.current_exception else: self.repl_exception
-                self.frame.push(ex_value)
+                let raw_ex = if self.current_exception != NIL: self.current_exception else: self.repl_exception
+                self.frame.push(raw_ex)
               else:
                 let key = symbol_str[1..^1].to_key()
                 let resolved = App.app.global_ns.ref.ns[key]
@@ -854,8 +854,8 @@ proc exec*(self: ptr VirtualMachine): Value =
             # Special handling for $ex (gene/ex or global/ex)
             if name == "ex".to_key() and (value == App.app.gene_ns or value == App.app.global_ns):
               # Return current exception if set, otherwise the REPL exception
-              let ex_value = if self.current_exception != NIL: self.current_exception else: self.repl_exception
-              self.frame.push(ex_value)
+              let raw_ex = if self.current_exception != NIL: self.current_exception else: self.repl_exception
+              self.frame.push(raw_ex)
             else:
               var member = value.ref.ns[name]
               if member == NIL:
@@ -1001,7 +1001,8 @@ proc exec*(self: ptr VirtualMachine): Value =
                   "".to_key()
               # Special handling for $ex (gene/ex)
               if key == "ex".to_key() and (target == App.app.gene_ns or target == App.app.global_ns):
-                let member = if self.current_exception != NIL: self.current_exception else: self.repl_exception
+                let raw_ex = if self.current_exception != NIL: self.current_exception else: self.repl_exception
+                let member = raw_ex
                 retain(member)
                 self.frame.push(member)
               elif key == "duration_start".to_key() and (target == App.app.gene_ns or target == App.app.global_ns):
@@ -4178,8 +4179,8 @@ proc exec*(self: ptr VirtualMachine): Value =
                 ns_ref.ns = caller_frame.ns
                 self.frame.push(ns_ref.to_ref_value())
               elif symbol_str == "$ex":
-                let ex_value = if self.current_exception != NIL: self.current_exception else: self.repl_exception
-                self.frame.push(ex_value)
+                let raw_ex = if self.current_exception != NIL: self.current_exception else: self.repl_exception
+                self.frame.push(raw_ex)
               else:
                 let key = symbol_str[1..^1].to_key()
                 let resolved = App.app.global_ns.ref.ns[key]
