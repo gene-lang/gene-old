@@ -393,12 +393,7 @@ proc exec*(self: ptr VirtualMachine): Value =
               break
             cursor = cursor.parent
 
-        if target_ns == nil:
-          if self.thread_local_ns != nil:
-            target_ns = self.thread_local_ns
-          elif App.app.global_ns != NIL:
-            target_ns = App.app.global_ns.ref.ns
-
+        # Module scope is the root — do not spill into global_ns.
         if target_ns == nil:
           not_allowed("Cannot assign symbol without an active namespace")
 

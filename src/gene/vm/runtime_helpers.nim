@@ -141,7 +141,10 @@ when not defined(gene_wasm):
               VM.frame = new_frame()
               VM.frame.stack_index = 0
               VM.frame.scope = new_scope(scope_tracker)
-              VM.frame.ns = App.app.gene_ns.ref.ns  # Set namespace for symbol lookup
+              # Fresh per-thread module namespace; gene_ns as parent gives read
+              # access to built-ins without sharing writable state across threads.
+              let thread_module_ns = new_namespace(App.app.gene_ns.ref.ns, "thread")
+              VM.frame.ns = thread_module_ns
               VM.cu = cu
               VM.pc = 0
 
