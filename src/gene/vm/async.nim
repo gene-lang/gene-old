@@ -176,6 +176,24 @@ proc future_cancel(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_
   execute_future_callbacks(vm, future_obj)
   return future_arg
 
+proc future_fail(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  # Fail a future with an error value (normalizes to Exception like throw does).
+  if arg_count < 2:
+    raise new_exception(types.Exception, "Future.fail requires a future and an error value")
+
+  let future_arg = get_positional_arg(args, 0, has_keyword_args)
+  if future_arg.kind != VkFuture:
+    raise new_exception(types.Exception, "fail can only be called on a Future")
+
+  let error_arg = get_positional_arg(args, 1, has_keyword_args)
+  let error_val = normalize_exception(error_arg)
+
+  let future_obj = future_arg.ref.future
+  if not future_obj.fail(error_val):
+    raise_future_already_terminal("fail", future_obj.state)
+  execute_future_callbacks(vm, future_obj)
+  return future_arg
+
 proc future_state(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
   # Get the state of a future
   # When called as a method, args contains the future as the first child
@@ -310,6 +328,7 @@ proc init_async*() =
 
     # Add Future methods
     future_class.def_native_method("complete", future_complete)
+    future_class.def_native_method("fail", future_fail)
     future_class.def_native_method("cancel", future_cancel)
     future_class.def_native_method("on_success", future_on_success)
     future_class.def_native_method("on_failure", future_on_failure)

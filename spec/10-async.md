@@ -64,13 +64,28 @@ future/.state     # => pending | success | failure | cancelled
 
 # Callbacks
 (f .on_success (fn [value] (println "Got:" value)))
-(f .on_failure (fn [error] (println "Error:" error)))
+(f .on_failure (fn [error] (println "Error:" error/message)))
 
-# Manual future + timeout-aware await
+# Manual future: complete, fail, cancel
 (var f (new gene/Future))
-(f .complete 42)
+(f .complete 42)           # resolve with a value
 (await ^timeout 0.5 f)
+
+(var f2 (new gene/Future))
+(f2 .fail "something broke")   # reject; error normalized to Exception
+(try (await f2) catch * (println $ex/message))
+
+(var f3 (new gene/Future))
+(f3 .cancel)               # cancel with default reason
 ```
+
+| Method | State after | `await` behaviour |
+|--------|-------------|-------------------|
+| `.complete value` | `success` | returns value |
+| `.fail error` | `failure` | re-throws as `Exception` |
+| `.cancel` | `cancelled` | throws `CancellationException` |
+
+All three raise if called on an already-terminal future.
 
 ## 10.4 Error Handling in Async
 
@@ -109,7 +124,8 @@ Only "literal" values can be sent between threads:
 - **Not allowed**: functions, classes, instances, threads, futures, namespaces
 
 ### Thread Limits
-- Maximum 64 threads (IDs 0-63)
+- Default cap is platform-dependent (macOS: 512, Linux: 1024, 32-bit: 64, WASM: 1)
+- Override at startup: `GENE_MAX_THREADS=256 gene run ...` (clamped to 4096)
 - Each thread gets its own VM and message channel
 
 ---
@@ -120,7 +136,6 @@ Only "literal" values can be sent between threads:
 - **`async for`**: No async iteration protocol. Cannot `for` over a stream of async values.
 - **Thread safety of shared state**: No mutex, lock, or atomic primitives in the language. Shared mutable state across threads is unsafe.
 - **Channel type**: Message passing uses thread-specific send. A first-class Channel type (like Go channels) would enable more flexible concurrent patterns.
-- **Thread pool**: The 64-thread limit is fixed. A work-stealing thread pool would better utilize resources.
-- **Manual future failure API**: `Future` supports manual completion and cancellation, but there is no dedicated `.fail` / reject-style helper for constructing failed futures directly.
+- **Thread pool**: Native OS threads; cap is runtime-configurable via `GENE_MAX_THREADS`. A work-stealing M:N scheduler would reduce per-thread overhead for high-concurrency workloads.
 - **Async in constructors/methods**: Async works in functions but the interaction with class constructors and method dispatch may have edge cases.
 - **Event loop visibility**: The internal polling interval (every 100 instructions) is not configurable and not visible to users.
