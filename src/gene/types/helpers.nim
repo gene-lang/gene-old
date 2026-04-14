@@ -186,6 +186,13 @@ proc init_app_and_vm*() =
   VM.thread_local_ns["thread".to_key()] = main_thread_ref.to_value()
   VM.thread_local_ns["main_thread".to_key()] = main_thread_ref.to_value()
 
+  # Pre-intern hot keys used in the exec loop to avoid repeated lock acquisition.
+  KEY_SELF  = "self".to_key()
+  KEY_CALL  = "call".to_key()
+  KEY_EX    = "ex".to_key()
+  KEY_INIT  = "init".to_key()
+  KEY_INIT2 = "__init__".to_key()
+
   for callback in VmCreatedCallbacks:
     callback()
 

@@ -1,4 +1,4 @@
-import tables, strutils, hashes, os, streams
+import tables, strutils, hashes, os, streams, locks
 
 import ../types
 import ../compiler
@@ -35,6 +35,10 @@ var ModuleCache* = initTable[string, Namespace]()
 var ModuleLoadState* = initTable[string, bool]()
 var ModuleLoadStack* = newSeq[string]()
 var LoadedModuleTypeRegistry* = new_global_type_registry()
+
+# Serializes concurrent first-time genex extension loads.
+var extension_load_lock: Lock
+initLock(extension_load_lock)
 
 let ExportKey* = "__exports__".to_key()
 
@@ -914,33 +918,45 @@ proc extension_library_candidates(name: string): seq[string] =
 
 proc ensure_genex_extension*(vm: ptr VirtualMachine, part: string): Value =
   ## Ensure a genex extension is loaded when accessing genex/<part>.
+  ## Thread-safe: extensions are loaded at most once even under concurrent access.
   if App == NIL or App.kind != VkApplication:
     return NIL
   if App.app.genex_ns.kind != VkNamespace:
     return NIL
 
   let key = part.to_key()
-  var member = App.app.genex_ns.ref.ns.members.getOrDefault(key, NIL)
 
-  if member == NIL:
-    when defined(gene_wasm):
-      raise_wasm_unsupported("dynamic_extension_loading")
-    when not defined(noExtensions):
-      let candidates = extension_library_candidates(part)
-      var ext_path = ""
-      for candidate in candidates:
-        if fileExists(candidate):
-          ext_path = candidate
-          break
-      if ext_path.len == 0:
-        # Missing extension is treated as unavailable so callers can probe with
-        # conditionals like: (if genex/sqlite ... else ...).
-        return NIL
-      let ext_ns = load_extension(vm, ext_path)
-      if ext_ns == nil:
-        not_allowed("[GENE.EXT.INIT_FAILED] Extension did not publish namespace: " & ext_path)
-      member = ext_ns.to_value()
-      App.app.genex_ns.ref.ns.members[key] = member
+  # Fast path: extension already loaded (written once, never removed).
+  var member = App.app.genex_ns.ref.ns.members.getOrDefault(key, NIL)
+  if member != NIL:
+    return member
+
+  when defined(gene_wasm):
+    raise_wasm_unsupported("dynamic_extension_loading")
+  when not defined(noExtensions):
+    # Slow path: serialize concurrent first-time loads with double-check.
+    acquire(extension_load_lock)
+    defer: release(extension_load_lock)
+
+    member = App.app.genex_ns.ref.ns.members.getOrDefault(key, NIL)
+    if member != NIL:
+      return member
+
+    let candidates = extension_library_candidates(part)
+    var ext_path = ""
+    for candidate in candidates:
+      if fileExists(candidate):
+        ext_path = candidate
+        break
+    if ext_path.len == 0:
+      # Missing extension is treated as unavailable so callers can probe with
+      # conditionals like: (if genex/sqlite ... else ...).
+      return NIL
+    let ext_ns = load_extension(vm, ext_path)
+    if ext_ns == nil:
+      not_allowed("[GENE.EXT.INIT_FAILED] Extension did not publish namespace: " & ext_path)
+    member = ext_ns.to_value()
+    App.app.genex_ns.ref.ns.members[key] = member
   return member
 
 proc try_member_missing_handlers*(vm: ptr VirtualMachine, ns: Namespace, name: string): Value =

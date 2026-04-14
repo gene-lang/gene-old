@@ -221,9 +221,8 @@ proc exec*(self: ptr VirtualMachine): Value =
           # Scope created with ref_count=1
           let tracker = inst.arg0.ref.scope_tracker
           if tracker != nil and self.frame != nil and self.frame.args.kind == VkGene and self.frame.args.gene.children.len > 0:
-            let self_key = "self".to_key()
-            if tracker.mappings.has_key(self_key):
-              let self_idx = tracker.mappings[self_key].int
+            if tracker.mappings.has_key(KEY_SELF):
+              let self_idx = tracker.mappings[KEY_SELF].int
               if self_idx >= 0:
                 while self.frame.scope.members.len <= self_idx:
                   self.frame.scope.members.add(NIL)
@@ -847,7 +846,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             self.frame.push(member)
           of VkNamespace:
             # Special handling for $ex (gene/ex or global/ex)
-            if name == "ex".to_key() and (value == App.app.gene_ns or value == App.app.global_ns):
+            if name == KEY_EX and (value == App.app.gene_ns or value == App.app.global_ns):
               # Return current exception if set, otherwise the REPL exception
               let raw_ex = if self.current_exception != NIL: self.current_exception else: self.repl_exception
               self.frame.push(raw_ex)
@@ -995,7 +994,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                   not_allowed("Invalid property type: " & $prop.kind)
                   "".to_key()
               # Special handling for $ex (gene/ex)
-              if key == "ex".to_key() and (target == App.app.gene_ns or target == App.app.global_ns):
+              if key == KEY_EX and (target == App.app.gene_ns or target == App.app.global_ns):
                 let raw_ex = if self.current_exception != NIL: self.current_exception else: self.repl_exception
                 let member = raw_ex
                 retain(member)
@@ -1196,7 +1195,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                   not_allowed("Invalid property type: " & $prop.kind)
                   "".to_key()
               # Special handling for $ex (gene/ex)
-              if key == "ex".to_key() and target == App.app.gene_ns:
+              if key == KEY_EX and target == App.app.gene_ns:
                 let member = self.current_exception
                 retain(member)
                 self.frame.push(member)
@@ -1869,11 +1868,10 @@ proc exec*(self: ptr VirtualMachine): Value =
 
           of VkInstance, VkCustom:
             # Check if instance has a call method
-            let call_method_key = "call".to_key()
             let instance_class = gene_type.get_object_class()
-            if instance_class != nil and instance_class.methods.hasKey(call_method_key):
+            if instance_class != nil and instance_class.methods.hasKey(KEY_CALL):
               # Instance has a call method, create a frame for it
-              let meth = instance_class.methods[call_method_key]
+              let meth = instance_class.methods[KEY_CALL]
               let target = meth.callable
 
               case target.kind:
@@ -3209,7 +3207,7 @@ proc exec*(self: ptr VirtualMachine): Value =
         let method_key = name.str.to_key()
         let method_callable = fn_value
         runtime_type.methods[method_key] = method_callable
-        if method_key == "init".to_key() or method_key == "__init__".to_key():
+        if method_key == KEY_INIT or method_key == KEY_INIT2:
           runtime_type.initializer = method_callable
         let m = Method(
           name: name.str,
@@ -5843,8 +5841,8 @@ proc exec*(self: ptr VirtualMachine): Value =
                 if (not f.matcher.has_type_annotations) and
                    f.matcher.hint_mode == MhSimpleData and f.matcher.children.len == 1:
                   # Manual argument matching: set self in scope without Gene objects
-                  if f.scope_tracker.mappings.len > 0 and f.scope_tracker.mappings.hasKey("self".to_key()):
-                    let self_idx = f.scope_tracker.mappings["self".to_key()]
+                  if f.scope_tracker.mappings.len > 0 and f.scope_tracker.mappings.hasKey(KEY_SELF):
+                    let self_idx = f.scope_tracker.mappings[KEY_SELF]
                     while scope.members.len <= self_idx:
                       scope.members.add(NIL)
                     scope.members[self_idx] = obj
@@ -6028,8 +6026,8 @@ proc exec*(self: ptr VirtualMachine): Value =
                 if (not f.matcher.has_type_annotations) and
                    f.matcher.hint_mode == MhSimpleData and f.matcher.children.len == 2:
                   # Manual argument matching: set self and arg in scope without Gene objects
-                  if f.scope_tracker.mappings.hasKey("self".to_key()):
-                    let self_idx = f.scope_tracker.mappings["self".to_key()]
+                  if f.scope_tracker.mappings.hasKey(KEY_SELF):
+                    let self_idx = f.scope_tracker.mappings[KEY_SELF]
                     while scope.members.len <= self_idx:
                       scope.members.add(NIL)
                     scope.members[self_idx] = obj
@@ -6191,8 +6189,8 @@ proc exec*(self: ptr VirtualMachine): Value =
                 if (not f.matcher.has_type_annotations) and
                    f.matcher.hint_mode == MhSimpleData and f.matcher.children.len == 3:
                   # Manual argument matching: set self and 2 args in scope without Gene objects
-                  if f.scope_tracker.mappings.hasKey("self".to_key()):
-                    let self_idx = f.scope_tracker.mappings["self".to_key()]
+                  if f.scope_tracker.mappings.hasKey(KEY_SELF):
+                    let self_idx = f.scope_tracker.mappings[KEY_SELF]
                     while scope.members.len <= self_idx:
                       scope.members.add(NIL)
                     scope.members[self_idx] = obj

@@ -146,6 +146,14 @@ var EventLoopCallbacks*: seq[EventLoopCallback] = @[]
 # Flag to track if gene namespace has been initialized (thread-local for worker threads)
 var gene_namespace_initialized* {.threadvar.}: bool
 
+# Pre-interned keys for hot exec paths — computed once at init_app_and_vm(),
+# safe to read from any thread (Key is a distinct int64, no GC involvement).
+var KEY_SELF*:          Key   # "self"
+var KEY_CALL*:          Key   # "call"
+var KEY_EX*:            Key   # "ex"
+var KEY_INIT*:          Key   # "init"
+var KEY_INIT2*:         Key   # "__init__"
+
 # Current thread ID (thread-local, 0 for main thread)
 var current_thread_id* {.threadvar.}: int
 
