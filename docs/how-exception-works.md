@@ -66,7 +66,6 @@ path uses `VM.current_exception` instead.
 
 - `App.app.exception_class`
 - `global_ns["Exception"]`
-- `global_ns["Exception"]` (legacy alias)
 - `global_ns["TypeException"]`, `global_ns["RuntimeException"]`, etc.
 
 ### B. `throw` normalizes all values to Exception instances
@@ -191,7 +190,6 @@ original message, use `($ex .message)`.
 - `catch *` — catch all exceptions
 - `catch SomeException` — catch a specific Exception subclass
 - `catch [ExceptionA ExceptionB]` — catch any of several Exception subclasses
-- `catch _` — catch all, discard (don't bind)
 
 Typed catches work by:
 
