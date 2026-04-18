@@ -1,4 +1,4 @@
-import unittest, os, strutils, tables, osproc
+import unittest, os, strutils, tables, osproc, locks
 
 import gene/parser
 import gene/compiler
@@ -10,6 +10,39 @@ import gene/vm/args
 import gene/vm
 import commands/gir as gir_command
 import ../helpers
+
+type
+  ConcurrentCompileBarrier = object
+    lock: Lock
+    cond: Cond
+    ready_count: int
+    start: bool
+
+  ConcurrentCompileJob = object
+    fn_value: Value
+    input_value: Value
+    barrier: ptr ConcurrentCompileBarrier
+    output_value: int64
+    raised: bool
+
+proc concurrent_compile_worker(job: ptr ConcurrentCompileJob) {.thread.} =
+  {.cast(gcsafe).}:
+    acquire(job.barrier[].lock)
+    job.barrier[].ready_count.inc()
+    while not job.barrier[].start:
+      wait(job.barrier[].cond, job.barrier[].lock)
+    release(job.barrier[].lock)
+
+    let vm = new_vm_ptr()
+    VM = vm
+    try:
+      let result = vm.exec_function(job[].fn_value, @[job[].input_value])
+      job[].output_value = result.to_int()
+    except CatchableError:
+      job[].raised = true
+    finally:
+      free_vm_ptr(vm)
+      VM = nil
 
 suite "GIR CLI":
   test "gir show renders instructions":
@@ -754,6 +787,60 @@ suite "GIR CLI":
     check ctor_loads == 1
     check method_loads == 1
     check init_loads == 1
+
+  test "concurrent first-call publication compiles a shared function once and publishes a ready body":
+    init_all()
+    let fn_value = VM.exec("""
+      (do
+        (fn shared_add [x: Int] -> Int
+          (var a (+ x 1))
+          (var b (+ a 2))
+          (var c (+ b 3))
+          (+ c 4))
+        shared_add)
+    """, "concurrent_lazy_compile.gene")
+
+    check fn_value.kind == VkFunction
+    let f = fn_value.ref.fn
+    check load_published_body(f) == nil
+
+    var barrier: ConcurrentCompileBarrier
+    initLock(barrier.lock)
+    initCond(barrier.cond)
+    defer:
+      deinitCond(barrier.cond)
+      deinitLock(barrier.lock)
+
+    var job1 = ConcurrentCompileJob(fn_value: fn_value, input_value: 10.to_value(), barrier: addr barrier)
+    var job2 = ConcurrentCompileJob(fn_value: fn_value, input_value: 20.to_value(), barrier: addr barrier)
+    var thread1: system.Thread[ptr ConcurrentCompileJob]
+    var thread2: system.Thread[ptr ConcurrentCompileJob]
+
+    createThread(thread1, concurrent_compile_worker, addr job1)
+    createThread(thread2, concurrent_compile_worker, addr job2)
+
+    while true:
+      acquire(barrier.lock)
+      let ready = barrier.ready_count
+      if ready >= 2:
+        barrier.start = true
+        broadcast(barrier.cond)
+        release(barrier.lock)
+        break
+      release(barrier.lock)
+      sleep(10)
+
+    joinThread(thread1)
+    joinThread(thread2)
+
+    check not job1.raised
+    check not job2.raised
+    check job1.output_value == 20
+    check job2.output_value == 30
+
+    let compiled = load_published_body(f)
+    check compiled != nil
+    check compiled.inline_caches.len == compiled.instructions.len
 
   test "class definitions attach lazy runtime hooks":
     init_all()

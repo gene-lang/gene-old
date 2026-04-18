@@ -95,43 +95,51 @@ proc prepare_native_ctx(self: ptr VirtualMachine, f: Function, out_ctx: var Nati
   ## Returns false if native execution is not available for this function.
   if f.is_generator or f.async or f.is_macro_like:
     return false
+  acquire(native_publication_lock)
+  defer: release(native_publication_lock)
   if not f.native_ready:
-    acquire(native_publication_lock)
-    defer: release(native_publication_lock)
-    if not f.native_ready:
-      if f.native_failed:
-        return false
-      if f.body_compiled == nil:
-        f.compile()
-      let compiled = compile_to_native(f)
-      if not compiled.ok:
-        f.native_failed = true
-        return false
-      if f.native_descriptors.len > 0:
-        release_descriptors(f.native_descriptors)
-      f.native_entry = compiled.entry
-      f.native_return_float = compiled.returnFloat
-      f.native_return_string = compiled.returnString
-      f.native_return_value = compiled.returnValue
-      f.native_descriptors = compiled.descriptors
-      f.native_ready = true
+    if f.native_failed:
+      return false
+    var compiled_body = load_published_body(f)
+    if compiled_body == nil:
+      f.compile()
+      compiled_body = load_published_body(f)
+    if compiled_body == nil:
+      f.native_failed = true
+      return false
+    let compiled = compile_to_native(f)
+    if not compiled.ok:
+      f.native_failed = true
+      return false
+    if f.native_descriptors.len > 0:
+      release_descriptors(f.native_descriptors)
+    f.native_entry = compiled.entry
+    f.native_return_float = compiled.returnFloat
+    f.native_return_string = compiled.returnString
+    f.native_return_value = compiled.returnValue
+    f.native_descriptors = compiled.descriptors
+    f.native_ready = true
 
   out_ctx = NativeContext(
     vm: self,
     trampoline: cast[pointer](native_trampoline),
+    entry: f.native_entry,
     descriptors: nil,
-    descriptor_count: f.native_descriptors.len.int32
+    descriptor_count: f.native_descriptors.len.int32,
+    return_float: f.native_return_float,
+    return_string: f.native_return_string,
+    return_value: f.native_return_value
   )
   if f.native_descriptors.len > 0:
     out_ctx.descriptors = cast[ptr UncheckedArray[CallDescriptor]](f.native_descriptors[0].addr)
   true
 
-proc unbox_native_result(f: Function, result_i64: int64, out_value: var Value) {.inline.} =
-  if f.native_return_float:
+proc unbox_native_result(ctx: NativeContext, result_i64: int64, out_value: var Value) {.inline.} =
+  if ctx.return_float:
     out_value = cast[float64](result_i64).to_value()
-  elif f.native_return_value:
+  elif ctx.return_value:
     out_value = Value(raw: cast[uint64](result_i64))
-  elif f.native_return_string:
+  elif ctx.return_string:
     let payload = cast[uint64](result_i64) and PAYLOAD_MASK
     out_value = cast[Value](STRING_TAG or payload)
   else:
@@ -145,8 +153,8 @@ proc try_native_call0(self: ptr VirtualMachine, f: Function, out_value: var Valu
   var ctx: NativeContext
   if not self.prepare_native_ctx(f, ctx):
     return false
-  let result_i64 = cast[NativeFn0](f.native_entry)(addr ctx)
-  unbox_native_result(f, result_i64, out_value)
+  let result_i64 = cast[NativeFn0](ctx.entry)(addr ctx)
+  unbox_native_result(ctx, result_i64, out_value)
   true
 
 proc try_native_call1(self: ptr VirtualMachine, f: Function, arg: Value, out_value: var Value): bool =
@@ -158,8 +166,8 @@ proc try_native_call1(self: ptr VirtualMachine, f: Function, arg: Value, out_val
   if not self.prepare_native_ctx(f, ctx):
     return false
   let a0 = arg_to_i64(arg, native_arg_type_id(f, 0))
-  let result_i64 = cast[NativeFn1](f.native_entry)(addr ctx, a0)
-  unbox_native_result(f, result_i64, out_value)
+  let result_i64 = cast[NativeFn1](ctx.entry)(addr ctx, a0)
+  unbox_native_result(ctx, result_i64, out_value)
   true
 
 proc try_native_call(self: ptr VirtualMachine, f: Function, args: seq[Value], out_value: var Value): bool =
@@ -178,22 +186,22 @@ proc try_native_call(self: ptr VirtualMachine, f: Function, args: seq[Value], ou
   var result_i64: int64
   case args.len
   of 0:
-    result_i64 = cast[NativeFn0](f.native_entry)(addr ctx)
+    result_i64 = cast[NativeFn0](ctx.entry)(addr ctx)
   of 1:
-    result_i64 = cast[NativeFn1](f.native_entry)(addr ctx, m[0])
+    result_i64 = cast[NativeFn1](ctx.entry)(addr ctx, m[0])
   of 2:
-    result_i64 = cast[NativeFn2](f.native_entry)(addr ctx, m[0], m[1])
+    result_i64 = cast[NativeFn2](ctx.entry)(addr ctx, m[0], m[1])
   of 3:
-    result_i64 = cast[NativeFn3](f.native_entry)(addr ctx, m[0], m[1], m[2])
+    result_i64 = cast[NativeFn3](ctx.entry)(addr ctx, m[0], m[1], m[2])
   of 4:
-    result_i64 = cast[NativeFn4](f.native_entry)(addr ctx, m[0], m[1], m[2], m[3])
+    result_i64 = cast[NativeFn4](ctx.entry)(addr ctx, m[0], m[1], m[2], m[3])
   of 5:
-    result_i64 = cast[NativeFn5](f.native_entry)(addr ctx, m[0], m[1], m[2], m[3], m[4])
+    result_i64 = cast[NativeFn5](ctx.entry)(addr ctx, m[0], m[1], m[2], m[3], m[4])
   of 6:
-    result_i64 = cast[NativeFn6](f.native_entry)(addr ctx, m[0], m[1], m[2], m[3], m[4], m[5])
+    result_i64 = cast[NativeFn6](ctx.entry)(addr ctx, m[0], m[1], m[2], m[3], m[4], m[5])
   of 7:
-    result_i64 = cast[NativeFn7](f.native_entry)(addr ctx, m[0], m[1], m[2], m[3], m[4], m[5], m[6])
+    result_i64 = cast[NativeFn7](ctx.entry)(addr ctx, m[0], m[1], m[2], m[3], m[4], m[5], m[6])
   else:
     return false
-  unbox_native_result(f, result_i64, out_value)
+  unbox_native_result(ctx, result_i64, out_value)
   true

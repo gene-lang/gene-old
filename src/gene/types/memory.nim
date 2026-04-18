@@ -85,33 +85,27 @@ proc retainManaged*(raw: uint64) {.gcsafe.} =
     of 0xFFF8:  # ARRAY_TAG
       let arr = cast[ptr ArrayObj](raw and PAYLOAD_MASK)
       if arr != nil:
-        # atomicInc(arr.ref_count)
-        arr.ref_count.inc()
+        atomicInc(arr.ref_count)
     of 0xFFF9:  # MAP_TAG
       let m = cast[ptr MapObj](raw and PAYLOAD_MASK)
       if m != nil:
-        # atomicInc(m.ref_count)
-        m.ref_count.inc()
+        atomicInc(m.ref_count)
     of 0xFFFA:  # INSTANCE_TAG
       let inst = cast[ptr InstanceObj](raw and PAYLOAD_MASK)
       if inst != nil:
-        # atomicInc(inst.ref_count)
-        inst.ref_count.inc()
+        atomicInc(inst.ref_count)
     of 0xFFFB:  # GENE_TAG
       let g = cast[ptr Gene](raw and PAYLOAD_MASK)
       if g != nil:
-        # atomicInc(g.ref_count)
-        g.ref_count.inc()
+        atomicInc(g.ref_count)
     of 0xFFFC:  # REF_TAG
       let ref_obj = cast[ptr Reference](raw and PAYLOAD_MASK)
       if ref_obj != nil:
-        # atomicInc(ref_obj.ref_count)
-        ref_obj.ref_count.inc()
+        atomicInc(ref_obj.ref_count)
     of 0xFFFD:  # STRING_TAG
       let s = cast[ptr String](raw and PAYLOAD_MASK)
       if s != nil:
-        # atomicInc(s.ref_count)
-        s.ref_count.inc()
+        atomicInc(s.ref_count)
     else:
       discard
 
@@ -214,4 +208,3 @@ proc `=sink`*(dest: var Value; src: Value) =
 
   # Transfer ownership (no retain - src won't be destroyed)
   dest.raw = src.raw
-

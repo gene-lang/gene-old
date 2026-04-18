@@ -62,11 +62,36 @@ proc symbol_index*(k: Key): int {.inline.} =
 
 var STRING_INTERN: Table[string, ptr String]
 var STRING_INTERN_LOCK: Lock
+var STRING_INTERN_FROZEN = false
 
 initLock(STRING_INTERN_LOCK)
 
 const MAX_INTERN_STRING_LEN* = 64   ## Strings longer than this are not interned
 const MAX_INTERN_TABLE_SIZE* = 8192 ## Maximum number of interned strings
+
+proc freeze_string_intern_table*() =
+  {.cast(gcsafe).}:
+    acquire(STRING_INTERN_LOCK)
+    try:
+      STRING_INTERN_FROZEN = true
+    finally:
+      release(STRING_INTERN_LOCK)
+
+proc string_intern_table_frozen*(): bool {.gcsafe.} =
+  {.cast(gcsafe).}:
+    acquire(STRING_INTERN_LOCK)
+    try:
+      result = STRING_INTERN_FROZEN
+    finally:
+      release(STRING_INTERN_LOCK)
+
+proc interned_string_entry_count*(): int {.gcsafe.} =
+  {.cast(gcsafe).}:
+    acquire(STRING_INTERN_LOCK)
+    try:
+      result = STRING_INTERN.len
+    finally:
+      release(STRING_INTERN_LOCK)
 
 proc intern_str_value*(s: string): Value {.gcsafe.} =
   ## Return an interned Value for short strings, allocating a fresh one for long strings.
@@ -87,7 +112,7 @@ proc intern_str_value*(s: string): Value {.gcsafe.} =
       if existing != nil:
         existing.ref_count.inc()  # caller's reference
         return cast[Value](STRING_TAG or cast[uint64](existing))
-      if STRING_INTERN.len >= MAX_INTERN_TABLE_SIZE:
+      if STRING_INTERN_FROZEN or STRING_INTERN.len >= MAX_INTERN_TABLE_SIZE:
         # Table full — uninterned fallback
         let str_ptr = cast[ptr String](alloc0(sizeof(String)))
         str_ptr.ref_count = 1

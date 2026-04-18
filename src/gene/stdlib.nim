@@ -18,3 +18,4 @@ proc init_gene_namespace*() =
 proc init_stdlib*() =
   stdlib_core.init_stdlib()
   init_serdes()
+  freeze_bootstrap_publication()

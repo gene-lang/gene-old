@@ -919,6 +919,8 @@ proc extension_library_candidates(name: string): seq[string] =
 proc ensure_genex_extension*(vm: ptr VirtualMachine, part: string): Value =
   ## Ensure a genex extension is loaded when accessing genex/<part>.
   ## Thread-safe: extensions are loaded at most once even under concurrent access.
+  ## These runtime extension publications are intentionally outside the
+  ## bootstrap snapshot boundary frozen after stdlib init.
   if App == NIL or App.kind != VkApplication:
     return NIL
   if App.app.genex_ns.kind != VkNamespace:
@@ -958,6 +960,9 @@ proc ensure_genex_extension*(vm: ptr VirtualMachine, part: string): Value =
     member = ext_ns.to_value()
     App.app.genex_ns.ref.ns.members[key] = member
   return member
+
+proc module_publication_is_actor_local*(): bool {.inline.} =
+  App != NIL and App.kind == VkApplication and App.app.bootstrap_frozen
 
 proc try_member_missing_handlers*(vm: ptr VirtualMachine, ns: Namespace, name: string): Value =
   ## Try each on_member_missing handler on a namespace.
@@ -1240,6 +1245,8 @@ proc compile_module*(path: string): CompilationUnit =
 
 proc load_module*(vm: ptr VirtualMachine, path: string): Namespace =
   ## Load a module from file and return its namespace
+  ## Module cache entries created here are runtime-local publications rather
+  ## than part of the bootstrap-shared snapshot.
   let cache_key = canonical_path(path)
   # Check cache first
   if ModuleCache.hasKey(cache_key):

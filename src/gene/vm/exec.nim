@@ -1,12 +1,21 @@
 ## The main exec* proc — the instruction dispatch loop.
 ## Included from vm.nim — shares its scope.
 
-template get_inline_cache(cu: CompilationUnit, pc: int): ptr InlineCache =
-  ## Fast inline cache access. Compilation units must be published with
-  ## caches pre-sized to `instructions.len`.
-  if pc >= cu.inline_caches.len:
-    raise new_exception(types.Exception, "Inline cache not initialized for published compilation unit")
-  cu.inline_caches[pc].addr
+proc require_published_body(f: Function): CompilationUnit {.inline.} =
+  result = load_published_body(f)
+  if result == nil:
+    f.compile()
+    result = load_published_body(f)
+  if result == nil:
+    raise new_exception(types.Exception, "Function body failed to publish")
+
+proc require_published_body(b: Block): CompilationUnit {.inline.} =
+  result = load_published_body(b)
+  if result == nil:
+    b.compile()
+    result = load_published_body(b)
+  if result == nil:
+    raise new_exception(types.Exception, "Block body failed to publish")
 
 proc resolve_local_lookup_value(self: ptr VirtualMachine, key: Key): Value {.inline.} =
   if self == nil or self.frame == nil or self.frame.scope == nil or self.frame.scope.tracker == nil:
@@ -461,8 +470,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           let tco_frame = tco_value.ref.frame
           if tco_frame.kind in {FkFunction, FkMethod, FkMacroMethod}:
             let f = tco_frame.target.ref.fn
-            if f.body_compiled == nil:
-              f.compile()
+            discard require_published_body(f)
 
             if is_function_like(self.frame.kind) and
                self.frame.target.kind == VkFunction and
@@ -497,8 +505,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           let tco_frame2 = tco_value.ref.frame
           if tco_frame2.kind in {FkFunction, FkMethod, FkMacroMethod}:
             let f2 = tco_frame2.target.ref.fn
-            if f2.body_compiled == nil:
-              f2.compile()
+            let compiled2 = require_published_body(f2)
 
             if is_function_like(self.frame.kind):
               discard self.frame.pop()
@@ -516,7 +523,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                 self.enter_function(func_name)
 
               self.frame = tco_frame2
-              self.cu = f2.body_compiled
+              self.cu = compiled2
               self.pc = 0
               inst = self.cu.instructions[self.pc].addr
               continue
@@ -551,34 +558,20 @@ proc exec*(self: ptr VirtualMachine): Value =
               let raw_ex = if self.current_exception != NIL: self.current_exception else: self.repl_exception
               self.frame.push(raw_ex)
             else:
-              # Inline cache implementation (pre-allocated at compile time)
-              let cache = get_inline_cache(self.cu, self.pc)
-              if cache.ns != nil and cache.version == cache.ns.version and name in cache.ns.members:
-                # Cache hit - use cached value
-                self.frame.push(cache.ns.members[name])
-              else:
-                # Cache miss - do full lookup
-                let resolved = resolve_namespace_value(self.frame.ns, name)
-                var found = resolved.found
-                var value = resolved.value
-                var found_ns = resolved.owner
-                if not found:
-                  # Try thread-local namespace first (for $thread, $main_thread, etc.)
-                  if self.thread_local_ns != nil:
-                    let thread_resolved = resolve_namespace_value(self.thread_local_ns, name)
-                    found = thread_resolved.found
-                    value = thread_resolved.value
-                    found_ns = thread_resolved.owner
-                if not found:
-                  let symbol_name = get_symbol(symbol_index(name))
-                  not_allowed(symbol_name & " is not defined")
-                # Update cache
-                if found_ns != nil:
-                  cache.ns = found_ns
-                  cache.version = found_ns.version
-                  cache.value = value
+              let resolved = resolve_namespace_value(self.frame.ns, name)
+              var found = resolved.found
+              var value = resolved.value
+              if not found:
+                # Try thread-local namespace first (for $thread, $main_thread, etc.)
+                if self.thread_local_ns != nil:
+                  let thread_resolved = resolve_namespace_value(self.thread_local_ns, name)
+                  found = thread_resolved.found
+                  value = thread_resolved.value
+              if not found:
+                let symbol_name = get_symbol(symbol_index(name))
+                not_allowed(symbol_name & " is not defined")
 
-                self.frame.push(value)
+              self.frame.push(value)
 
       of IkSelf:
         # Get self from first argument
@@ -2136,11 +2129,10 @@ proc exec*(self: ptr VirtualMachine): Value =
               of FkFunction, FkMethod, FkMacroMethod:
                 let f = frame.target.ref.fn
                 when DEBUG_VM:
-                  vm_log(LlDebug, VmExecLogger, fmt"  Function name = {f.name}, has compiled body = {f.body_compiled != nil}")
-                if f.body_compiled == nil:
-                  f.compile()
-                  when DEBUG_VM:
-                    vm_log(LlDebug, VmExecLogger, "  After compile, scope_tracker.mappings = " & $f.scope_tracker.mappings)
+                  vm_log(LlDebug, VmExecLogger, fmt"  Function name = {f.name}, has compiled body = {load_published_body(f) != nil}")
+                let compiled = require_published_body(f)
+                when DEBUG_VM:
+                  vm_log(LlDebug, VmExecLogger, "  After compile, scope_tracker.mappings = " & $f.scope_tracker.mappings)
 
                 self.pc.inc()
                 # Pop the VkFrame value from the stack before switching context
@@ -2157,7 +2149,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                   self.enter_function(func_name)
 
                 self.frame = frame
-                self.cu = f.body_compiled
+                self.cu = compiled
 
                 # Process arguments if matcher exists
                 when DEBUG_VM:
@@ -2265,8 +2257,7 @@ proc exec*(self: ptr VirtualMachine): Value =
               of FkMacro:
                 # Handle macro-like function (VkFunction with is_macro_like=true)
                 let f = frame.target.ref.fn
-                if f.body_compiled == nil:
-                  f.compile()
+                let compiled = require_published_body(f)
 
                 self.pc.inc()
                 # Pop the VkFrame value from the stack before switching context
@@ -2277,7 +2268,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                 frame.caller_address = Address(cu: self.cu, pc: self.pc)
                 frame.ns = f.ns
                 self.frame = frame
-                self.cu = f.body_compiled
+                self.cu = compiled
 
                 # Process arguments if matcher exists
                 if not f.matcher.is_empty():
@@ -2289,8 +2280,7 @@ proc exec*(self: ptr VirtualMachine): Value =
 
               of FkBlock:
                 let b = frame.target.ref.block
-                if b.body_compiled == nil:
-                  b.compile()
+                let compiled = require_published_body(b)
 
                 self.pc.inc()
                 # Pop the VkFrame value from the stack before switching context
@@ -2301,7 +2291,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                 frame.caller_address = Address(cu: self.cu, pc: self.pc)
                 frame.ns = b.ns
                 self.frame = frame
-                self.cu = b.body_compiled
+                self.cu = compiled
 
                 # Process arguments if matcher exists
                 if not b.matcher.is_empty():
@@ -3402,8 +3392,9 @@ proc exec*(self: ptr VirtualMachine): Value =
         f.scope_tracker = scope_tracker_obj
         if f.matcher != nil:
           f.matcher.type_check = self.type_check
-          if f.body_compiled != nil and f.body_compiled.type_descriptors.len > 0:
-            f.matcher.type_descriptors = f.body_compiled.type_descriptors
+          let compiled_body = load_published_body(f)
+          if compiled_body != nil and compiled_body.type_descriptors.len > 0:
+            f.matcher.type_descriptors = compiled_body.type_descriptors
           elif self.cu != nil and self.cu.type_descriptors.len > 0:
             f.matcher.type_descriptors = self.cu.type_descriptors
         if not f.matcher.is_empty():
@@ -3919,19 +3910,9 @@ proc exec*(self: ptr VirtualMachine): Value =
           continue
 
         let class = v.get_class()
-        var cache: ptr InlineCache
-        cache = get_inline_cache(self.cu, self.pc)
-
-        var meth: Method
-        if cache.class != nil and cache.class == class and cache.class_version == class.version and cache.cached_method != nil:
-          meth = cache.cached_method
-        else:
-          meth = class.get_method(method_name)
-          if meth == nil:
-            not_allowed("Method '" & method_name & "' not found on " & $v.kind)
-          cache.class = class
-          cache.class_version = class.version
-          cache.cached_method = meth
+        let meth = class.get_method(method_name)
+        if meth == nil:
+          not_allowed("Method '" & method_name & "' not found on " & $v.kind)
 
         # Push the method callable on top of the object
         self.frame.push(meth.callable)
@@ -4725,8 +4706,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             if self.try_native_call0(f, native_result):
               self.frame.push(native_result)
             else:
-              if f.body_compiled == nil:
-                f.compile()
+              let compiled = require_published_body(f)
 
               var scope: Scope
               if f.matcher.is_empty():
@@ -4763,7 +4743,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                 ))
 
               self.frame = new_frame
-              self.cu = f.body_compiled
+              self.cu = compiled
               self.pc = 0
               inst = self.cu.instructions[self.pc].addr
               continue
@@ -4787,8 +4767,7 @@ proc exec*(self: ptr VirtualMachine): Value =
 
         of VkBlock:
           let b = target.ref.block
-          if b.body_compiled == nil:
-            b.compile()
+          let compiled = require_published_body(b)
 
           var scope: Scope
           if b.matcher.is_empty():
@@ -4809,7 +4788,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           new_frame.ns = b.ns
 
           self.frame = new_frame
-          self.cu = b.body_compiled
+          self.cu = compiled
           self.pc = 0
           inst = self.cu.instructions[self.pc].addr
           continue
@@ -4828,8 +4807,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             case init_method.callable.kind:
             of VkFunction:
               let f = init_method.callable.ref.fn
-              if f.body_compiled == nil:
-                f.compile()
+              let compiled = require_published_body(f)
 
               var scope: Scope
               if f.matcher.is_empty():
@@ -4855,7 +4833,7 @@ proc exec*(self: ptr VirtualMachine): Value =
               new_frame.ns = f.ns
 
               self.frame = new_frame
-              self.cu = f.body_compiled
+              self.cu = compiled
               self.pc = 0
               inst = self.cu.instructions[self.pc].addr
               continue
@@ -4910,8 +4888,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             if self.try_native_call1(f, arg, native_result):
               self.frame.push(native_result)
             else:
-              if f.body_compiled == nil:
-                f.compile()
+              let compiled = require_published_body(f)
 
               var scope: Scope
               if f.matcher.is_empty():
@@ -4950,7 +4927,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                 ))
 
               self.frame = new_frame
-              self.cu = f.body_compiled
+              self.cu = compiled
               self.pc = 0
               inst = self.cu.instructions[self.pc].addr
               continue
@@ -4970,8 +4947,7 @@ proc exec*(self: ptr VirtualMachine): Value =
 
         of VkBlock:
           let b = target.ref.block
-          if b.body_compiled == nil:
-            b.compile()
+          let compiled = require_published_body(b)
 
           var scope: Scope
           if b.matcher.is_empty():
@@ -4993,7 +4969,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           new_frame.ns = b.ns
 
           self.frame = new_frame
-          self.cu = b.body_compiled
+          self.cu = compiled
           self.pc = 0
           inst = self.cu.instructions[self.pc].addr
           continue
@@ -5012,8 +4988,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             case init_method.callable.kind:
             of VkFunction:
               let f = init_method.callable.ref.fn
-              if f.body_compiled == nil:
-                f.compile()
+              let compiled = require_published_body(f)
 
               var scope: Scope
               if f.matcher.is_empty():
@@ -5038,7 +5013,7 @@ proc exec*(self: ptr VirtualMachine): Value =
               new_frame.ns = f.ns
 
               self.frame = new_frame
-              self.cu = f.body_compiled
+              self.cu = compiled
               self.pc = 0
               inst = self.cu.instructions[self.pc].addr
               continue
@@ -5128,8 +5103,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             if self.try_native_call(f, args, native_result):
               self.frame.push(native_result)
             else:
-              if f.body_compiled == nil:
-                f.compile()
+              let compiled = require_published_body(f)
 
               var scope: Scope
               if f.matcher.is_empty():
@@ -5169,7 +5143,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                 ))
 
               self.frame = new_frame
-              self.cu = f.body_compiled
+              self.cu = compiled
               self.pc = 0
               inst = self.cu.instructions[self.pc].addr
               continue
@@ -5207,8 +5181,7 @@ proc exec*(self: ptr VirtualMachine): Value =
 
         of VkBlock:
           let b = target.ref.block
-          if b.body_compiled == nil:
-            b.compile()
+          let compiled = require_published_body(b)
 
           var scope: Scope
           if b.matcher.is_empty():
@@ -5231,7 +5204,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           new_frame.ns = b.ns
 
           self.frame = new_frame
-          self.cu = b.body_compiled
+          self.cu = compiled
           self.pc = 0
           inst = self.cu.instructions[self.pc].addr
           continue
@@ -5287,8 +5260,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             if self.try_native_call(f, args, native_result):
               self.frame.push(native_result)
             else:
-              if f.body_compiled == nil:
-                f.compile()
+              let compiled = require_published_body(f)
 
               var scope: Scope
               if f.matcher.is_empty():
@@ -5327,7 +5299,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                 ))
 
               self.frame = new_frame
-              self.cu = f.body_compiled
+              self.cu = compiled
               self.pc = 0
               inst = self.cu.instructions[self.pc].addr
               continue
@@ -5476,8 +5448,7 @@ proc exec*(self: ptr VirtualMachine): Value =
 
         of VkBlock:
           let b = target.ref.block
-          if b.body_compiled == nil:
-            b.compile()
+          let compiled = require_published_body(b)
 
           var scope: Scope
           if b.matcher.is_empty():
@@ -5501,7 +5472,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           new_frame.ns = b.ns
 
           self.frame = new_frame
-          self.cu = b.body_compiled
+          self.cu = compiled
           self.pc = 0
           inst = self.cu.instructions[self.pc].addr
           continue
@@ -5542,8 +5513,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             if self.try_native_call(f, args, native_result):
               self.frame.push(native_result)
             else:
-              if f.body_compiled == nil:
-                f.compile()
+              let compiled = require_published_body(f)
 
               var scope: Scope
               if f.matcher.is_empty():
@@ -5586,7 +5556,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                 ))
 
               self.frame = new_frame
-              self.cu = f.body_compiled
+              self.cu = compiled
               self.pc = 0
               inst = self.cu.instructions[self.pc].addr
               continue
@@ -5617,8 +5587,7 @@ proc exec*(self: ptr VirtualMachine): Value =
 
         of VkBlock:
           let b = target.ref.block
-          if b.body_compiled == nil:
-            b.compile()
+          let compiled = require_published_body(b)
 
           var scope: Scope
           if b.matcher.is_empty():
@@ -5641,7 +5610,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           new_frame.ns = b.ns
 
           self.frame = new_frame
-          self.cu = b.body_compiled
+          self.cu = compiled
           self.pc = 0
           inst = self.cu.instructions[self.pc].addr
           continue
@@ -5799,17 +5768,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           # to avoid the seq allocation in call_value_method → invoke_method_value.
           let value_class = get_value_class(obj)
           if value_class != nil:
-            var cache: ptr InlineCache
-            cache = get_inline_cache(self.cu, self.pc)
-            var meth: Method
-            if cache.class != nil and cache.class == value_class and cache.class_version == value_class.version and cache.cached_method != nil:
-              meth = cache.cached_method
-            else:
-              meth = value_class.get_method(method_key_0)
-              if meth != nil:
-                cache.class = value_class
-                cache.class_version = value_class.version
-                cache.cached_method = meth
+            let meth = value_class.get_method(method_key_0)
             if meth != nil and meth.callable.kind == VkNativeFn:
               let result = call_native_fn(meth.callable.ref.native_fn, self, [obj])
               self.frame.push(result)
@@ -5828,28 +5787,14 @@ proc exec*(self: ptr VirtualMachine): Value =
           let class = obj.get_object_class()
           if class.is_nil:
             not_allowed("Object has no class for method call")
-          var cache: ptr InlineCache
-          cache = get_inline_cache(self.cu, self.pc)
-
-          var meth: Method
-          if cache.class != nil and cache.class == class and cache.class_version == class.version and cache.cached_method != nil:
-            # CACHE HIT: Use cached method
-            meth = cache.cached_method
-          else:
-            # CACHE MISS: Look up method and cache it
-            meth = class.get_method(method_key_0)
-            if meth != nil:
-              cache.class = class
-              cache.class_version = class.version
-              cache.cached_method = meth
+          let meth = class.get_method(method_key_0)
 
           if meth != nil:
             case meth.callable.kind:
             of VkFunction:
               # OPTIMIZED: Follow IkCallMethod1 pattern for zero-arg method calls
               let f = meth.callable.ref.fn
-              if f.body_compiled == nil:
-                f.compile()
+              let compiled = require_published_body(f)
 
               # Use exact same scope optimization as original IkCallMethod1
               var scope: Scope
@@ -5903,7 +5848,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                 ))
 
               self.frame = new_frame
-              self.cu = f.body_compiled
+              self.cu = compiled
               self.pc = 0
               inst = self.cu.instructions[self.pc].addr
               continue
@@ -5991,17 +5936,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           # Fast path: inline-cached native method dispatch for value types
           let value_class = get_value_class(obj)
           if value_class != nil:
-            var cache: ptr InlineCache
-            cache = get_inline_cache(self.cu, self.pc)
-            var meth: Method
-            if cache.class != nil and cache.class == value_class and cache.class_version == value_class.version and cache.cached_method != nil:
-              meth = cache.cached_method
-            else:
-              meth = value_class.get_method(method_key_1)
-              if meth != nil:
-                cache.class = value_class
-                cache.class_version = value_class.version
-                cache.cached_method = meth
+            let meth = value_class.get_method(method_key_1)
             if meth != nil and meth.callable.kind == VkNativeFn:
               let result = call_native_fn(meth.callable.ref.native_fn, self, [obj, arg])
               self.frame.push(result)
@@ -6020,28 +5955,14 @@ proc exec*(self: ptr VirtualMachine): Value =
           let class = obj.get_object_class()
           if class.is_nil:
             not_allowed("Object has no class for method call")
-          var cache: ptr InlineCache
-          cache = get_inline_cache(self.cu, self.pc)
-
-          var meth: Method
-          if cache.class != nil and cache.class == class and cache.class_version == class.version and cache.cached_method != nil:
-            # CACHE HIT: Use cached method
-            meth = cache.cached_method
-          else:
-            # CACHE MISS: Look up method and cache it
-            meth = class.get_method(method_key_1)
-            if meth != nil:
-              cache.class = class
-              cache.class_version = class.version
-              cache.cached_method = meth
+          let meth = class.get_method(method_key_1)
 
           if meth != nil:
             case meth.callable.kind:
             of VkFunction:
               # OPTIMIZED: Follow IkCallMethod1 pattern for single-arg method calls
               let f = meth.callable.ref.fn
-              if f.body_compiled == nil:
-                f.compile()
+              let compiled = require_published_body(f)
 
               # Use exact same scope optimization as IkUnifiedMethodCall0
               var scope: Scope
@@ -6103,7 +6024,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                 ))
 
               self.frame = new_frame
-              self.cu = f.body_compiled
+              self.cu = compiled
               self.pc = 0
               inst = self.cu.instructions[self.pc].addr
               continue
@@ -6183,28 +6104,14 @@ proc exec*(self: ptr VirtualMachine): Value =
           let class = obj.get_object_class()
           if class.is_nil:
             not_allowed("Object has no class for method call")
-          var cache: ptr InlineCache
-          cache = get_inline_cache(self.cu, self.pc)
-
-          var meth: Method
-          if cache.class != nil and cache.class == class and cache.class_version == class.version and cache.cached_method != nil:
-            # CACHE HIT: Use cached method
-            meth = cache.cached_method
-          else:
-            # CACHE MISS: Look up method and cache it
-            meth = class.get_method(method_name)
-            if meth != nil:
-              cache.class = class
-              cache.class_version = class.version
-              cache.cached_method = meth
+          let meth = class.get_method(method_name)
 
           if meth != nil:
             case meth.callable.kind:
             of VkFunction:
               # OPTIMIZED: Follow IkCallMethod pattern for two-arg method calls
               let f = meth.callable.ref.fn
-              if f.body_compiled == nil:
-                f.compile()
+              let compiled = require_published_body(f)
 
               # Use exact same scope optimization as IkUnifiedMethodCall0
               var scope: Scope
@@ -6274,7 +6181,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                 ))
 
               self.frame = new_frame
-              self.cu = f.body_compiled
+              self.cu = compiled
               self.pc = 0
               inst = self.cu.instructions[self.pc].addr
               continue
@@ -6358,8 +6265,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             case meth.callable.kind:
             of VkFunction:
               let f = meth.callable.ref.fn
-              if f.body_compiled == nil:
-                f.compile()
+              let compiled = require_published_body(f)
 
               var scope: Scope
               if f.matcher.is_empty():
@@ -6387,7 +6293,7 @@ proc exec*(self: ptr VirtualMachine): Value =
               new_frame.ns = f.ns
 
               self.frame = new_frame
-              self.cu = f.body_compiled
+              self.cu = compiled
               self.pc = 0
               inst = self.cu.instructions[self.pc].addr
               continue
@@ -6495,8 +6401,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             case meth.callable.kind:
             of VkFunction:
               let f = meth.callable.ref.fn
-              if f.body_compiled == nil:
-                f.compile()
+              let compiled = require_published_body(f)
 
               var scope: Scope
               if f.matcher.is_empty():
@@ -6539,7 +6444,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                 ))
 
               self.frame = new_frame
-              self.cu = f.body_compiled
+              self.cu = compiled
               self.pc = 0
               inst = self.cu.instructions[self.pc].addr
               continue
@@ -6624,8 +6529,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             case meth.callable.kind:
             of VkFunction:
               let f = meth.callable.ref.fn
-              if f.body_compiled == nil:
-                f.compile()
+              let compiled = require_published_body(f)
 
               var scope: Scope
               if f.matcher.is_empty():
@@ -6673,7 +6577,7 @@ proc exec*(self: ptr VirtualMachine): Value =
                 ))
 
               self.frame = new_frame
-              self.cu = f.body_compiled
+              self.cu = compiled
               self.pc = 0
               inst = self.cu.instructions[self.pc].addr
               continue

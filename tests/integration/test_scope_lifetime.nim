@@ -59,6 +59,28 @@ suite "Scope Lifetime":
   """, 3
 
   test_vm """
+    (fn test_async_managed_values []
+      (var data [10 20 30])
+      (var offsets [1 2])
+      (var f (async (do
+        (var inner [100 200])
+        (+ (+ (./ data 1) (./ offsets 1)) (./ inner 0)))))
+      (await f))
+    (test_async_managed_values)
+  """, 122
+
+  test_vm """
+    (fn test_scope_teardown_after_async_capture []
+      (var f
+        (do
+          (var payload [5 6 7])
+          (var bonus [9])
+          (async (+ (./ payload 2) (./ bonus 0)))))
+      (await f))
+    (test_scope_teardown_after_async_capture)
+  """, 16
+
+  test_vm """
     (var total 0)
     (fn accumulate [n]
       (if (> n 0)

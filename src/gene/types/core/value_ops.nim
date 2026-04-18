@@ -53,85 +53,17 @@ converter to_value*(k: Key): Value {.inline.} =
 # Manual ref counting is used instead of Nim ARC/ORC for Value-backed types.
 # Map, Array, and Instance use dedicated NaN-tagged objects rather than Reference.
 
-# Manual reference counting for Values
+# Manual stack/runtime ownership uses the same managed-hook primitives as
+# ordinary Nim assignment sites. The VM still decides *when* a retain/release
+# boundary exists; memory.nim remains the source of truth for *how* it updates
+# managed Value lifetimes.
 proc retain*(v: Value) {.inline.} =
-  {.push checks: off.}
-  let u = cast[uint64](v)
-  if (u and NAN_MASK) == NAN_MASK:  # In NaN space
-    case u and 0xFFFF_0000_0000_0000u64:
-      of REF_TAG:
-        let x = cast[ptr Reference](u and PAYLOAD_MASK)
-        x.ref_count.inc()
-      of ARRAY_TAG:
-        let x = cast[ptr ArrayObj](u and PAYLOAD_MASK)
-        x.ref_count.inc()
-      of MAP_TAG:
-        let x = cast[ptr MapObj](u and PAYLOAD_MASK)
-        x.ref_count.inc()
-      of INSTANCE_TAG:
-        let x = cast[ptr InstanceObj](u and PAYLOAD_MASK)
-        x.ref_count.inc()
-      of GENE_TAG:
-        let x = cast[ptr Gene](u and PAYLOAD_MASK)
-        x.ref_count.inc()
-      of STRING_TAG:
-        let x = cast[ptr String](u and PAYLOAD_MASK)
-        if not x.is_nil:
-          x.ref_count.inc()
-      else:
-        discard  # No ref counting for other types
-  {.pop.}
+  if isManaged(v):
+    retainManaged(v.raw)
 
 proc release*(v: Value) {.inline.} =
-  {.push checks: off.}
-  let u = cast[uint64](v)
-  if (u and NAN_MASK) == NAN_MASK:  # In NaN space
-    case u and 0xFFFF_0000_0000_0000u64:
-      of REF_TAG:
-        let x = cast[ptr Reference](u and PAYLOAD_MASK)
-        if x.ref_count == 1:
-          if x.kind == VkFunction and x.fn != nil and x.fn.native_descriptors.len > 0:
-            for desc in x.fn.native_descriptors:
-              release(desc.callable)
-            x.fn.native_descriptors = @[]
-          reset(x[])
-          dealloc(x)
-        else:
-          x.ref_count.dec()
-      of ARRAY_TAG:
-        let x = cast[ptr ArrayObj](u and PAYLOAD_MASK)
-        if x.ref_count == 1:
-          dealloc(x)
-        else:
-          x.ref_count.dec()
-      of MAP_TAG:
-        let x = cast[ptr MapObj](u and PAYLOAD_MASK)
-        if x.ref_count == 1:
-          dealloc(x)
-        else:
-          x.ref_count.dec()
-      of INSTANCE_TAG:
-        let x = cast[ptr InstanceObj](u and PAYLOAD_MASK)
-        if x.ref_count == 1:
-          dealloc(x)
-        else:
-          x.ref_count.dec()
-      of GENE_TAG:
-        let x = cast[ptr Gene](u and PAYLOAD_MASK)
-        if x.ref_count == 1:
-          dealloc(x)
-        else:
-          x.ref_count.dec()
-      of STRING_TAG:
-        let x = cast[ptr String](u and PAYLOAD_MASK)
-        if not x.is_nil:
-          if x.ref_count == 1:
-            dealloc(x)
-          else:
-            x.ref_count.dec()
-      else:
-        discard  # No ref counting for other types
-  {.pop.}
+  if isManaged(v):
+    releaseManaged(v.raw)
 
 proc array_ptr*(v: Value): ptr ArrayObj {.inline.} =
   let u = cast[uint64](v)
@@ -243,11 +175,11 @@ proc `ref`*(v: Value): ptr Reference {.inline.} =
     raise newException(ValueError, "Value is not a reference")
 
 proc to_ref_value*(v: ptr Reference): Value {.inline.} =
-  v.ref_count.inc()
   # Ensure pointer fits in 48 bits
   let ptr_addr = cast[uint64](v)
   assert (ptr_addr and 0xFFFF_0000_0000_0000u64) == 0, "Reference pointer too large for NaN boxing"
   result = cast[Value](REF_TAG or ptr_addr)
+  retainManaged(result.raw)
 
 template hash_map_items*(v: Value): var seq[Value] =
   `ref`(v).hash_map_items

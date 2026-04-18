@@ -7,6 +7,7 @@ import ../wasm_host_abi
 
 proc refresh_env_map*()
 proc set_program_args*(program: string, args: seq[string])
+proc freeze_bootstrap_publication*()
 
 var body_publication_lock*: Lock
 var native_publication_lock*: Lock
@@ -40,6 +41,44 @@ proc publish_compiled_body*(b: Block, cu: CompilationUnit) =
     b.body_compiled.matcher = b.matcher
   else:
     ensure_inline_caches_ready(b.body_compiled)
+
+proc load_published_body*(f: Function): CompilationUnit =
+  if f == nil:
+    return nil
+  acquire(body_publication_lock)
+  defer: release(body_publication_lock)
+  result = f.body_compiled
+  if result != nil:
+    ensure_inline_caches_ready(result)
+    result.matcher = f.matcher
+
+proc load_published_body*(b: Block): CompilationUnit =
+  if b == nil:
+    return nil
+  acquire(body_publication_lock)
+  defer: release(body_publication_lock)
+  result = b.body_compiled
+  if result != nil:
+    ensure_inline_caches_ready(result)
+    result.matcher = b.matcher
+
+proc snapshot_namespace_members(ns_value: Value): Value =
+  if ns_value.kind != VkNamespace:
+    return new_frozen_map_value()
+  var snapshot = initTable[Key, Value]()
+  for k, v in ns_value.ref.ns.members:
+    snapshot[k] = v
+  new_frozen_map_value(snapshot)
+
+proc freeze_bootstrap_publication*() =
+  if App == NIL or App.kind != VkApplication:
+    return
+  if App.app.bootstrap_frozen:
+    return
+  App.app.bootstrap_gene_ns_snapshot = snapshot_namespace_members(App.app.gene_ns)
+  App.app.bootstrap_genex_ns_snapshot = snapshot_namespace_members(App.app.genex_ns)
+  freeze_string_intern_table()
+  App.app.bootstrap_frozen = true
 
 #################### VM ##########################
 

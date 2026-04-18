@@ -392,6 +392,9 @@ type
     global_ns*     : Value
     gene_ns*       : Value
     genex_ns*      : Value
+    bootstrap_frozen*: bool
+    bootstrap_gene_ns_snapshot*: Value
+    bootstrap_genex_ns_snapshot*: Value
 
     object_class*   : Value
     nil_class*      : Value
@@ -1135,6 +1138,10 @@ type
     trampoline*: pointer
     descriptors*: ptr UncheckedArray[CallDescriptor]
     descriptor_count*: int32
+    entry*: pointer
+    return_float*: bool
+    return_string*: bool
+    return_value*: bool
 
   VmCallback* = proc() {.gcsafe.}
 

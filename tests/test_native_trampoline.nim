@@ -96,6 +96,37 @@ test "native codegen: fib runs natively":
   check not f.native_failed
   check f.native_entry != nil
 
+test "native codegen: repeated execution reuses published descriptors":
+  init_all()
+  let prev = VM.native_code
+  let prev_tier = VM.native_tier
+  defer:
+    VM.native_code = prev
+    VM.native_tier = prev_tier
+  VM.native_tier = NctGuarded
+  VM.native_code = true
+
+  let result = VM.exec(FIB_NATIVE, "test_native_fib_reuse")
+  check result.kind == VkArray
+  let items = array_data(result)
+  check items.len == 3
+  check items[2].kind == VkFunction
+
+  let fn_value = items[2]
+  let f = fn_value.ref.fn
+  check f.native_ready
+  let first_entry = f.native_entry
+  let first_descriptor_count = f.native_descriptors.len
+
+  let second = VM.exec_function(fn_value, @[10.to_value()])
+  let third = VM.exec_function(fn_value, @[11.to_value()])
+  check second.to_int() == 55
+  check third.to_int() == 89
+  check f.native_ready
+  check not f.native_failed
+  check f.native_entry == first_entry
+  check f.native_descriptors.len == first_descriptor_count
+
 test "native tier never disables native compile attempts":
   init_all()
   let prev = VM.native_code
