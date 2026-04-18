@@ -25,6 +25,7 @@ import ./selectors as stdlib_selectors
 import ./gdat as stdlib_gdat
 import ./gene_meta as stdlib_gene_meta
 import ./aspects as stdlib_aspects
+import ./freeze as stdlib_freeze
 
 when not defined(gene_wasm):
   import osproc, asyncfile, terminal
@@ -4174,6 +4175,7 @@ proc init_stdlib*() =
 
   # Collections
   global_ns["len".to_key()] = NativeFn(core_len).to_value()
+  global_ns["freeze".to_key()] = NativeFn(stdlib_freeze.core_freeze).to_value()
   global_ns["types_equivalent".to_key()] = core_types_equivalent.to_value()
   global_ns["types_equiv".to_key()] = core_types_equivalent.to_value()
 
