@@ -43,8 +43,48 @@ proc already_seen(v: Value, visited: var HashSet[uint64]): bool =
   visited.incl(id)
   false
 
+proc already_seen_scope(scope: Scope, visited: var HashSet[uint64]): bool =
+  if scope == nil:
+    return true
+
+  let id = cast[uint64](scope)
+  if id == 0:
+    return true
+  if id in visited:
+    return true
+
+  visited.incl(id)
+  false
+
+proc capture_segment(scope: Scope, slot: int): string =
+  if scope != nil and scope.tracker != nil:
+    for key, index in scope.tracker.mappings:
+      if index == slot.int16:
+        return "<capture:" & symbol_name(key) & ">"
+
+  "<slot:" & $slot & ">"
+
 proc validate_for_freeze*(v: Value, path: string, visited: var HashSet[uint64])
 proc tag_for_freeze*(v: Value, visited: var HashSet[uint64])
+
+proc validate_scope_for_freeze(scope: Scope, path: string, depth: int, visited: var HashSet[uint64]) =
+  if already_seen_scope(scope, visited):
+    return
+
+  let scope_path = append_path(append_path(path, "<closure>"), "<scope:" & $depth & ">")
+  for i, item in scope.members:
+    validate_for_freeze(item, append_path(scope_path, capture_segment(scope, i)), visited)
+
+  validate_scope_for_freeze(scope.parent, path, depth + 1, visited)
+
+proc tag_scope_for_freeze(scope: Scope, visited: var HashSet[uint64]) =
+  if already_seen_scope(scope, visited):
+    return
+
+  for item in scope.members:
+    tag_for_freeze(item, visited)
+
+  tag_scope_for_freeze(scope.parent, visited)
 
 proc validate_for_freeze*(v: Value, path: string, visited: var HashSet[uint64]) =
   if v.deep_frozen or already_seen(v, visited):
@@ -75,6 +115,9 @@ proc validate_for_freeze*(v: Value, path: string, visited: var HashSet[uint64]) 
       validate_for_freeze(value, append_path(path, "." & symbol_name(key)), visited)
     for i, child in v.gene.children:
       validate_for_freeze(child, append_path(path, "children[" & $i & "]"), visited)
+  of VkFunction:
+    if v.ref.fn != nil:
+      validate_scope_for_freeze(v.ref.fn.parent_scope, path, 0, visited)
   else:
     reject_freeze(v, path)
 
@@ -111,6 +154,11 @@ proc tag_for_freeze*(v: Value, visited: var HashSet[uint64]) =
       tag_for_freeze(value, visited)
     for child in v.gene.children:
       tag_for_freeze(child, visited)
+  of VkFunction:
+    setDeepFrozen(v)
+    setShared(v)
+    if v.ref.fn != nil:
+      tag_scope_for_freeze(v.ref.fn.parent_scope, visited)
   else:
     discard
 
