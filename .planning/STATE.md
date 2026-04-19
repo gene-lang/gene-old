@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Completed 01.5-02-PLAN.md
+status: complete
+stopped_at: Completed Phase 1.5 execution and closeout
 last_updated: "2026-04-19T20:51:57.522Z"
-last_activity: 2026-04-19
+last_activity: 2026-04-19 -- Phase 1.5 execution complete
 progress:
   total_phases: 6
   completed_phases: 3
@@ -23,17 +23,17 @@ See: .planning/PROJECT.md (updated 2026-04-17)
 **Core value:** Phase 1 introduced the deep-frozen bit, shared-heap allocation
 path, and `(freeze v)` stdlib operation that every subsequent actor-runtime
 phase depends on, without adding a new concurrency API.
-**Current focus:** Phase 01.5 — freezable-closures
+**Current focus:** Phase 2 (actor runtime) — next planning target
 
 ## Current Position
 
-Phase: 01.5 (freezable-closures) — EXECUTING
+Phase: 01.5 (freezable-closures) — COMPLETE
 Plan: 2 of 2
-Status: Phase complete — ready for verification
-Last activity: 2026-04-19
+Status: Complete
+Last activity: 2026-04-19 -- Phase 1.5 execution complete
 Depends on the verified Phase 1 substrate across `f153f95`..`a36452b`
 
-Progress: [█████████░] 92%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -110,7 +110,7 @@ None yet.
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| Concurrency | Freezable closures (Phase 1.5 — hard prerequisite for Phase 2) | In progress (01.5-01 complete, 01.5-02 pending) | 2026-04-19 |
+| Concurrency | Freezable closures (Phase 1.5 — hard prerequisite for Phase 2) | Complete | 2026-04-19 |
 | Concurrency | Actor scheduler, tiered send, reply futures, stop semantics (Phase 2) | Deferred until Phase 1.5 closes | 2026-04-18 |
 | Concurrency | Port-actor protocol for extensions (Phase 3) | Deferred | 2026-04-17 |
 | Concurrency | Thread API deprecation / `GENE_WORKERS` rename (Phase 4) | Deferred | 2026-04-17 |
@@ -119,6 +119,6 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-04-19T20:51:57.518Z
-Stopped at: Completed 01.5-02-PLAN.md
-Next step: Execute `01.5-02-PLAN.md`
+Stopped at: Completed Phase 1.5 execution
+Next step: Plan or execute Phase 2 actor runtime work
 Resume file: None

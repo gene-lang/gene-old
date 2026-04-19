@@ -29,9 +29,10 @@ slot can be used for the real Phase 1.
   header bits, shared-heap allocation path, atomic-vs-plain refcount branch,
   and the user-facing `(freeze v)` stdlib operation over the MVP container
   scope *(completed 2026-04-19, commits `f153f95`..`a36452b`)*
-- [ ] **Phase 1.5: Freezable closures** - Make closures with freezable
+- [x] **Phase 1.5: Freezable closures** - Make closures with freezable
   captured environments deep-freezable and pointer-shareable so Phase 2 actor
-  scheduling can use the same send semantics for callable payloads
+  scheduling can use the same send semantics for callable payloads *(completed
+  2026-04-19, commits `9e9a97a`..`cfb9140`)*
 - [ ] **Phase 2: Actor runtime** - Add actor scheduler, tiered send semantics,
   reply futures, stop semantics, and the user-facing actor API on top of the
   Phase 0/1 substrate
@@ -91,12 +92,12 @@ Plans:
 |-------|----------------|--------|-----------|
 | 0. Unify lifetime and publication semantics | 5/5 | Complete | 2026-04-18 |
 | 1. Deep-frozen bit, shared heap, and `(freeze v)` | 6/6 | Complete | 2026-04-19 |
-| 1.5. Freezable closures | 0/2 | Planned | - |
+| 1.5. Freezable closures | 2/2 | Complete | 2026-04-19 |
 | 2. Actor runtime | 0/? | Unplanned | - |
 | 3. Port actors for extensions | 0/? | Unplanned | - |
 | 4. Remove legacy thread-first concurrency surfaces | 0/? | Unplanned | - |
 
-### Phase 1.5: Freezable closures
+### Phase 1.5: Freezable closures *(complete)*
 **Goal**: Allow closures whose captured environments are themselves freezable to
 be deep-frozen and pointer-shared, closing the last major gap before the actor
 scheduler lands.

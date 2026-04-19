@@ -36,9 +36,9 @@ a new concurrency API.
 
 ### Active
 
-- [ ] Plan Phase 1.5 (freezable closures) as the next hard prerequisite for
+- [x] Plan Phase 1.5 (freezable closures) as the next hard prerequisite for
   Phase 2 actor scheduling.
-- [ ] Scope Phase 2 actor runtime work on top of the now-verified Phase 1
+- [ ] Scope Phase 2 actor runtime work on top of the now-verified Phase 1.5
   substrate.
 
 ### Out of Scope
@@ -89,7 +89,8 @@ Phase 0 without renumbering or rewriting historical exploratory docs.
 | Phase 0 closeout commit `e2e776c` addresses review gaps before Phase 1 | Cross-AI review flagged P0.1 RC race and P0.5 bootstrap as HIGH risk; both resolved in one commit | ✓ Complete |
 | Archive legacy `01-architecture-comparison/` to unblock Phase 1 numbering | Legacy exploratory material (gene-old vs gene comparison) is unrelated to actor track | ✓ Moved to `.planning/archive/` |
 | Phase 1 uses `--skip-research` with CONTEXT defaults rather than a discuss round | User elected fast path; defaults documented in Phase 1 CONTEXT.md and revisable at review round | ✓ Complete — Phase 1 shipped across commits `f153f95`..`a36452b` |
-| Split freezable closures into Phase 1.5 (not Phase 1) | Closure captured-env analysis is its own workstream; holding Phase 1 to containers keeps the scope testable | - Pending Phase 1.5 |
+| Split freezable closures into Phase 1.5 (not Phase 1) | Closure captured-env analysis is its own workstream; holding Phase 1 to containers keeps the scope testable | ✓ Complete — Phase 1.5 shipped across commits `9e9a97a`..`cfb9140` |
+| Keep legacy thread-first concurrency surfaces unchanged during Phase 1.5 | Closure freezeability is the last substrate gate; actor scheduling and thread-surface removal belong to later phases | ✓ Complete — Phase 1.5 docs/tests fence migration boundaries explicitly |
 
 ## Evolution
 
@@ -109,4 +110,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-19 after Phase 1 completion, verification pass, and planning closeout*
+*Last updated: 2026-04-19 after Phase 1.5 execution and verification pass*

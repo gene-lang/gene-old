@@ -84,9 +84,7 @@ VM.
 ### Freezable Closures (Phase 1.5 — Hard Prerequisite for Phase 2)
 
 - **CLO-01**: Closures with freezable captured environments can be frozen and
-  sent by pointer across actor boundaries. Progress: Plan `01.5-01` completed
-  the closure-freeze runtime rule and unit coverage; Plan `01.5-02` remains to
-  prove actor-ready pointer sharing after scope teardown.
+  sent by pointer across actor boundaries.
 
 ### Actor Runtime
 
@@ -124,7 +122,7 @@ VM.
 | HEAP-01 | Phase 1 | Complete |
 | RC-02 | Phase 1 | Complete |
 | NAME-01 | Phase 1 | Complete |
-| CLO-01 | Phase 1.5 | In progress (01.5-01 complete, 01.5-02 pending) |
+| CLO-01 | Phase 1.5 | Complete |
 | ACT-02 | Phase 2 | Deferred |
 | ACT-03 | Phase 3 | Deferred |
 | ACT-04 | Phase 4 | Deferred |
@@ -132,9 +130,9 @@ VM.
 **Coverage:**
 - v1 requirements (Phase 0): 9 complete
 - v2 requirements (Phase 1): 7 complete
-- v3 requirements (Phase 1.5+): 4 deferred
+- v3 requirements (Phase 1.5+): 1 complete, 3 deferred
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-17*
-*Last updated: 2026-04-19 after Phase 1.5 plan 01 execution*
+*Last updated: 2026-04-19 after Phase 1.5 completion*
