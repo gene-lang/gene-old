@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-03-PLAN.md
-last_updated: "2026-04-19T00:38:12.423Z"
+stopped_at: Completed 01-05-PLAN.md
+last_updated: "2026-04-19T00:47:49.751Z"
 last_activity: 2026-04-19
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 11
-  completed_plans: 9
-  percent: 82
+  completed_plans: 10
+  percent: 91
 ---
 
 # Project State
@@ -28,7 +28,7 @@ phase depends on, without adding a new concurrency API.
 ## Current Position
 
 Phase: 01 (deep-frozen-bit-shared-heap-freeze) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-04-19
 scope-in from `docs/proposals/actor-design.md:687-718`
@@ -56,6 +56,7 @@ Progress: [██░░░░░░░░] 20%
 - Trend: Stable
 
 | Phase 01 P03 | 25m | 4 tasks | 3 files |
+| Phase 01 P05 | 7m | 5 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -80,6 +81,8 @@ Recent decisions affecting current work:
 
 - [Phase 01]: Guard the actual mutation opcode handlers in exec.nim, including current-map/current-gene builder opcodes, instead of relying on higher-level surface syntax alone.
 - [Phase 01]: Keep the existing shallow frozen checks intact and add deep-frozen guards ahead of the writes.
+- [Phase 01]: Phase 01-05 fixes shared-heap semantics as tag-on-existing-heap publication; dedicated pool allocation remains deferred perf work.
+- [Phase 01]: Cross-thread shared-heap verification is pinned to exact before/after refcount equality rather than a specific initial count for nested graphs.
 
 ### Pending Todos
 
@@ -102,7 +105,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-19T00:38:12.420Z
-Stopped at: Completed 01-03-PLAN.md
+Last session: 2026-04-19T00:47:49.747Z
+Stopped at: Completed 01-05-PLAN.md
 step is spawning `gsd-planner` for Phase 1
 Resume file: None

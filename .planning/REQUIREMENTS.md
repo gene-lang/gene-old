@@ -61,7 +61,7 @@ VM.
 
 ### Shared-Heap Allocation
 
-- [ ] **HEAP-01**: Frozen values are reachable from any thread through the same
+- [x] **HEAP-01**: Frozen values are reachable from any thread through the same
   heap without per-actor cloning, with documented invariants for pointer
   sharing distinct from owned-heap values.
 
@@ -119,7 +119,7 @@ VM.
 | FRZ-02 | Phase 1 | Pending |
 | FRZ-03 | Phase 1 | Complete |
 | FRZ-04 | Phase 1 | Complete |
-| HEAP-01 | Phase 1 | Pending |
+| HEAP-01 | Phase 1 | Complete |
 | RC-02 | Phase 1 | Pending |
 | NAME-01 | Phase 1 | Pending |
 | CLO-01 | Phase 1.5 | Deferred |
