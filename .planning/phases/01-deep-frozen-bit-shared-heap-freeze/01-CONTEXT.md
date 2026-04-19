@@ -79,8 +79,9 @@ tracked as a separate phase after Phase 1 closes).
   STRING). All existing atomic paths in `memory.nim:88-170` are replaced with
   a conditional. The non-shared path recovers the pre-Phase-0 owned-case
   performance; the shared path preserves Phase 0 correctness.
-- **D-12:** For types that carry no `shared` bit yet (Instances in Phase 1),
-  refcount stays atomic. Adding `shared` to Instance is out of scope.
+- **D-12:** Instances now participate in the same `shared`-bit RC branch as
+  the other managed headers because 01-01 added `flags` to `InstanceObj`.
+  The owned path is plain `.inc` / `.dec`; the shared path remains atomic.
 
 ### Naming (NAME-01)
 - **D-13:** Final user-facing naming: "sealed" for the shallow `#[]` / `#{}`

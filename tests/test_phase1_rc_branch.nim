@@ -64,22 +64,6 @@ when declared(resetRcBranchProbe):
     check ref_count_of(value) == baseline
     expect_probe_counts(0, 1, 0, 1)
 
-  proc expect_instance_stays_atomic(value: var Value) =
-    resetRcBranchProbe()
-    let baseline = ref_count_of(value)
-
-    retainManaged(value.raw)
-    releaseManaged(value.raw)
-    check ref_count_of(value) == baseline
-    expect_probe_counts(0, 1, 0, 1)
-
-    setShared(value)
-    resetRcBranchProbe()
-    retainManaged(value.raw)
-    releaseManaged(value.raw)
-    check ref_count_of(value) == baseline
-    expect_probe_counts(0, 1, 0, 1)
-
 when declared(setShared) and declared(setRcBranchProbeEnabled):
   proc rc_stress_worker(job: ptr RcStressJob) {.thread.} =
     for _ in 0 ..< job.loops:
@@ -132,10 +116,9 @@ suite "Phase 1 RC branch":
 
       var string_value = "phase1-rc-branch".to_value()
       expect_shared_branch(string_value)
-
-    test "instance path remains atomic even if shared flag is set":
+      
       var instance_value = new_instance_value(nil)
-      expect_instance_stays_atomic(instance_value)
+      expect_shared_branch(instance_value)
 
   when declared(setShared) and declared(setRcBranchProbeEnabled):
     test "shared values survive concurrent retain/release loops with exact refcount":
@@ -144,5 +127,8 @@ suite "Phase 1 RC branch":
 
       var ref_value = new_bytes_value(@[11'u8, 12, 13, 14, 15, 16, 17, 18])
       run_shared_stress(ref_value)
+
+      var instance_value = new_instance_value(nil)
+      run_shared_stress(instance_value)
 
 discard benchmark_owned_array()

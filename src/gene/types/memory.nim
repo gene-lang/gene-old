@@ -150,8 +150,7 @@ proc retainManaged*(raw: uint64) {.gcsafe.} =
     of 0xFFFA:  # INSTANCE_TAG
       let inst = cast[ptr InstanceObj](raw and PAYLOAD_MASK)
       if inst != nil:
-        recordRcBranch(RcAtomicInc)
-        atomicInc(inst.ref_count)
+        incRc(inst, (inst.flags and RC_SHARED_BIT) != 0)
     of 0xFFFB:  # GENE_TAG
       let g = cast[ptr Gene](raw and PAYLOAD_MASK)
       if g != nil:
@@ -207,8 +206,7 @@ proc releaseManaged*(raw: uint64) {.gcsafe.} =
         destroy_map(m)
     of 0xFFFA:  # INSTANCE_TAG
       let inst = cast[ptr InstanceObj](payload)
-      recordRcBranch(RcAtomicDec)
-      let old_count = atomicDec(inst.ref_count)
+      let old_count = decRc(inst, (inst.flags and RC_SHARED_BIT) != 0)
       if old_count == 1:
         destroy_instance(inst)
     of 0xFFFB:  # GENE_TAG

@@ -7,7 +7,7 @@ requires:
   - phase: 01-deep-frozen-bit-shared-heap-freeze
     provides: "Header-bit substrate from 01-01"
 provides:
-  - "Managed RC now branches on the shared header bit for ARRAY, MAP, GENE, REF, and STRING"
+  - "Managed RC now branches on the shared header bit for ARRAY, MAP, INSTANCE, GENE, REF, and STRING"
   - "Focused regression coverage for plain-vs-atomic RC paths plus shared-path thread stress"
   - "Owned-case retain/release performance restored beyond the pre-e2e776c baseline on the benchmarked hot loop"
 affects: [phase-1, freeze-runtime, shared-heap, refcount]
@@ -22,7 +22,7 @@ key-files:
   modified:
     - src/gene/types/memory.nim
 key-decisions:
-  - "Kept the Instance arm atomic per D-12 and limited the shared-bit branch to ARRAY, MAP, GENE, REF, and STRING"
+  - "Aligned InstanceObj with the same shared-bit RC branch as the other managed headers once flags existed on the instance header"
   - "Recorded the publication happens-before invariant directly in memory.nim beside the RC helpers"
 requirements-completed: [RC-02]
 duration: 24m
@@ -31,7 +31,7 @@ completed: 2026-04-18
 
 # Phase 1 / Plan 01-04 Summary
 
-**Managed retain/release now recover the owned-case fast path by branching on `shared`, while preserving atomic RC for published values and leaving Instance atomic-only**
+**Managed retain/release now recover the owned-case fast path by branching on `shared` across all managed headers that carry the bit, while preserving atomic RC for published values**
 
 ## Performance
 
@@ -41,22 +41,25 @@ completed: 2026-04-18
 
 ## Accomplishments
 
-- Added a module-level publication invariant comment and shared-bit RC helpers in `src/gene/types/memory.nim`, then switched the `ARRAY`, `MAP`, `GENE`, `REF`, and `STRING` arms in both `retainManaged` and `releaseManaged` to branch on the managed header's `shared` bit.
-- Left the `INSTANCE` arm atomic in both directions, matching D-12 even if an instance header later carries the bit for some other purpose.
-- Added `tests/test_phase1_rc_branch.nim` with direct probe assertions for the plain and atomic paths, an explicit Instance carve-out check, a shared-path threaded retain/release stress test, and a reusable owned-array benchmark.
+- Added a module-level publication invariant comment and shared-bit RC helpers in `src/gene/types/memory.nim`, then switched the `ARRAY`, `MAP`, `INSTANCE`, `GENE`, `REF`, and `STRING` arms in both `retainManaged` and `releaseManaged` to branch on the managed header's `shared` bit.
+- Added `tests/test_phase1_rc_branch.nim` with direct probe assertions for the plain and atomic paths across every managed header kind, plus shared-path threaded retain/release stress coverage and a reusable owned-array benchmark.
 - Re-ran the full Phase 0 acceptance sweep with no regressions.
 
 ## Converted Arms
 
 - `ARRAY`
 - `MAP`
+- `INSTANCE`
 - `GENE`
 - `REF`
 - `STRING`
 
-## Instance Exclusion
+## Instance Branching
 
-- `INSTANCE` remains atomic-only by plan decision D-12. Phase 1 does not treat Instance headers as part of the shared-bit RC branch contract, so the runtime behavior stays unchanged there.
+- `INSTANCE` now participates in the same branch contract as the other
+  managed headers because `InstanceObj` already carries `flags` from `01-01`
+  and Phase 1's owned-vs-shared RC split should not exempt actor-local
+  instances.
 
 ## Benchmark
 
