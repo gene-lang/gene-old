@@ -47,9 +47,9 @@ VM.
 
 ### Deep-Frozen Bit and Shared Heap
 
-- [ ] **FRZ-01**: `Value` header carries a `deep_frozen` bit readable without
+- [x] **FRZ-01**: `Value` header carries a `deep_frozen` bit readable without
   heap allocation on both payload and managed reference types.
-- [ ] **FRZ-02**: `Value` header carries a `shared` bit readable without heap
+- [x] **FRZ-02**: `Value` header carries a `shared` bit readable without heap
   allocation, orthogonal to `deep_frozen` at the bit level but set in lockstep
   by the freeze path for Phase 1 MVP scope.
 - [x] **FRZ-03**: Stdlib `(freeze v)` transitions `array`, `map`, `hash_map`,
@@ -67,7 +67,7 @@ VM.
 
 ### Refcount Branch
 
-- [ ] **RC-02**: Retain and release branch on the `shared` bit: shared values
+- [x] **RC-02**: Retain and release branch on the `shared` bit: shared values
   continue to use atomic increments and decrements; owned (non-shared) values
   may use plain increments and decrements where the lifetime is provably
   thread-local, restoring the owned-side refcount performance Phase 0 traded
@@ -75,7 +75,7 @@ VM.
 
 ### Naming
 
-- [ ] **NAME-01**: The two-level naming ("sealed" for shallow `#[]` / `#{}` /
+- [x] **NAME-01**: The two-level naming ("sealed" for shallow `#[]` / `#{}` /
   `#()` literals, "frozen" for deep `(freeze v)` output) is finalized with
   matching error messages, stdlib names, and documentation.
 
@@ -115,13 +115,13 @@ VM.
 | STR-01 | Phase 0 | Complete |
 | STR-02 | Phase 0 | Complete |
 | BOOT-01 | Phase 0 | Complete (commit e2e776c) |
-| FRZ-01 | Phase 1 | Pending |
-| FRZ-02 | Phase 1 | Pending |
+| FRZ-01 | Phase 1 | Complete |
+| FRZ-02 | Phase 1 | Complete |
 | FRZ-03 | Phase 1 | Complete |
 | FRZ-04 | Phase 1 | Complete |
 | HEAP-01 | Phase 1 | Complete |
-| RC-02 | Phase 1 | Pending |
-| NAME-01 | Phase 1 | Pending |
+| RC-02 | Phase 1 | Complete |
+| NAME-01 | Phase 1 | Complete |
 | CLO-01 | Phase 1.5 | Deferred |
 | ACT-02 | Phase 2 | Deferred |
 | ACT-03 | Phase 3 | Deferred |
@@ -129,7 +129,7 @@ VM.
 
 **Coverage:**
 - v1 requirements (Phase 0): 9 complete
-- v2 requirements (Phase 1): 7 pending
+- v2 requirements (Phase 1): 7 complete
 - v3 requirements (Phase 1.5+): 4 deferred
 - Unmapped: 0
 

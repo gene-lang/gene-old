@@ -4,9 +4,9 @@
 
 This roadmap tracks the approved actor-design migration from
 `docs/proposals/actor-design.md`. Phase 0 (substrate cleanup) landed in commit
-`e2e776c`. Phase 1 (deep-frozen bit, shared heap, `(freeze v)`) is now the
-active phase. Later phases stay deferred in the proposal until Phase 1
-verifies cleanly.
+`e2e776c`. Phase 1 (deep-frozen bit, shared heap, `(freeze v)`) is now
+implemented across commits `f153f95`..`a36452b`. Later phases stay deferred in
+the proposal until follow-on planning resumes.
 
 The legacy `.planning/phases/01-architecture-comparison/` directory was
 preserved historical exploratory material and has been moved to
@@ -25,10 +25,10 @@ slot can be used for the real Phase 1.
   correctness debt in ref-counting, publication, thread messaging, string
   semantics, and bootstrap sharing before actor primitives land *(completed
   2026-04-18, commit e2e776c)*
-- [ ] **Phase 1: Deep-frozen bit, shared heap, and `(freeze v)`** - Add the
+- [x] **Phase 1: Deep-frozen bit, shared heap, and `(freeze v)`** - Add the
   header bits, shared-heap allocation path, atomic-vs-plain refcount branch,
   and the user-facing `(freeze v)` stdlib operation over the MVP container
-  scope
+  scope *(completed 2026-04-19, commits `f153f95`..`a36452b`)*
 
 ## Phase Details
 
@@ -53,7 +53,7 @@ Plans:
 - [x] 00-05: Enforce bootstrap publication discipline and run phase acceptance
   sweep
 
-### Phase 1: Deep-frozen bit, shared heap, and `(freeze v)`
+### Phase 1: Deep-frozen bit, shared heap, and `(freeze v)` *(complete)*
 **Goal**: Introduce the runtime substrate the proposal requires before the actor scheduler lands — deep-frozen and shared bits on `Value`, a shared-heap allocation path for frozen values, an atomic-vs-plain refcount branch driven by the `shared` bit, and a user-facing `(freeze v)` stdlib operation over the MVP container scope (arrays, maps, hash maps, genes, bytes). No new concurrency API is added; existing thread code remains unaffected.
 **Depends on**: Phase 0 (landed Phase 0 substrate: unified RC, publication safety, bootstrap freeze)
 **Requirements**: [FRZ-01, FRZ-02, FRZ-03, FRZ-04, HEAP-01, RC-02, NAME-01]
@@ -63,14 +63,19 @@ Plans:
   3. Shared-heap allocation is a documented, tested path: frozen values are pointer-shareable across threads and retain/release use atomic primitives; owned values may use plain refcount primitives where lifetime is provably local.
   4. The naming in user-facing APIs, errors, and docs finalizes as "sealed" (shallow `#[]` / `#{}` / `#()` literals) vs "frozen" (deep `(freeze v)` output) with no remaining mixed usage.
   5. No Phase 0 regression: the acceptance sweep (`./testsuite/run_tests.sh` plus `test_bootstrap_publication`, `test_scope_lifetime`, `test_cli_gir`, `test_thread`, `test_stdlib_string`, `test_native_trampoline`) still passes.
-**Plans**: TBD by planner
+**Plans**: 6 plans
 
 Plans:
-- TBD
+- [x] 01-01: Header bits + O(1) accessors
+- [x] 01-02: `(freeze v)` operation and typed errors
+- [x] 01-03: Mutation opcode guards for `deep_frozen`
+- [x] 01-04: Atomic-vs-plain refcount branch on `shared`
+- [x] 01-05: Shared-heap semantics verification
+- [x] 01-06: "sealed" vs "frozen" naming finalization
 
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 0. Unify lifetime and publication semantics | 5/5 | Complete | 2026-04-18 |
-| 1. Deep-frozen bit, shared heap, and `(freeze v)` | 0/? | Planning | - |
+| 1. Deep-frozen bit, shared heap, and `(freeze v)` | 6/6 | Complete | 2026-04-19 |

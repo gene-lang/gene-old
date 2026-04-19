@@ -3,15 +3,19 @@
 ## What This Is
 
 This workstream ports the approved actor-based concurrency design in
-`docs/proposals/actor-design.md` into the existing `gene-old` runtime. The
-current tracked scope is Phase 0 only: unify lifetime and publication
-semantics so later actor primitives land on a stable substrate instead of
-stacking new races on top of the current runtime.
+`docs/proposals/actor-design.md` into the existing `gene-old` runtime. Phase 0
+(substrate cleanup) is complete. Phase 1 introduces the runtime machinery —
+deep-frozen and shared header bits on `Value`, a shared-heap allocation path,
+an atomic-vs-plain refcount branch, and the user-facing `(freeze v)` stdlib
+operation over the MVP container scope — that every later actor-runtime phase
+depends on, without adding a new concurrency API.
 
 ## Core Value
 
-Phase 0 must make Gene's runtime ownership and publication semantics safe
-enough for later actor work without destabilizing the existing VM.
+Phase 1 delivers the deep-frozen / shared-heap runtime substrate and the
+`(freeze v)` user surface that every subsequent actor phase (scheduler, tiered
+send, port actors) requires, without destabilizing the existing VM or shipping
+a new concurrency API.
 
 ## Requirements
 
@@ -20,30 +24,35 @@ enough for later actor work without destabilizing the existing VM.
 - ✓ Bytecode execution, async futures, thread messaging, native trampoline
   compilation, and stdlib string operations already exist in the current
   runtime.
-- ✓ Brownfield planning context already exists in `.planning/codebase/` and the
-  exploratory `.planning/phases/01-architecture-comparison/` draft.
+- ✓ Brownfield planning context in `.planning/codebase/`.
+- ✓ Phase 0 substrate: unified managed RC with atomic increments, synchronized
+  publication for lazy bodies and native entry, shared-inline-cache mutation
+  removed, immutable strings and removed literal copies, bootstrap freeze
+  boundary with init-time namespace snapshots *(commit e2e776c, 2026-04-18)*.
 
 ### Active
 
-- [ ] Unify `Value` ownership around one ref-counting model across manual VM
-  writes and Nim-managed assignment hooks.
-- [ ] Remove unsynchronized publication paths for lazy body compilation, inline
-  caches, and native code entry.
-- [ ] Fix thread reply polling and `.on_message` registration so non-main worker
-  paths behave correctly.
-- [ ] Make strings immutable and remove defensive string-literal copies from
-  `IkPushValue`.
-- [ ] Add explicit bootstrap publication discipline for the narrow set of shared
-  runtime artifacts needed by later actor phases.
+- [ ] Add `deep_frozen` and `shared` bits on `Value` that are readable without
+  heap allocation and round-trip through managed assignment hooks.
+- [ ] Add a shared-heap allocation path for frozen values that is pointer-
+  shareable across threads without per-actor cloning.
+- [ ] Branch retain/release on the `shared` bit — atomic for shared, plain for
+  provably thread-local owned values — to restore owned-side RC performance.
+- [ ] Add a stdlib `(freeze v)` operation over the MVP container scope (array,
+  map, hash_map, gene, bytes) with typed errors for non-MVP kinds.
+- [ ] Finalize the "sealed" (shallow) vs "frozen" (deep) naming across user-
+  facing APIs, errors, and documentation.
 
 ### Out of Scope
 
-- Deep-frozen/shared heap support and `(freeze v)` - deferred until after Phase
-  0 lands cleanly.
-- Actor scheduler, mailbox send tiers, port actors, and thread API deprecation -
-  follow-on actor phases, not this track.
-- Distributed actors, supervision trees, hot code loading, and compile-time
-  effect typing - explicitly rejected by the approved proposal.
+- Freezable closures — deferred to Phase 1.5 as a hard prerequisite for Phase 2.
+- Actor scheduler, tiered send, reply futures, stop semantics — Phase 2.
+- Port-actor protocol and extension migration — Phase 3.
+- Thread API deprecation and `GENE_WORKERS` rename — Phase 4.
+- Move-semantics `send!`, work-stealing scheduler, `^frozen-default` — deferred
+  indefinitely per the approved proposal.
+- Distributed actors, supervision trees, hot code loading, compile-time effect
+  typing — explicitly rejected by the approved proposal.
 
 ## Context
 
@@ -64,22 +73,25 @@ Phase 0 without renumbering or rewriting historical exploratory docs.
 
 - **Tech stack**: Keep the existing Nim runtime and test harness - no new
   dependencies without explicit request.
-- **Compatibility**: Preserve existing behavior except for the proposal-approved
-  string mutator break in P0.4.
-- **Validation**: Lock behavior with targeted runtime tests before cleanup-style
-  refactors in hot paths.
-- **Planning**: Track only proposal Phase 0 in GSD for now to avoid colliding
-  with the preserved legacy `01-architecture-comparison` directory.
-- **Performance**: Do not regress hot paths without measurement; removing the
-  `IkPushValue` string copy is the only expected perf win in this phase.
+- **Compatibility**: No user-facing break in Phase 1. `(freeze v)` is additive;
+  existing thread code is unaffected.
+- **Validation**: Every Phase 1 plan must not regress the Phase 0 acceptance
+  sweep.
+- **Planning**: Legacy `.planning/phases/01-architecture-comparison/` is
+  archived under `.planning/archive/`; do not resurrect without triage.
+- **Performance**: Owned-side refcount performance must not regress below the
+  pre-Phase-0 baseline once the atomic-vs-plain branch lands.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Track only proposal Phase 0 in ROADMAP.md for now | Avoids phase-number collisions with preserved legacy planning and keeps the work bounded | - Pending |
-| Mirror P0.1-P0.5 as five executable plans | Preserves proposal rollback boundaries and keeps verification focused | - Pending |
-| Resolve P0.4 with return-new-string semantics for `String.append` | Smallest immutable-string cut that removes the current literal-copy workaround | - Pending |
+| Mirror P0.1-P0.5 as five executable plans | Preserves proposal rollback boundaries and keeps verification focused | ✓ Complete — all five plans shipped |
+| Resolve P0.4 with return-new-string semantics for `String.append` | Smallest immutable-string cut that removes the current literal-copy workaround | ✓ Complete |
+| Phase 0 closeout commit `e2e776c` addresses review gaps before Phase 1 | Cross-AI review flagged P0.1 RC race and P0.5 bootstrap as HIGH risk; both resolved in one commit | ✓ Complete |
+| Archive legacy `01-architecture-comparison/` to unblock Phase 1 numbering | Legacy exploratory material (gene-old vs gene comparison) is unrelated to actor track | ✓ Moved to `.planning/archive/` |
+| Phase 1 uses `--skip-research` with CONTEXT defaults rather than a discuss round | User elected fast path; defaults documented in Phase 1 CONTEXT.md and revisable at review round | ✓ Complete — Phase 1 shipped across commits `f153f95`..`a36452b` |
+| Split freezable closures into Phase 1.5 (not Phase 1) | Closure captured-env analysis is its own workstream; holding Phase 1 to containers keeps the scope testable | - Pending Phase 1.5 |
 
 ## Evolution
 
@@ -99,4 +111,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-17 after actor-design Phase 0 bootstrap*
+*Last updated: 2026-04-19 after Phase 1 completion and verification pass*

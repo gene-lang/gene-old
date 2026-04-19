@@ -4,7 +4,11 @@
 
 Gene currently has inconsistent mutation semantics — scalars copy by value, collections share by reference. This is confusing and a poor foundation for an AI-oriented language.
 
-This document describes the target model. The current implementation now uses `#[...]` for immutable arrays, `#{...}` for immutable maps, and `#(...)` for immutable genes, but the rest of the proposal is still design work rather than a complete description of shipped behavior.
+This document describes the target model. The current implementation now uses
+`#[...]`, `#{...}`, and `#(...)` for **sealed** arrays, maps, and genes
+(shallow immutable containers), while `(freeze v)` produces **frozen** values
+with deep immutability over the Phase 1 MVP scope. Strings are already
+immutable and pointer-shareable.
 
 ## Design Decision
 
@@ -24,7 +28,8 @@ The split is **not** scalar vs container. It's **value vs entity**:
 | Characters | `'a'` | Always immutable |
 | Nil | `nil` | Always immutable |
 | Symbols | `foo`, `^key` | Interned, used as map keys |
-| Frozen containers | `#[1 2]`, `#{^a 1}`, `#(Foo 1)` | `#` prefix freezes |
+| Sealed containers | `#[1 2]`, `#{^a 1}`, `#(Foo 1)` | `#` prefix seals the outer container only |
+| Frozen containers | `(freeze [1 2])`, `(freeze {^a 1})` | `freeze` recursively deep-freezes MVP scope |
 
 ### Mutable (Entities)
 
@@ -33,7 +38,7 @@ The split is **not** scalar vs container. It's **value vs entity**:
 | Arrays | `[1 2 3]` | Mutable by default |
 | Maps | `{^a 1}` | Mutable by default |
 | Genes | `(Foo 1 2)` | Mutable by default |
-| Strings | `"hello"` | Mutable (array of chars) |
+| Strings | `"hello"` | Immutable, pointer-shareable |
 | Class instances | `(new User "GL")` | Mutable entities |
 
 ### Bindings
@@ -61,22 +66,29 @@ The split is **not** scalar vs container. It's **value vs entity**:
 # c: [1 2 3], d: [1 2 3] — same object
 ```
 
-### Strings — mutable like arrays
+### Strings — immutable values
 
 ```gene
 (var s "hello")
 (var t s)
-(s .append " world")
-# s: "hello world", t: "hello world" — same object
+(var u (s .append " world"))
+# s: "hello", t: "hello", u: "hello world" — append returns a new value
 ```
 
-### Frozen containers — immutable values
+### Sealed containers — shallow immutable values
 
 ```gene
 (var c #[1 2])
 (var d c)
 (var c2 [c... 3])
 # c: #[1 2], d: #[1 2], c2: [1 2 3]
+```
+
+### Frozen containers — deep immutable values
+
+```gene
+(var c (freeze [1 {^a 2}]))
+# c and every reachable MVP child are frozen and pointer-shareable
 ```
 
 ### Entities — mutable, identity persists
@@ -115,7 +127,9 @@ The semantic model doesn't limit performance:
 ## Summary
 
 - **Scalars** (int, bool, char, nil, symbol): always immutable
-- **Structured types** (array, map, gene, string): mutable by default
-- **`#` prefix**: frozen/immutable variant of any structured type
+- **Structured container types** (array, map, gene): mutable by default
+- **Strings**: immutable by default
+- **`#` prefix**: sealed/shallow-immutable variant of array, map, and gene
+- **`freeze`**: deep-frozen variant over the Phase 1 MVP scope
 - **Class instances**: mutable entities with persistent identity
 - **`var`**: mutable binding / **`const`**: immutable binding

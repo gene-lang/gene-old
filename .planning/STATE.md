@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 01-05-PLAN.md
-last_updated: "2026-04-19T00:47:49.751Z"
+status: complete
+stopped_at: Completed 01-06-PLAN.md
+last_updated: "2026-04-19T01:15:00.000Z"
 last_activity: 2026-04-19
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 11
-  completed_plans: 10
-  percent: 91
+  completed_plans: 11
+  percent: 100
 ---
 
 # Project State
@@ -20,20 +20,20 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-04-17)
 
-**Core value:** Phase 1 introduces the deep-frozen bit, shared-heap allocation
+**Core value:** Phase 1 introduced the deep-frozen bit, shared-heap allocation
 path, and `(freeze v)` stdlib operation that every subsequent actor-runtime
 phase depends on, without adding a new concurrency API.
-**Current focus:** Phase 01 — deep-frozen-bit-shared-heap-freeze
+**Current focus:** Phase 1 closeout complete — next work is follow-on planning
 
 ## Current Position
 
-Phase: 01 (deep-frozen-bit-shared-heap-freeze) — EXECUTING
-Plan: 3 of 6
-Status: Ready to execute
+Phase: 01 (deep-frozen-bit-shared-heap-freeze) — COMPLETE
+Plan: 6 of 6
+Status: Complete
 Last activity: 2026-04-19
-scope-in from `docs/proposals/actor-design.md:687-718`
+verified closeout across `f153f95`..`a36452b`
 
-Progress: [██░░░░░░░░] 20%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -48,7 +48,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 0 | 5 | - | - |
-| 1 | 0 | - | - |
+| 1 | 6 | - | - |
 
 **Recent Trend:**
 
@@ -74,10 +74,14 @@ Recent decisions affecting current work:
   `.planning/archive/01-architecture-comparison-legacy/` so the `01-` slot is
   usable for the real Phase 1.
 
-- [Phase 1]: `--skip-research` route selected — planner uses the default
+- [Phase 1]: `--skip-research` route selected — planner used the default
   decisions documented in Phase 1 CONTEXT.md (header-bit placement, in-place
   tag freeze semantics, tag-on-existing-heap allocator, atomic-vs-plain RC
   branch, MVP container scope, Phase 1.5 split).
+- [Phase 1]: Completed 2026-04-19 across commits `f153f95`, `c0a2508`,
+  `576bdb3`, `3322e43`, `9055ef9`, `cc665d2`, `24a1efd`, `22e1336`,
+  and `a36452b`; verifier gaps closed by aligning `value_vs_entity.md`
+  and phase metadata.
 
 - [Phase 01]: Guard the actual mutation opcode handlers in exec.nim, including current-map/current-gene builder opcodes, instead of relying on higher-level surface syntax alone.
 - [Phase 01]: Keep the existing shallow frozen checks intact and add deep-frozen guards ahead of the writes.
@@ -105,7 +109,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-19T00:47:49.747Z
-Stopped at: Completed 01-05-PLAN.md
-step is spawning `gsd-planner` for Phase 1
+Last session: 2026-04-19T01:15:00.000Z
+Stopped at: Completed Phase 1 closeout and metadata reconciliation
+Next step: Plan Phase 1.5 or Phase 2 follow-on work when ready
 Resume file: None
