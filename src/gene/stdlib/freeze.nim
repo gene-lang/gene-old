@@ -64,6 +64,13 @@ proc capture_segment(scope: Scope, slot: int): string =
 
   "<slot:" & $slot & ">"
 
+proc capture_key(scope: Scope, slot: int): Key =
+  if scope != nil and scope.tracker != nil:
+    for key, index in scope.tracker.mappings:
+      if index == slot.int16:
+        return key
+  0.Key
+
 proc validate_for_freeze*(v: Value, path: string, visited: var HashSet[uint64])
 proc tag_for_freeze*(v: Value, visited: var HashSet[uint64])
 
@@ -73,6 +80,8 @@ proc validate_scope_for_freeze(scope: Scope, path: string, depth: int, visited: 
 
   let scope_path = append_path(append_path(path, "<closure>"), "<scope:" & $depth & ">")
   for i, item in scope.members:
+    if capture_key(scope, i) == KEY_SELF and item.kind == VkNamespace:
+      continue
     validate_for_freeze(item, append_path(scope_path, capture_segment(scope, i)), visited)
 
   validate_scope_for_freeze(scope.parent, path, depth + 1, visited)
