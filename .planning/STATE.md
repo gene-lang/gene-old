@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: planned
-stopped_at: Planned Phase 1.5 (freezable closures)
-last_updated: "2026-04-19T14:31:39.571Z"
-last_activity: 2026-04-19 -- Phase 1.5 planned and checker-approved
+status: executing
+stopped_at: Completed 01.5-01-PLAN.md
+last_updated: "2026-04-19T20:36:58.028Z"
+last_activity: 2026-04-19 -- Completed 01.5-01 closure freeze walker
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 13
-  completed_plans: 11
-  percent: 85
+  completed_plans: 12
+  percent: 92
 ---
 
 # Project State
@@ -23,17 +23,17 @@ See: .planning/PROJECT.md (updated 2026-04-17)
 **Core value:** Phase 1 introduced the deep-frozen bit, shared-heap allocation
 path, and `(freeze v)` stdlib operation that every subsequent actor-runtime
 phase depends on, without adding a new concurrency API.
-**Current focus:** Phase 1.5 (freezable closures) — ready to execute
+**Current focus:** Phase 01.5 — freezable-closures
 
 ## Current Position
 
-Phase: 01.5 (freezable-closures) — PLANNED
-Plan: 0 of 2
-Status: Ready to execute
-Last activity: 2026-04-19 -- Phase 1.5 planned and checker-approved
+Phase: 01.5 (freezable-closures) — EXECUTING
+Plan: 2 of 2
+Status: Plan 01 complete; Plan 02 pending
+Last activity: 2026-04-19 -- Completed 01.5-01 closure freeze walker
 Depends on the verified Phase 1 substrate across `f153f95`..`a36452b`
 
-Progress: [████████░░] 85%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Progress: [████████░░] 85%
 
 | Phase 01 P03 | 25m | 4 tasks | 3 files |
 | Phase 01 P05 | 7m | 5 tasks | 4 files |
+| Phase 01.5 P01 | 5m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -88,6 +89,9 @@ Recent decisions affecting current work:
 - [Phase 01]: Keep the existing shallow frozen checks intact and add deep-frozen guards ahead of the writes.
 - [Phase 01]: Phase 01-05 fixes shared-heap semantics as tag-on-existing-heap publication; dedicated pool allocation remains deferred perf work.
 - [Phase 01]: Cross-thread shared-heap verification is pinned to exact before/after refcount equality rather than a specific initial count for nested graphs.
+- [Phase 01.5]: Freeze VkFunction values through Function.parent_scope and Scope.parent traversal instead of transport-specific logic
+- [Phase 01.5]: Derive closure freeze failure paths from ScopeTracker mappings with slot fallback for deterministic diagnostics
+- [Phase 01.5]: Keep legacy serializer and thread transport behavior unchanged while Phase 1.5 establishes the closure freeze invariant
 
 ### Pending Todos
 
@@ -102,7 +106,7 @@ None yet.
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| Concurrency | Freezable closures (Phase 1.5 — hard prerequisite for Phase 2) | Planned and ready to execute | 2026-04-19 |
+| Concurrency | Freezable closures (Phase 1.5 — hard prerequisite for Phase 2) | In progress (01.5-01 complete, 01.5-02 pending) | 2026-04-19 |
 | Concurrency | Actor scheduler, tiered send, reply futures, stop semantics (Phase 2) | Deferred until Phase 1.5 closes | 2026-04-18 |
 | Concurrency | Port-actor protocol for extensions (Phase 3) | Deferred | 2026-04-17 |
 | Concurrency | Thread API deprecation / `GENE_WORKERS` rename (Phase 4) | Deferred | 2026-04-17 |
@@ -110,7 +114,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-19T14:31:39.571Z
-Stopped at: Phase 1.5 planned and checker-approved
-Next step: Execute Phase 1.5 with `$gsd-execute-phase 01.5`
+Last session: 2026-04-19T20:36:58.025Z
+Stopped at: Completed 01.5-01-PLAN.md
+Next step: Execute `01.5-02-PLAN.md`
 Resume file: None

@@ -112,7 +112,7 @@ scheduler lands.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 01.5-01-PLAN.md — Extend the two-pass freeze walker to `VkFunction`
+- [x] 01.5-01-PLAN.md — Extend the two-pass freeze walker to `VkFunction`
   capture graphs and lock the typed failure contract with focused tests
 - [ ] 01.5-02-PLAN.md — Prove frozen closures are actor-ready after scope
   teardown, add shared-pointer stress coverage, and document the migration
