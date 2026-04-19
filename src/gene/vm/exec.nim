@@ -17,6 +17,10 @@ proc require_published_body(b: Block): CompilationUnit {.inline.} =
   if result == nil:
     raise new_exception(types.Exception, "Block body failed to publish")
 
+template guard_deep_frozen_write(target: Value, op_name: static[string]) =
+  if target.deep_frozen:
+    raise_frozen_write(op_name, target)
+
 proc resolve_local_lookup_value(self: ptr VirtualMachine, key: Key): Value {.inline.} =
   if self == nil or self.frame == nil or self.frame.scope == nil or self.frame.scope.tracker == nil:
     return VOID
@@ -710,9 +714,11 @@ proc exec*(self: ptr VirtualMachine): Value =
             let symbol_name = get_symbol(symbol_index.int)
             not_allowed("Cannot set member '" & symbol_name & "' on nil (namespace or object doesn't exist)")
           of VkMap:
+            guard_deep_frozen_write(target, "IkSetMember")
             ensure_mutable_map(target, "set item on")
             map_data(target)[name] = value
           of VkGene:
+            guard_deep_frozen_write(target, "IkSetMember")
             ensure_mutable_gene(target, "set property on")
             target.gene.props[name] = value
           of VkNamespace:
@@ -720,6 +726,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           of VkClass:
             target.ref.class.ns[name] = value
           of VkInstance:
+            guard_deep_frozen_write(target, "IkSetMember")
             # Check property type if class has type annotations
             if self.type_check:
               let cls = target.instance_class
@@ -764,6 +771,7 @@ proc exec*(self: ptr VirtualMachine): Value =
               "".to_key()
           case target.kind:
             of VkMap:
+              guard_deep_frozen_write(target, "IkSetMemberDynamic")
               ensure_mutable_map(target, "set item on")
               map_data(target)[key] = value
             of VkNamespace:
@@ -771,6 +779,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             of VkClass:
               target.ref.class.ns[key] = value
             of VkInstance:
+              guard_deep_frozen_write(target, "IkSetMemberDynamic")
               instance_props(target)[key] = value
             of VkAdapter:
               adapter_set_member(target.ref.adapter, key, value)
@@ -779,6 +788,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             else:
               discard
         of VkGene:
+          guard_deep_frozen_write(target, "IkSetMemberDynamic")
           ensure_mutable_gene(target, if prop.kind == VkInt: "set child on" else: "set property on")
           case prop.kind:
             of VkInt:
@@ -798,6 +808,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           let arr_len = array_data(target).len.int64
           if idx < 0 or idx >= arr_len:
             not_allowed("Array index out of bounds: " & $idx & " (len=" & $arr_len & ")")
+          guard_deep_frozen_write(target, "IkSetMemberDynamic")
           ensure_mutable_array(target, "set item on")
           array_data(target)[idx.int] = value
         else:
@@ -1331,12 +1342,14 @@ proc exec*(self: ptr VirtualMachine): Value =
             let arr_len = array_data(target).len.int64
             if i < 0 or i >= arr_len:
               not_allowed("Array index out of bounds: " & $i & " (len=" & $arr_len & ")")
+            guard_deep_frozen_write(target, "IkSetChild")
             ensure_mutable_array(target, "set item on")
             array_data(target)[i] = new_value
           of VkGene:
             let children_len = target.gene.children.len.int64
             if i < 0 or i >= children_len:
               not_allowed("Gene child index out of bounds: " & $i & " (len=" & $children_len & ")")
+            guard_deep_frozen_write(target, "IkSetChild")
             ensure_mutable_gene(target, "set child on")
             target.gene.children[i] = new_value
           else:
@@ -1642,18 +1655,24 @@ proc exec*(self: ptr VirtualMachine): Value =
         let key = cast[Key](inst.arg0.raw)
         var value: Value
         self.frame.pop2(value)
-        map_data(self.frame.current())[key] = value
+        let current = self.frame.current()
+        guard_deep_frozen_write(current, "IkMapSetProp")
+        map_data(current)[key] = value
       of IkMapSetPropValue:
         # Set property with literal value
         let key = cast[Key](inst.arg0.raw)
-        map_data(self.frame.current())[key] = inst.arg1
+        let current = self.frame.current()
+        guard_deep_frozen_write(current, "IkMapSetPropValue")
+        map_data(current)[key] = inst.arg1
       of IkMapSpread:
         # Spread map key-value pairs into current map
         let value = self.frame.pop()
+        let current = self.frame.current()
         case value.kind:
           of VkMap:
+            guard_deep_frozen_write(current, "IkMapSpread")
             for k, v in map_data(value):
-              map_data(self.frame.current())[k] = v
+              map_data(current)[k] = v
           of VkNil:
             # Spreading nil is a no-op (treat as empty map)
             discard
@@ -1942,7 +1961,9 @@ proc exec*(self: ptr VirtualMachine): Value =
         {.push checks: off}
         var value: Value
         self.frame.pop2(value)
-        self.frame.current().gene.type = value
+        let current = self.frame.current()
+        guard_deep_frozen_write(current, "IkGeneSetType")
+        current.gene.type = value
         {.pop.}
       of IkGeneSetProp:
         {.push checks: off}
@@ -1952,14 +1973,19 @@ proc exec*(self: ptr VirtualMachine): Value =
         let current = self.frame.current()
         case current.kind:
           of VkGene:
+            guard_deep_frozen_write(current, "IkGeneSetProp")
             current.gene.props[key] = value
           of VkFrame:
             # For function calls, we need to set up the args gene with properties
-            if current.ref.frame.args.kind != VkGene:
+            if current.ref.frame.args.kind == VkGene:
+              guard_deep_frozen_write(current.ref.frame.args, "IkGeneSetProp")
+            else:
               current.ref.frame.args = new_gene_value()
             current.ref.frame.args.gene.props[key] = value
           of VkNativeFrame:
-            if current.ref.native_frame.args.kind != VkGene:
+            if current.ref.native_frame.args.kind == VkGene:
+              guard_deep_frozen_write(current.ref.native_frame.args, "IkGeneSetProp")
+            else:
               current.ref.native_frame.args = new_gene_value()
             current.ref.native_frame.args.gene.props[key] = value
           else:
@@ -1984,12 +2010,19 @@ proc exec*(self: ptr VirtualMachine): Value =
         case v.kind:
           of VkFrame:
             # For function calls, we need to set up the args gene with children
-            if v.ref.frame.args.kind != VkGene:
+            if v.ref.frame.args.kind == VkGene:
+              guard_deep_frozen_write(v.ref.frame.args, "IkGeneAddChild")
+            else:
               v.ref.frame.args = new_gene_value()
             v.ref.frame.args.gene.children.add(child)
           of VkNativeFrame:
+            if v.ref.native_frame.args.kind != VkGene:
+              v.ref.native_frame.args = new_gene_value()
+            else:
+              guard_deep_frozen_write(v.ref.native_frame.args, "IkGeneAddChild")
             v.ref.native_frame.args.gene.children.add(child)
           of VkGene:
+            guard_deep_frozen_write(v, "IkGeneAddChild")
             v.gene.children.add(child)
           of VkNil:
             # Skip adding to nil - this might happen happen in conditional contexts
@@ -2012,12 +2045,19 @@ proc exec*(self: ptr VirtualMachine): Value =
         let v = self.frame.current()
         case v.kind:
           of VkFrame:
-            if v.ref.frame.args.kind != VkGene:
+            if v.ref.frame.args.kind == VkGene:
+              guard_deep_frozen_write(v.ref.frame.args, "IkGeneAdd")
+            else:
               v.ref.frame.args = new_gene_value()
             v.ref.frame.args.gene.children.add(child)
           of VkNativeFrame:
+            if v.ref.native_frame.args.kind != VkGene:
+              v.ref.native_frame.args = new_gene_value()
+            else:
+              guard_deep_frozen_write(v.ref.native_frame.args, "IkGeneAdd")
             v.ref.native_frame.args.gene.children.add(child)
           of VkGene:
+            guard_deep_frozen_write(v, "IkGeneAdd")
             v.gene.children.add(child)
           of VkNil:
             discard
@@ -2036,14 +2076,21 @@ proc exec*(self: ptr VirtualMachine): Value =
           of VkArray:
             case v.kind:
               of VkFrame:
-                if v.ref.frame.args.kind != VkGene:
+                if v.ref.frame.args.kind == VkGene:
+                  guard_deep_frozen_write(v.ref.frame.args, "IkGeneAddSpread")
+                else:
                   v.ref.frame.args = new_gene_value()
                 for item in array_data(value):
                   v.ref.frame.args.gene.children.add(item)
               of VkNativeFrame:
+                if v.ref.native_frame.args.kind != VkGene:
+                  v.ref.native_frame.args = new_gene_value()
+                else:
+                  guard_deep_frozen_write(v.ref.native_frame.args, "IkGeneAddSpread")
                 for item in array_data(value):
                   v.ref.native_frame.args.gene.children.add(item)
               of VkGene:
+                guard_deep_frozen_write(v, "IkGeneAddSpread")
                 for item in array_data(value):
                   v.gene.children.add(item)
               else:
@@ -2061,12 +2108,19 @@ proc exec*(self: ptr VirtualMachine): Value =
         let v = self.frame.current()
         case v.kind:
           of VkFrame:
-            if v.ref.frame.args.kind != VkGene:
+            if v.ref.frame.args.kind == VkGene:
+              guard_deep_frozen_write(v.ref.frame.args, "IkGeneAddChildValue")
+            else:
               v.ref.frame.args = new_gene_value()
             v.ref.frame.args.gene.children.add(inst.arg0)
           of VkNativeFrame:
+            if v.ref.native_frame.args.kind != VkGene:
+              v.ref.native_frame.args = new_gene_value()
+            else:
+              guard_deep_frozen_write(v.ref.native_frame.args, "IkGeneAddChildValue")
             v.ref.native_frame.args.gene.children.add(inst.arg0)
           of VkGene:
+            guard_deep_frozen_write(v, "IkGeneAddChildValue")
             v.gene.children.add(inst.arg0)
           else:
             not_allowed("Cannot add child value to type: " & $v.kind)
@@ -2079,9 +2133,12 @@ proc exec*(self: ptr VirtualMachine): Value =
         let current = self.frame.current()
         case current.kind:
           of VkGene:
+            guard_deep_frozen_write(current, "IkGeneSetPropValue")
             current.gene.props[key] = inst.arg1
           of VkFrame:
-            if current.ref.frame.args.kind != VkGene:
+            if current.ref.frame.args.kind == VkGene:
+              guard_deep_frozen_write(current.ref.frame.args, "IkGeneSetPropValue")
+            else:
               current.ref.frame.args = new_gene_value()
             current.ref.frame.args.gene.props[key] = inst.arg1
           of VkNativeFrame:
@@ -2099,10 +2156,13 @@ proc exec*(self: ptr VirtualMachine): Value =
           of VkMap:
             case current.kind:
               of VkGene:
+                guard_deep_frozen_write(current, "IkGenePropsSpread")
                 for k, v in map_data(value):
                   current.gene.props[k] = v
               of VkFrame:
-                if current.ref.frame.args.kind != VkGene:
+                if current.ref.frame.args.kind == VkGene:
+                  guard_deep_frozen_write(current.ref.frame.args, "IkGenePropsSpread")
+                else:
                   current.ref.frame.args = new_gene_value()
                 for k, v in map_data(value):
                   current.ref.frame.args.gene.props[k] = v

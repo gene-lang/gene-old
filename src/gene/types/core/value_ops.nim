@@ -37,6 +37,20 @@ proc not_allowed*(message: string) =
 proc not_allowed*() =
   not_allowed("Error: should not arrive here.")
 
+type
+  FrozenWriteError* = object of CatchableError
+    target_kind*: ValueKind
+    op*: string
+
+proc raise_frozen_write*(op: string, target: Value) {.noinline, noreturn.} =
+  var err = new_exception(
+    FrozenWriteError,
+    "cannot mutate deep-frozen " & $target.kind & " via " & op
+  )
+  err.target_kind = target.kind
+  err.op = op
+  raise err
+
 proc to_binstr*(v: int64): string =
   re.replacef(fmt"{v: 065b}", re.re"([01]{8})", "$1 ")
 
