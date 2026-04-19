@@ -68,10 +68,48 @@ Everything else is outside the Phase 1 deep-freeze MVP. In particular:
 - classes are not yet freezable
 - bound methods are not yet freezable
 - native resources are not freezable
-- closures are deferred to Phase 1.5
 
 If `(freeze v)` reaches one of those non-MVP kinds, it raises a
 `FreezeScopeError` instead of partially freezing the graph.
+
+## Phase 1.5 closure scope
+
+Phase 1.5 extends the frozen surface to `VkFunction` closures whose captured
+environments are themselves freezable. In practice that means `(freeze v)` now
+accepts returned or retained closures when every value reachable through the
+captured `parent_scope` chain is already immutable or is part of the Phase 1
+deep-freeze surface.
+
+Phase 1.5 closure support is intentionally narrower than "all callable things
+are frozen." The following values are still outside the frozen surface here:
+
+- `VkBlock`
+- classes and instances
+- bound methods
+- native functions and native resources
+
+If a closure capture reaches one of those non-freezable values, `(freeze v)`
+still raises `FreezeScopeError` rather than partially publishing the closure.
+
+## Migration boundary
+
+Phase 1.5 stops at closure freezeability. It does not rewrite the legacy
+thread-first concurrency surfaces, which remain visible as migration
+boundaries:
+
+- `spawn`
+- `spawn_return`
+- `Thread.send`
+- `Thread.send_expect_reply`
+- `Thread.on_message`
+- `keep_alive`
+- `GENE_MAX_THREADS`
+
+Those surfaces remain part of the current runtime until the later migration
+phase that retires the thread-first API. Phase 2 consumes frozen closures in
+the actor runtime so callable payloads can use the same frozen-by-pointer rules
+as other frozen graphs. The eventual deprecation and removal of the legacy
+thread surfaces belongs to Phase 4, not Phase 1.5.
 
 ## Sealed versus frozen by example
 
@@ -110,7 +148,8 @@ are deep.
 
 ## Forward reference
 
-Phase 1.5 is the next required step for closures. Closures need a separate
-captured-environment analysis before they can participate in the frozen
-surface safely. Phase 2 actor APIs depend on that follow-up work, but Phase 1
-does not include it.
+Phase 2 builds on this closure-freeze rule instead of rediscovering it in send
+logic. Frozen closures are now part of the actor-ready surface; the remaining
+Phase 2 work is scheduler, mailbox, reply, and stop behavior. The legacy
+thread-first APIs stay in place until the later migration/removal phase, so
+this handbook section is the handoff point rather than a transport rewrite.
