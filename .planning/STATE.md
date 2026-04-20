@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-04-20T14:34:49.019Z"
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-04-20T14:54:07.330Z"
 last_activity: 2026-04-20
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 18
-  completed_plans: 14
-  percent: 78
+  completed_plans: 15
+  percent: 83
 ---
 
 # Project State
@@ -28,8 +28,8 @@ phase depends on, without adding a new concurrency API.
 ## Current Position
 
 Phase: 02 (actor-runtime) — EXECUTING
-Plan: 2 of 5
-Status: Executing Phase 02
+Plan: 3 of 5
+Status: Ready to execute
 Last activity: 2026-04-20
 Depends on the verified Phase 1.5 substrate across `9e9a97a`..`cfb9140`
 
@@ -62,6 +62,7 @@ Progress: [████████░░] 78%
 | Phase 01.5 P01 | 5m | 2 tasks | 2 files |
 | Phase 01.5 P02 | 37m | 3 tasks | 5 files |
 | Phase 02 P01 | 3m | 2 tasks | 7 files |
+| Phase 02 P02 | 14 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -101,6 +102,9 @@ Recent decisions affecting current work:
 - [Phase 01.5]: Document spawn/thread surfaces as migration boundaries only; Phase 2 consumes frozen closures, and Phase 4 retires the legacy thread-first API.
 - [Phase 02]: Phase 02-01 uses dedicated VkActor/VkActorContext kinds and Application class slots rather than reusing thread or custom payload paths.
 - [Phase 02]: Keep actor runtime coverage in tests/test_actor_runtime_types.nim as the focused compile gate for later scheduler and send-tier work.
+- [Phase 02]: Expose actor bootstrap only through gene/actor/* and leave bare spawn on the legacy thread path.
+- [Phase 02]: Pin actors onto bounded workers taken from the existing thread pool instead of building a second concurrency runtime.
+- [Phase 02]: Default gene/actor/enable worker count to CPU-count-bounded pool usage so actor startup does not starve the thread compatibility lane.
 
 ### Pending Todos
 
@@ -123,7 +127,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-20T14:34:48.798Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-04-20T14:54:07.327Z
+Stopped at: Completed 02-02-PLAN.md
 Next step: Execute Phase 2 with `$gsd-execute-phase 02`
 Resume file: None
