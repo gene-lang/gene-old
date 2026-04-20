@@ -1,6 +1,9 @@
 import unittest
 
 import ../src/gene/types except Exception
+import ../src/gene/types/type_defs except Exception
+import ../src/gene/types/runtime_types
+import ../src/gene/vm
 import ./helpers
 
 var actor_runtime_types_ready = false
@@ -53,11 +56,15 @@ suite "Actor runtime types":
   test "boxed actors expose stable runtime type names":
     let actor_value = App.app.global_ns.ns["actor_value".to_key()]
     let actor_context_value = App.app.global_ns.ns["actor_context_value".to_key()]
+    let thread_value = type_defs.Thread(id: 11, secret: 29).to_value()
 
     check actor_value.kind == VkActor
     check actor_context_value.kind == VkActorContext
+    check actor_value.ref.actor.id == 7
+    check actor_context_value.ref.actor_context.actor.id == 7
     check runtime_type_name(actor_value) == "Actor"
     check runtime_type_name(actor_context_value) == "ActorContext"
+    check runtime_type_name(thread_value) == "Thread"
 
   test "boxed actors resolve methods through actor runtime classes":
     check VM.exec("(actor_value .marker)", "actor-runtime-types") == "Actor".to_value()

@@ -101,6 +101,12 @@ type
     exception_escaped*: bool
 
   # Threading support types
+  Actor* = ref object
+    id*: int
+
+  ActorContext* = ref object
+    actor*: Actor
+
   ThreadMessageType* = enum
     MtSend          # Send data, no reply expected
     MtSendExpectReply # Send data, expect reply
@@ -173,6 +179,8 @@ type
     VkGenerator          # Generator instance
     VkThread             # Thread reference
     VkThreadMessage      # Thread message
+    VkActor              # Actor handle
+    VkActorContext       # Actor handler context
 
     # Date and time types
     VkDate               # Date only
@@ -442,6 +450,8 @@ type
     thread_class*   : Value
     thread_message_class* : Value
     thread_message_type_class* : Value
+    actor_class*    : Value
+    actor_context_class* : Value
     aspect_class*   : Value
     interface_class*: Value
     adapter_class*  : Value

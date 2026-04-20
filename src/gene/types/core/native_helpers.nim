@@ -19,6 +19,16 @@ converter to_value*(m: type_defs.ThreadMessage): Value {.inline.} =
   r.thread_message = m
   return r.to_ref_value()
 
+converter to_value*(a: type_defs.Actor): Value {.inline.} =
+  let r = new_ref(VkActor)
+  r.actor = a
+  r.to_ref_value()
+
+converter to_value*(ctx: type_defs.ActorContext): Value {.inline.} =
+  let r = new_ref(VkActorContext)
+  r.actor_context = ctx
+  r.to_ref_value()
+
 # Helper functions for new NativeFn signature
 proc get_positional_arg*(args: ptr UncheckedArray[Value], index: int, has_keyword_args: bool): Value {.inline.} =
   ## Get positional argument (handles keyword offset automatically)

@@ -356,6 +356,10 @@ template get_value_class(val: Value): Class =
     safe_class_value(THREAD_CLASS_VALUE)
   of VkThreadMessage:
     safe_class_value(THREAD_MESSAGE_CLASS_VALUE)
+  of VkActor:
+    safe_class_value(App.app.actor_class)
+  of VkActorContext:
+    safe_class_value(App.app.actor_context_class)
   of VkClass:
     safe_class_value(App.app.class_class)
   of VkInterface:

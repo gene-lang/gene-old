@@ -131,6 +131,10 @@ type
         thread*: Thread
       of VkThreadMessage:
         thread_message*: ThreadMessage
+      of VkActor:
+        actor*: Actor
+      of VkActorContext:
+        actor_context*: ActorContext
 
       # Language constructs
       of VkApplication:
