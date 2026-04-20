@@ -134,7 +134,7 @@ user-facing actor API.
 **Plans**: 5 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Define actor runtime value contracts and class plumbing
+- [x] 02-01-PLAN.md — Define actor runtime value contracts and class plumbing
 - [ ] 02-02-PLAN.md — Reuse the worker substrate for actor enable/spawn and `gene/actor/*` bootstrap
 - [ ] 02-03-PLAN.md — Implement tiered send behavior with bounded mailbox backpressure
 - [ ] 02-04-PLAN.md — Wire actor reply futures and stop semantics onto the existing Future runtime

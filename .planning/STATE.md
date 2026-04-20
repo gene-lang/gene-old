@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: planned
-stopped_at: Planned Phase 2 (actor runtime)
-last_updated: "2026-04-20T14:11:03.447Z"
-last_activity: 2026-04-20 -- Phase 02 planning complete
+status: executing
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-04-20T14:34:49.019Z"
+last_activity: 2026-04-20
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 18
-  completed_plans: 13
-  percent: 72
+  completed_plans: 14
+  percent: 78
 ---
 
 # Project State
@@ -23,23 +23,23 @@ See: .planning/PROJECT.md (updated 2026-04-17)
 **Core value:** Phase 1 introduced the deep-frozen bit, shared-heap allocation
 path, and `(freeze v)` stdlib operation that every subsequent actor-runtime
 phase depends on, without adding a new concurrency API.
-**Current focus:** Phase 2 (actor runtime) — ready to execute
+**Current focus:** Phase 02 — actor-runtime
 
 ## Current Position
 
-Phase: 02 (actor-runtime) — PLANNED
-Plan: 0 of 5
-Status: Ready to execute
-Last activity: 2026-04-20 -- Phase 02 planning complete
+Phase: 02 (actor-runtime) — EXECUTING
+Plan: 2 of 5
+Status: Executing Phase 02
+Last activity: 2026-04-20
 Depends on the verified Phase 1.5 substrate across `9e9a97a`..`cfb9140`
 
-Progress: [███████░░░] 72%
+Progress: [████████░░] 78%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 5
+- Total plans completed: 14
 - Average duration: -
 - Total execution time: not recorded
 
@@ -61,6 +61,7 @@ Progress: [███████░░░] 72%
 | Phase 01 P05 | 7m | 5 tasks | 4 files |
 | Phase 01.5 P01 | 5m | 2 tasks | 2 files |
 | Phase 01.5 P02 | 37m | 3 tasks | 5 files |
+| Phase 02 P01 | 3m | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -98,6 +99,8 @@ Recent decisions affecting current work:
 - [Phase 01.5]: Treat the namespace-valued self capture on VM-created closures as redundant metadata, not part of the freezable closure environment.
 - [Phase 01.5]: Prove closure pointer-safety by publishing frozen VkFunction values through the same Atomic[uint64] slot pattern used for Phase 1 shared graphs.
 - [Phase 01.5]: Document spawn/thread surfaces as migration boundaries only; Phase 2 consumes frozen closures, and Phase 4 retires the legacy thread-first API.
+- [Phase 02]: Phase 02-01 uses dedicated VkActor/VkActorContext kinds and Application class slots rather than reusing thread or custom payload paths.
+- [Phase 02]: Keep actor runtime coverage in tests/test_actor_runtime_types.nim as the focused compile gate for later scheduler and send-tier work.
 
 ### Pending Todos
 
@@ -120,7 +123,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-20T14:11:03.447Z
-Stopped at: Planned Phase 2 actor runtime work
+Last session: 2026-04-20T14:34:48.798Z
+Stopped at: Completed 02-01-PLAN.md
 Next step: Execute Phase 2 with `$gsd-execute-phase 02`
 Resume file: None
