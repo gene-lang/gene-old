@@ -8,6 +8,7 @@ import ../parser
 import ../compiler
 import ../repl_session
 import ../vm/thread
+import ../vm/actor
 import ../vm/pubsub as vm_pubsub
 import ../logging_core
 import ../logging_config
@@ -23,6 +24,7 @@ import ./collections as stdlib_collections
 import ./dates as stdlib_dates
 import ./selectors as stdlib_selectors
 import ./gdat as stdlib_gdat
+import ./actor as stdlib_actor
 import ./gene_meta as stdlib_gene_meta
 import ./aspects as stdlib_aspects
 import ./freeze as stdlib_freeze
@@ -4091,6 +4093,7 @@ proc init_gene_namespace*() =
   if types.gene_namespace_initialized:
     return
   types.gene_namespace_initialized = true
+  init_actor_runtime()
   let object_class = stdlib_classes.init_basic_classes()
   stdlib_classes.init_type_class(object_class)
   stdlib_strings.init_string_class(object_class)
@@ -4124,6 +4127,8 @@ proc init_gene_namespace*() =
   init_vm_namespace()
 
   init_thread_class()
+  init_actor_class()
+  stdlib_actor.init_actor_namespace()
 
 # Utility function: $tap - applies operations to a value and returns it
 proc core_tap(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =

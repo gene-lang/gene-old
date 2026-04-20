@@ -13,8 +13,8 @@ suite "Actor runtime":
     init_app_and_vm()
     init_stdlib()
 
-  test "gene/actor/spawn rejects use before enable":
-    let result = exec_gene("""
+  test "gene/actor bootstrap keeps actor and thread surfaces separate":
+    let blocked = exec_gene("""
       (do
         (var blocked false)
         (try
@@ -28,10 +28,9 @@ suite "Actor runtime":
         blocked)
     """, "actor_spawn_requires_enable.gene")
 
-    check result == TRUE
+    check blocked == TRUE
 
-  test "gene/actor processes sequential messages with explicit state threading":
-    let result = exec_gene("""
+    let actor_state = exec_gene("""
       (do
         (gene/actor/enable)
         (var counter
@@ -51,11 +50,10 @@ suite "Actor runtime":
         (await (counter .send_expect_reply {^kind "get"})))
     """, "actor_state_progression.gene")
 
-    check result.kind == VkInt
-    check result.int64 == 2
+    check actor_state.kind == VkInt
+    check actor_state.int64 == 2
 
-  test "bare spawn keeps thread semantics while actors live under gene/actor":
-    let result = exec_gene("""
+    let thread_result = exec_gene("""
       (do
         (var worker
           (spawn
@@ -67,5 +65,5 @@ suite "Actor runtime":
         (await (worker .send_expect_reply 41)))
     """, "thread_spawn_compatibility.gene")
 
-    check result.kind == VkInt
-    check result.int64 == 42
+    check thread_result.kind == VkInt
+    check thread_result.int64 == 42

@@ -58,6 +58,7 @@ include ./vm/core_helpers
 import ./vm/arithmetic
 import ./vm/generator
 import ./vm/thread
+import ./vm/actor
 import ./vm/pubsub
 
 # Forward declarations needed by vm/async and vm/native
