@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 02-02-PLAN.md
-last_updated: "2026-04-20T14:54:07.330Z"
+status: complete
+stopped_at: Completed 02-05-PLAN.md
+last_updated: "2026-04-20T15:51:41Z"
 last_activity: 2026-04-20
 progress:
   total_phases: 6
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 18
-  completed_plans: 15
-  percent: 83
+  completed_plans: 18
+  percent: 100
 ---
 
 # Project State
@@ -23,23 +23,23 @@ See: .planning/PROJECT.md (updated 2026-04-17)
 **Core value:** Phase 1 introduced the deep-frozen bit, shared-heap allocation
 path, and `(freeze v)` stdlib operation that every subsequent actor-runtime
 phase depends on, without adding a new concurrency API.
-**Current focus:** Phase 02 — actor-runtime
+**Current focus:** Phase 02 — actor-runtime (complete)
 
 ## Current Position
 
-Phase: 02 (actor-runtime) — EXECUTING
-Plan: 3 of 5
-Status: Ready to execute
+Phase: 02 (actor-runtime) — COMPLETE
+Plan: 5 of 5
+Status: Verified and closed
 Last activity: 2026-04-20
 Depends on the verified Phase 1.5 substrate across `9e9a97a`..`cfb9140`
 
-Progress: [████████░░] 78%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 14
+- Total plans completed: 18
 - Average duration: -
 - Total execution time: not recorded
 
@@ -50,7 +50,7 @@ Progress: [████████░░] 78%
 | 0 | 5 | - | - |
 | 1 | 6 | - | - |
 | 1.5 | 2 | - | - |
-| 2 | 0 | - | - |
+| 2 | 5 | - | - |
 
 **Recent Trend:**
 
@@ -105,6 +105,9 @@ Recent decisions affecting current work:
 - [Phase 02]: Expose actor bootstrap only through gene/actor/* and leave bare spawn on the legacy thread path.
 - [Phase 02]: Pin actors onto bounded workers taken from the existing thread pool instead of building a second concurrency runtime.
 - [Phase 02]: Default gene/actor/enable worker count to CPU-count-bounded pool usage so actor startup does not starve the thread compatibility lane.
+- [Phase 02]: Keep actor replies on the existing `FutureObj` / `MtReply` runtime path instead of creating a second await subsystem.
+- [Phase 02]: Stop semantics fail queued reply waiters immediately and fail the current in-flight reply future if stop wins before an explicit reply.
+- [Phase 02]: Public docs now treat actors as the primary concurrency API while threads remain a Phase 2 compatibility boundary.
 
 ### Pending Todos
 
@@ -120,14 +123,14 @@ None yet.
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
 | Concurrency | Freezable closures (Phase 1.5 — hard prerequisite for Phase 2) | Complete | 2026-04-19 |
-| Concurrency | Actor scheduler, tiered send, reply futures, stop semantics (Phase 2) | Planned and ready to execute | 2026-04-20 |
+| Concurrency | Actor scheduler, tiered send, reply futures, stop semantics (Phase 2) | Complete | 2026-04-20 |
 | Concurrency | Port-actor protocol for extensions (Phase 3) | Deferred | 2026-04-17 |
 | Concurrency | Thread API deprecation / `GENE_WORKERS` rename (Phase 4) | Deferred | 2026-04-17 |
 | Perf | Move-semantics `send!`, work-stealing scheduler, `^frozen-default` class annotation | Deferred indefinitely per proposal | 2026-04-17 |
 
 ## Session Continuity
 
-Last session: 2026-04-20T14:54:07.327Z
-Stopped at: Completed 02-02-PLAN.md
-Next step: Execute Phase 2 with `$gsd-execute-phase 02`
+Last session: 2026-04-20T15:51:41.000Z
+Stopped at: Completed 02-05-PLAN.md
+Next step: Plan Phase 3 extension migration
 Resume file: None

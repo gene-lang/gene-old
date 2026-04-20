@@ -33,9 +33,9 @@ slot can be used for the real Phase 1.
   captured environments deep-freezable and pointer-shareable so Phase 2 actor
   scheduling can use the same send semantics for callable payloads *(completed
   2026-04-19, commits `9e9a97a`..`cfb9140`)*
-- [ ] **Phase 2: Actor runtime** - Add actor scheduler, tiered send semantics,
+- [x] **Phase 2: Actor runtime** - Add actor scheduler, tiered send semantics,
   reply futures, stop semantics, and the user-facing actor API on top of the
-  Phase 0/1 substrate
+  Phase 0/1 substrate *(completed 2026-04-20, commits `d3822be`..`49d8d7a`)*
 - [ ] **Phase 3: Port actors for extensions** - Migrate process-global native
   resources and extension-side concurrency behind actor/port boundaries
 - [ ] **Phase 4: Remove legacy thread-first concurrency surfaces** - Deprecate
@@ -93,7 +93,7 @@ Plans:
 | 0. Unify lifetime and publication semantics | 5/5 | Complete | 2026-04-18 |
 | 1. Deep-frozen bit, shared heap, and `(freeze v)` | 6/6 | Complete | 2026-04-19 |
 | 1.5. Freezable closures | 2/2 | Complete | 2026-04-19 |
-| 2. Actor runtime | 0/5 | Planned | - |
+| 2. Actor runtime | 5/5 | Complete | 2026-04-20 |
 | 3. Port actors for extensions | 0/? | Unplanned | - |
 | 4. Remove legacy thread-first concurrency surfaces | 0/? | Unplanned | - |
 
@@ -119,7 +119,7 @@ Plans:
   teardown, add shared-pointer stress coverage, and document the migration
   boundary to Phase 2 / later thread-surface removal
 
-### Phase 2: Actor runtime
+### Phase 2: Actor runtime *(complete)*
 **Goal**: Deliver the actual actor model on top of the verified substrate:
 scheduler, tiered send behavior, reply futures, actor stop semantics, and the
 user-facing actor API.
@@ -136,9 +136,9 @@ user-facing actor API.
 Plans:
 - [x] 02-01-PLAN.md — Define actor runtime value contracts and class plumbing
 - [x] 02-02-PLAN.md — Reuse the worker substrate for actor enable/spawn and `gene/actor/*` bootstrap
-- [ ] 02-03-PLAN.md — Implement tiered send behavior with bounded mailbox backpressure
-- [ ] 02-04-PLAN.md — Wire actor reply futures and stop semantics onto the existing Future runtime
-- [ ] 02-05-PLAN.md — Publish actor docs, preserve thread compatibility guidance, and add black-box actor verification
+- [x] 02-03-PLAN.md — Implement tiered send behavior with bounded mailbox backpressure
+- [x] 02-04-PLAN.md — Wire actor reply futures and stop semantics onto the existing Future runtime
+- [x] 02-05-PLAN.md — Publish actor docs, preserve thread compatibility guidance, and add black-box actor verification
 
 ### Phase 3: Port actors for extensions
 **Goal**: Move process-global native resources and extension-side concurrency to

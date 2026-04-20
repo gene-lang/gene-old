@@ -38,8 +38,10 @@ a new concurrency API.
 
 - [x] Plan Phase 1.5 (freezable closures) as the next hard prerequisite for
   Phase 2 actor scheduling.
-- [ ] Scope Phase 2 actor runtime work on top of the now-verified Phase 1.5
-  substrate.
+- [x] Scope and execute Phase 2 actor runtime work on top of the verified
+  Phase 1.5 substrate.
+- [ ] Plan Phase 3 extension migration on top of the now-verified Phase 2
+  actor runtime.
 
 ### Out of Scope
 
@@ -91,6 +93,7 @@ Phase 0 without renumbering or rewriting historical exploratory docs.
 | Phase 1 uses `--skip-research` with CONTEXT defaults rather than a discuss round | User elected fast path; defaults documented in Phase 1 CONTEXT.md and revisable at review round | ✓ Complete — Phase 1 shipped across commits `f153f95`..`a36452b` |
 | Split freezable closures into Phase 1.5 (not Phase 1) | Closure captured-env analysis is its own workstream; holding Phase 1 to containers keeps the scope testable | ✓ Complete — Phase 1.5 shipped across commits `9e9a97a`..`cfb9140` |
 | Keep legacy thread-first concurrency surfaces unchanged during Phase 1.5 | Closure freezeability is the last substrate gate; actor scheduling and thread-surface removal belong to later phases | ✓ Complete — Phase 1.5 docs/tests fence migration boundaries explicitly |
+| Phase 2 keeps actor replies on the existing Future runtime | Reusing `FutureObj`/`MtReply` avoids a second await subsystem and keeps callbacks/timeouts consistent | ✓ Complete |
 
 ## Evolution
 

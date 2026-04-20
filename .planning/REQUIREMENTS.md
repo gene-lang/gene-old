@@ -88,7 +88,7 @@ VM.
 
 ### Actor Runtime
 
-- **ACT-02**: Add actor scheduler, tiered send, reply futures, and actor stop
+- [x] **ACT-02**: Add actor scheduler, tiered send, reply futures, and actor stop
   semantics.
 - **ACT-03**: Migrate process-global native resources behind port actors.
 - **ACT-04**: Deprecate the legacy thread API after the actor API is verified.
@@ -123,14 +123,14 @@ VM.
 | RC-02 | Phase 1 | Complete |
 | NAME-01 | Phase 1 | Complete |
 | CLO-01 | Phase 1.5 | Complete |
-| ACT-02 | Phase 2 | Deferred |
+| ACT-02 | Phase 2 | Complete |
 | ACT-03 | Phase 3 | Deferred |
 | ACT-04 | Phase 4 | Deferred |
 
 **Coverage:**
 - v1 requirements (Phase 0): 9 complete
 - v2 requirements (Phase 1): 7 complete
-- v3 requirements (Phase 1.5+): 1 complete, 3 deferred
+- v3 requirements (Phase 1.5+): 2 complete, 2 deferred
 - Unmapped: 0
 
 ---
