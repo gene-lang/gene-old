@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: complete
-stopped_at: Completed Phase 1.5 execution and closeout
-last_updated: "2026-04-19T20:51:57.522Z"
-last_activity: 2026-04-19 -- Phase 1.5 execution complete
+status: planned
+stopped_at: Planned Phase 2 (actor runtime)
+last_updated: "2026-04-20T14:11:03.447Z"
+last_activity: 2026-04-20 -- Phase 02 planning complete
 progress:
   total_phases: 6
   completed_phases: 3
-  total_plans: 13
+  total_plans: 18
   completed_plans: 13
-  percent: 100
+  percent: 72
 ---
 
 # Project State
@@ -23,17 +23,17 @@ See: .planning/PROJECT.md (updated 2026-04-17)
 **Core value:** Phase 1 introduced the deep-frozen bit, shared-heap allocation
 path, and `(freeze v)` stdlib operation that every subsequent actor-runtime
 phase depends on, without adding a new concurrency API.
-**Current focus:** Phase 2 (actor runtime) — next planning target
+**Current focus:** Phase 2 (actor runtime) — ready to execute
 
 ## Current Position
 
-Phase: 01.5 (freezable-closures) — COMPLETE
-Plan: 2 of 2
-Status: Complete
-Last activity: 2026-04-19 -- Phase 1.5 execution complete
-Depends on the verified Phase 1 substrate across `f153f95`..`a36452b`
+Phase: 02 (actor-runtime) — PLANNED
+Plan: 0 of 5
+Status: Ready to execute
+Last activity: 2026-04-20 -- Phase 02 planning complete
+Depends on the verified Phase 1.5 substrate across `9e9a97a`..`cfb9140`
 
-Progress: [██████████] 100%
+Progress: [███████░░░] 72%
 
 ## Performance Metrics
 
@@ -49,6 +49,8 @@ Progress: [██████████] 100%
 |-------|-------|-------|----------|
 | 0 | 5 | - | - |
 | 1 | 6 | - | - |
+| 1.5 | 2 | - | - |
+| 2 | 0 | - | - |
 
 **Recent Trend:**
 
@@ -111,14 +113,14 @@ None yet.
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
 | Concurrency | Freezable closures (Phase 1.5 — hard prerequisite for Phase 2) | Complete | 2026-04-19 |
-| Concurrency | Actor scheduler, tiered send, reply futures, stop semantics (Phase 2) | Deferred until Phase 1.5 closes | 2026-04-18 |
+| Concurrency | Actor scheduler, tiered send, reply futures, stop semantics (Phase 2) | Planned and ready to execute | 2026-04-20 |
 | Concurrency | Port-actor protocol for extensions (Phase 3) | Deferred | 2026-04-17 |
 | Concurrency | Thread API deprecation / `GENE_WORKERS` rename (Phase 4) | Deferred | 2026-04-17 |
 | Perf | Move-semantics `send!`, work-stealing scheduler, `^frozen-default` class annotation | Deferred indefinitely per proposal | 2026-04-17 |
 
 ## Session Continuity
 
-Last session: 2026-04-19T20:51:57.518Z
-Stopped at: Completed Phase 1.5 execution
-Next step: Plan or execute Phase 2 actor runtime work
+Last session: 2026-04-20T14:11:03.447Z
+Stopped at: Planned Phase 2 actor runtime work
+Next step: Execute Phase 2 with `$gsd-execute-phase 02`
 Resume file: None

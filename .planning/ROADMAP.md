@@ -93,7 +93,7 @@ Plans:
 | 0. Unify lifetime and publication semantics | 5/5 | Complete | 2026-04-18 |
 | 1. Deep-frozen bit, shared heap, and `(freeze v)` | 6/6 | Complete | 2026-04-19 |
 | 1.5. Freezable closures | 2/2 | Complete | 2026-04-19 |
-| 2. Actor runtime | 0/? | Unplanned | - |
+| 2. Actor runtime | 0/5 | Planned | - |
 | 3. Port actors for extensions | 0/? | Unplanned | - |
 | 4. Remove legacy thread-first concurrency surfaces | 0/? | Unplanned | - |
 
@@ -131,7 +131,14 @@ user-facing actor API.
   2. Send semantics distinguish primitive, frozen, and mutable payload paths as
      described in the approved proposal.
   3. Reply futures and actor stop behavior are validated under concurrent load.
-**Plans**: TBD
+**Plans**: 5 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Define actor runtime value contracts and class plumbing
+- [ ] 02-02-PLAN.md — Reuse the worker substrate for actor enable/spawn and `gene/actor/*` bootstrap
+- [ ] 02-03-PLAN.md — Implement tiered send behavior with bounded mailbox backpressure
+- [ ] 02-04-PLAN.md — Wire actor reply futures and stop semantics onto the existing Future runtime
+- [ ] 02-05-PLAN.md — Publish actor docs, preserve thread compatibility guidance, and add black-box actor verification
 
 ### Phase 3: Port actors for extensions
 **Goal**: Move process-global native resources and extension-side concurrency to
