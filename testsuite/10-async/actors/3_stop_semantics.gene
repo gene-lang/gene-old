@@ -1,0 +1,36 @@
+# Expected: queued_failed
+# Expected: stopped_send
+
+(do
+  (gene/actor/enable ^workers 1)
+  (var worker
+    (gene/actor/spawn
+      ^state 0
+      (fn [ctx msg state]
+        (case msg/kind
+        when "hold"
+          (sleep 200)
+          (+ state 1)
+        when "get"
+          (ctx .reply state)
+          state
+        else
+          state))))
+
+  (worker .send {^kind "hold"})
+  (var queued (worker .send_expect_reply {^kind "get"}))
+  (worker .stop)
+
+  (println
+    (try
+      (await queued)
+      "unexpected"
+    catch *
+      "queued_failed"))
+
+  (println
+    (try
+      (worker .send {^kind "get"})
+      "unexpected"
+    catch *
+      "stopped_send")))

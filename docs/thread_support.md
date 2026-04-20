@@ -1,5 +1,11 @@
 # Thread Support in the Gene VM (current implementation)
 
+Phase 2 introduces actors as the primary public concurrency surface.
+
+This page now documents the surviving thread-first API as a compatibility
+boundary for existing code and migration cases. For new concurrent work, start
+with [docs/handbook/actors.md](/Users/gcao/gene-workspace/gene-old/docs/handbook/actors.md).
+
 This document describes the thread system as implemented in the Nim VM today (not the older design notes).
 
 ## High-level model
@@ -94,6 +100,7 @@ This is enforced by `serialize_literal` (`src/gene/serdes.nim`) and covered by t
 If you need many concurrent jobs, prefer:
 
 - spawning a worker thread once (keep the handle) and using message passing, or
+- using actors when the workload fits the Phase 2 actor model, or
 - adding an explicit “terminate after job” behavior to `MtRunExpectReply` (not implemented today).
 
 ### 2) `keep_alive` is a placeholder and will block message processing
@@ -116,4 +123,3 @@ Some extensions wrap Nim ref objects that are not safe to share across threads. 
 
 - `tests/test_thread.nim` — spawn/spawn_return, reply futures, message callbacks
 - `tests/test_thread_msg.nim` — payload serialization constraints
-

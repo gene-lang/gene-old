@@ -1,0 +1,19 @@
+# Expected: 2
+
+(do
+  (gene/actor/enable)
+  (var counter
+    (gene/actor/spawn
+      ^state 0
+      (fn [ctx msg state]
+        (case msg/kind
+        when "increment"
+          (+ state 1)
+        when "get"
+          (ctx .reply state)
+          state
+        else
+          state))))
+  (counter .send {^kind "increment"})
+  (counter .send {^kind "increment"})
+  (println (await (counter .send_expect_reply {^kind "get"}))))

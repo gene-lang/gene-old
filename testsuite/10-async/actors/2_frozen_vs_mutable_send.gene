@@ -1,0 +1,35 @@
+# Expected: {^count 9}
+# Expected: {^count 1}
+# Expected: frozen
+# Expected: {^count 5}
+
+(do
+  (gene/actor/enable)
+  (var storage
+    (gene/actor/spawn
+      ^state {^last nil}
+      (fn [ctx msg state]
+        (case msg/kind
+        when "remember"
+          {^last msg/payload}
+        when "get"
+          (ctx .reply state/last)
+          state
+        else
+          state))))
+
+  (var mutable {^count 1})
+  (storage .send {^kind "remember" ^payload mutable})
+  (mutable/count = 9)
+  (println mutable)
+  (println (await (storage .send_expect_reply {^kind "get"})))
+
+  (var frozen (freeze {^count 5}))
+  (storage .send {^kind "remember" ^payload frozen})
+  (println
+    (try
+      (frozen/count = 7)
+      "mutated"
+    catch *
+      "frozen"))
+  (println (await (storage .send_expect_reply {^kind "get"}))))

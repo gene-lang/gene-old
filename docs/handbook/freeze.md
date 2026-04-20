@@ -148,8 +148,13 @@ are deep.
 
 ## Forward reference
 
-Phase 2 builds on this closure-freeze rule instead of rediscovering it in send
-logic. Frozen closures are now part of the actor-ready surface; the remaining
-Phase 2 work is scheduler, mailbox, reply, and stop behavior. The legacy
-thread-first APIs stay in place until the later migration/removal phase, so
-this handbook section is the handoff point rather than a transport rewrite.
+Phase 2 now consumes this closure-freeze rule in the shipped actor runtime.
+Frozen closures are part of the send-by-pointer surface alongside other frozen
+graphs, while mutable ordinary data is cloned on send. The remaining legacy
+thread-first APIs stay in place only as a compatibility boundary until the
+later migration/removal phase.
+
+See also:
+
+- [docs/handbook/actors.md](/Users/gcao/gene-workspace/gene-old/docs/handbook/actors.md)
+- [docs/thread_support.md](/Users/gcao/gene-workspace/gene-old/docs/thread_support.md)
