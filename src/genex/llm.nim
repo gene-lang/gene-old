@@ -1,9 +1,12 @@
-import os, tables, osproc
+import os, tables, osproc, strutils
 import std/locks
-import std/exitprocs
 import ../gene/types
-import ../gene/vm
 import ../gene/vm/extension_abi
+import ../gene/vm/llm_host_abi
+import ../gene/serdes
+when not defined(GENE_LLM_MOCK):
+  import std/exitprocs
+  import ../gene/vm
 
 # Global registries for cross-thread access
 # This allows worker threads to access models and create sessions
@@ -12,6 +15,47 @@ var global_model_class* {.global.}: Class = nil
 var global_session_class* {.global.}: Class = nil
 var global_model_lock* {.global.}: Lock  # Protects access to global_model_registry
 var global_llm_op_lock* {.global.}: Lock  # Serializes llama.cpp operations (not thread-safe)
+var llm_extension_host* {.global.}: GeneHostAbi
+var llm_extension_host_ready* {.global.}: bool
+var llm_backend_model_handles* {.global.}: Table[system.int64, Value] = initTable[system.int64, Value]()
+var llm_backend_session_handles* {.global.}: Table[system.int64, Value] = initTable[system.int64, Value]()
+var llm_backend_next_model_id* {.global.}: system.int64 = 1
+var llm_backend_next_session_id* {.global.}: system.int64 = 1
+
+proc llm_host_vm(): ptr VirtualMachine =
+  cast[ptr VirtualMachine](llm_extension_host.user_data)
+
+proc llm_alloc_cstring_copy(s: string): cstring =
+  let size = s.len + 1
+  let raw = cast[cstring](allocShared0(size))
+  if s.len > 0:
+    copyMem(raw, s.cstring, s.len)
+  raw
+
+proc llm_set_error(out_error: ptr cstring, message: string) =
+  if out_error != nil:
+    out_error[] = llm_alloc_cstring_copy(message)
+
+proc llm_clear_error(out_error: ptr cstring) =
+  if out_error != nil:
+    out_error[] = nil
+
+proc llm_parse_options(options_ser: cstring): Value =
+  if options_ser == nil:
+    return NIL
+  let text = $options_ser
+  if text.len == 0:
+    return NIL
+  deserialize_literal(text)
+
+proc llm_serialize_reply(value: Value): cstring =
+  var text = ""
+  {.cast(gcsafe).}:
+    text = serialize_literal(value).to_s()
+  llm_alloc_cstring_copy(text)
+
+proc gene_llm_host_abi_version*(): uint32 {.cdecl, exportc, dynlib.} =
+  GENE_LLM_HOST_ABI_VERSION
 
 when defined(GENE_LLM_MOCK):
   type
@@ -143,14 +187,14 @@ when defined(GENE_LLM_MOCK):
     cast[SessionState](get_custom_data(val, "LLM session payload missing"))
 
   proc new_model_value(state: ModelState): Value {.gcsafe.} =
-    # Use threadvar class if available, fall back to global for worker threads
-    let cls = if model_class_global != nil: model_class_global else: global_model_class
-    new_custom_value(cls, state)
+    {.cast(gcsafe).}:
+      let cls = if model_class_global != nil: model_class_global else: global_model_class
+      new_custom_value(cls, state)
 
   proc new_session_value(state: SessionState): Value {.gcsafe.} =
-    # Use threadvar class if available, fall back to global for worker threads
-    let cls = if session_class_global != nil: session_class_global else: global_session_class
-    new_custom_value(cls, state)
+    {.cast(gcsafe).}:
+      let cls = if session_class_global != nil: session_class_global else: global_session_class
+      new_custom_value(cls, state)
 
   proc ensure_model_open(state: ModelState) =
     if state.closed:
@@ -1141,11 +1185,130 @@ proc init*(vm: ptr VirtualMachine): Namespace {.gcsafe.} =
     return llm_val.ref.ns
   return nil
 
+proc gene_llm_host_load_model*(path: cstring, options_ser: cstring,
+                               out_model_id: ptr int64, out_error: ptr cstring): int32 {.cdecl, exportc, dynlib.} =
+  if not llm_extension_host_ready:
+    llm_set_error(out_error, "LLM host bridge is not initialized")
+    return int32(GlhsErr)
+  try:
+    llm_clear_error(out_error)
+    if path == nil:
+      llm_set_error(out_error, "Model path must be a string")
+      return int32(GlhsErr)
+    let options = llm_parse_options(options_ser)
+    var args = @[($path).to_value()]
+    if options != NIL:
+      args.add(options)
+    let model = call_native_fn(vm_load_model, llm_host_vm(), args)
+    let id = llm_backend_next_model_id
+    llm_backend_next_model_id.inc()
+    llm_backend_model_handles[id] = model
+    if out_model_id != nil:
+      out_model_id[] = id
+    int32(GlhsOk)
+  except CatchableError as exc:
+    llm_set_error(out_error, exc.msg)
+    int32(GlhsErr)
+
+proc gene_llm_host_new_session*(model_id: int64, options_ser: cstring,
+                                out_session_id: ptr int64, out_error: ptr cstring): int32 {.cdecl, exportc, dynlib.} =
+  if not llm_extension_host_ready:
+    llm_set_error(out_error, "LLM host bridge is not initialized")
+    return int32(GlhsErr)
+  try:
+    llm_clear_error(out_error)
+    let model = llm_backend_model_handles.getOrDefault(model_id, NIL)
+    if model == NIL:
+      llm_set_error(out_error, "LLM model handle is no longer valid")
+      return int32(GlhsErr)
+    let options = llm_parse_options(options_ser)
+    var args = @[model]
+    if options != NIL:
+      args.add(options)
+    let session = call_native_fn(vm_model_new_session, llm_host_vm(), args)
+    let id = llm_backend_next_session_id
+    llm_backend_next_session_id.inc()
+    llm_backend_session_handles[id] = session
+    if out_session_id != nil:
+      out_session_id[] = id
+    int32(GlhsOk)
+  except CatchableError as exc:
+    llm_set_error(out_error, exc.msg)
+    int32(GlhsErr)
+
+proc gene_llm_host_infer*(session_id: int64, prompt: cstring, options_ser: cstring,
+                          out_result_ser: ptr cstring, out_error: ptr cstring): int32 {.cdecl, exportc, dynlib.} =
+  if not llm_extension_host_ready:
+    llm_set_error(out_error, "LLM host bridge is not initialized")
+    return int32(GlhsErr)
+  try:
+    llm_clear_error(out_error)
+    if out_result_ser != nil:
+      out_result_ser[] = nil
+    if prompt == nil:
+      llm_set_error(out_error, "Session.infer prompt must be a string")
+      return int32(GlhsErr)
+    let session = llm_backend_session_handles.getOrDefault(session_id, NIL)
+    if session == NIL:
+      llm_set_error(out_error, "LLM session handle is no longer valid")
+      return int32(GlhsErr)
+    let options = llm_parse_options(options_ser)
+    var args = @[session, ($prompt).to_value()]
+    if options != NIL:
+      args.add(options)
+    let reply = call_native_fn(vm_session_infer, llm_host_vm(), args)
+    if out_result_ser != nil:
+      out_result_ser[] = llm_serialize_reply(reply)
+    int32(GlhsOk)
+  except CatchableError as exc:
+    llm_set_error(out_error, exc.msg)
+    int32(GlhsErr)
+
+proc gene_llm_host_close_model*(model_id: int64, out_error: ptr cstring): int32 {.cdecl, exportc, dynlib.} =
+  if not llm_extension_host_ready:
+    llm_set_error(out_error, "LLM host bridge is not initialized")
+    return int32(GlhsErr)
+  try:
+    llm_clear_error(out_error)
+    let model = llm_backend_model_handles.getOrDefault(model_id, NIL)
+    if model == NIL:
+      llm_set_error(out_error, "LLM model handle is no longer valid")
+      return int32(GlhsErr)
+    discard call_native_fn(vm_model_close, llm_host_vm(), @[model])
+    llm_backend_model_handles.del(model_id)
+    int32(GlhsOk)
+  except CatchableError as exc:
+    llm_set_error(out_error, exc.msg)
+    int32(GlhsErr)
+
+proc gene_llm_host_close_session*(session_id: int64, out_error: ptr cstring): int32 {.cdecl, exportc, dynlib.} =
+  if not llm_extension_host_ready:
+    llm_set_error(out_error, "LLM host bridge is not initialized")
+    return int32(GlhsErr)
+  try:
+    llm_clear_error(out_error)
+    let session = llm_backend_session_handles.getOrDefault(session_id, NIL)
+    if session == NIL:
+      llm_set_error(out_error, "LLM session handle is no longer valid")
+      return int32(GlhsErr)
+    discard call_native_fn(vm_session_close, llm_host_vm(), @[session])
+    llm_backend_session_handles.del(session_id)
+    int32(GlhsOk)
+  except CatchableError as exc:
+    llm_set_error(out_error, exc.msg)
+    int32(GlhsErr)
+
+proc gene_llm_host_free_cstring*(s: cstring) {.cdecl, exportc, dynlib.} =
+  if s != nil:
+    deallocShared(cast[pointer](s))
+
 proc gene_init*(host: ptr GeneHostAbi): int32 {.cdecl, exportc, dynlib.} =
   if host == nil:
     return int32(GeneExtErr)
   if host.abi_version != GENE_EXT_ABI_VERSION:
     return int32(GeneExtAbiMismatch)
+  llm_extension_host = host[]
+  llm_extension_host_ready = true
   let vm = apply_extension_host_context(host)
   run_extension_vm_created_callbacks()
   let ns = init(vm)

@@ -102,8 +102,8 @@ proc call_extension_port*(host: ptr GeneHostAbi, port_handle: Value, msg: Value,
                           timeout_ms = 2000): Value =
   if host == nil or host.call_port_fn == nil:
     return NIL
-  var result = NIL
-  let status = host.call_port_fn(port_handle, msg, int32(timeout_ms), addr result)
+  var res = NIL
+  let status = host.call_port_fn(port_handle, msg, int32(timeout_ms), addr res)
   if status != int32(GeneExtOk):
     return NIL
-  result
+  res

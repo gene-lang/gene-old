@@ -44,8 +44,6 @@ var actor_mailbox_limit = DEFAULT_ACTOR_MAILBOX_LIMIT
 var actor_cleanup_registered = false
 
 var current_actor_record {.threadvar.}: ActorRuntimeRecord
-var current_actor_message {.threadvar.}: ActorMailboxMessage
-var current_actor_reply_sent {.threadvar.}: bool
 
 initLock(actor_runtime_lock)
 
@@ -380,6 +378,32 @@ proc send_actor_reply(msg: ActorMailboxMessage, payload: Value) {.gcsafe.} =
   next_message_id.inc()
   THREAD_DATA[msg.from_thread_id].channel.send(reply)
 
+proc send_actor_reply_from_context(ctx: ActorContext, payload: Value) {.gcsafe.} =
+  if ctx == nil or not ctx.reply_requested:
+    raise new_exception(types.Exception, "ActorContext.reply requires send_expect_reply")
+  if ctx.reply_sent:
+    raise new_exception(types.Exception, "ActorContext.reply can only be called once per message")
+  if ctx.reply_thread_id < 0 or ctx.reply_thread_id >= g_max_threads:
+    raise new_exception(types.Exception, "ActorContext.reply target thread is invalid")
+  if not THREADS[ctx.reply_thread_id].in_use or THREADS[ctx.reply_thread_id].secret != ctx.reply_thread_secret:
+    raise new_exception(types.Exception, "ActorContext.reply target thread is no longer valid")
+
+  var reply: ThreadMessage
+  new(reply)
+  reply.id = next_message_id
+  reply.msg_type = MtReply
+  reply.payload = NIL
+  reply.payload_bytes = ThreadPayload(bytes: @[])
+  if payload != NIL:
+    let routed = prepare_actor_payload_for_send(payload)
+    reply.payload = routed.value
+  reply.from_message_id = ctx.reply_message_id
+  reply.from_thread_id = current_thread_id
+  reply.from_thread_secret = THREADS[current_thread_id].secret
+  next_message_id.inc()
+  THREAD_DATA[ctx.reply_thread_id].channel.send(reply)
+  ctx.reply_sent = true
+
 proc send_actor_failure(msg: ActorMailboxMessage, message: string) {.gcsafe.} =
   let error_payload = new_map_value()
   map_data(error_payload)["__thread_error__".to_key()] = true.to_value()
@@ -417,10 +441,14 @@ proc actor_process_message(msg: ThreadMessage) =
     return
 
   current_actor_record = record
-  current_actor_message = mailbox_msg
-  current_actor_reply_sent = false
-
-  let ctx = ActorContext(actor: record.actor)
+  let ctx = ActorContext(
+    actor: record.actor,
+    reply_requested: mailbox_msg.reply_requested,
+    reply_sent: false,
+    reply_message_id: mailbox_msg.from_message_id,
+    reply_thread_id: mailbox_msg.from_thread_id,
+    reply_thread_secret: mailbox_msg.from_thread_secret
+  )
 
   try:
     let next_state =
@@ -437,18 +465,16 @@ proc actor_process_message(msg: ThreadMessage) =
     let is_stopped = record.stopped
     release(record.lock)
 
-    if mailbox_msg.reply_requested and not current_actor_reply_sent:
+    if mailbox_msg.reply_requested and not ctx.reply_sent:
       if is_stopped:
         send_actor_failure(mailbox_msg, "Actor is stopped")
       else:
         send_actor_reply(mailbox_msg, NIL)
   except CatchableError as exc:
-    if mailbox_msg.reply_requested and not current_actor_reply_sent:
+    if mailbox_msg.reply_requested and not ctx.reply_sent:
       send_actor_failure(mailbox_msg, exc.msg)
   finally:
     current_actor_record = nil
-    current_actor_message = nil
-    current_actor_reply_sent = false
     actor_finish_turn(record)
 
 proc actor_worker_handler(thread_id: int) {.thread.} =
@@ -620,12 +646,7 @@ proc actor_context_actor_native(vm: ptr VirtualMachine, args: ptr UncheckedArray
 proc actor_reply_for_test*(ctx: Value, value: Value) {.gcsafe.} =
   if ctx.kind != VkActorContext or ctx.ref.actor_context == nil:
     raise new_exception(types.Exception, "actor reply helper requires an ActorContext")
-  if current_actor_message == nil or not current_actor_message.reply_requested:
-    raise new_exception(types.Exception, "ActorContext.reply requires send_expect_reply")
-  if current_actor_reply_sent:
-    raise new_exception(types.Exception, "ActorContext.reply can only be called once per message")
-  send_actor_reply(current_actor_message, value)
-  current_actor_reply_sent = true
+  send_actor_reply_from_context(ctx.ref.actor_context, value)
 
 proc actor_context_reply_impl(args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
   if get_method_arg_count(arg_count, has_keyword_args) < 1:

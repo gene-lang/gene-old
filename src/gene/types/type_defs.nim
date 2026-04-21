@@ -106,6 +106,11 @@ type
 
   ActorContext* = ref object
     actor*: Actor
+    reply_requested*: bool
+    reply_sent*: bool
+    reply_message_id*: int
+    reply_thread_id*: int
+    reply_thread_secret*: int
 
   ExtensionPortKind* = enum
     EpkSingleton

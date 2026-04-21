@@ -1,9 +1,10 @@
 import unittest
 
-import strutils, tables
+import strutils, tables, os
 
 import gene/types except Exception
 import gene/vm
+import gene/vm/extension
 
 import ../helpers
 
@@ -17,17 +18,28 @@ proc eval(code: string): Value =
   let snippet = cleanup(code)
   VM.exec(snippet, "llm_mock_test")
 
+var mock_llm_built = false
+
+proc ensure_mock_llm_built() =
+  if mock_llm_built:
+    return
+  let rc = execShellCmd("nim c --app:lib -d:GENE_LLM_MOCK --mm:orc -o:build/libllm.dylib src/genex/llm.nim")
+  check rc == 0
+  mock_llm_built = true
+
 suite "LLM Mock Backend":
+  ensure_mock_llm_built()
   init_all()
   if App.kind == VkApplication and App.app.global_ns.kind == VkNamespace:
     App.app.global_ns.ref.ns["genex".to_key()] = App.app.genex_ns
+  discard load_extension(VM, "build/libllm")
 
   test "model instances expose classes":
     let model_value = eval("""
       (genex/llm/load_model """ & MockModelPathLiteral & """ {^allow_missing true})
     """)
-    check model_value.kind == VkCustom
-    check model_value.ref.custom_class.name == "Model"
+    check model_value.kind == VkInstance
+    check model_value.instance_class.name == "Model"
 
   test "infer returns completion map":
     let response = eval("""

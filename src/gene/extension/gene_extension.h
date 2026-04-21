@@ -58,6 +58,10 @@ typedef enum GeneExtStatus {
 typedef void (*GeneHostLogFn)(int32_t level, const char* logger_name, const char* message);
 typedef void (*GeneHostSchedulerTickFn)(void* vm_user_data, void* callback_user_data);
 typedef int32_t (*GeneHostRegisterSchedulerCallbackFn)(GeneHostSchedulerTickFn callback, void* callback_user_data);
+typedef int32_t (*GeneHostRegisterPortFn)(const char* name, int32_t kind, int32_t pool_size,
+                                          Value handler, Value init_state, Value* out_handle);
+typedef int32_t (*GeneHostCallPortFn)(Value port_handle, Value msg, int32_t timeout_ms,
+                                      Value* out_value);
 
 /**
  * Host ABI passed to gene_init.
@@ -69,6 +73,8 @@ typedef struct GeneHostAbi {
     void* symbols_data;            /* host symbol table pointer */
     GeneHostLogFn log_message_fn;  /* optional host logging callback */
     GeneHostRegisterSchedulerCallbackFn register_scheduler_callback_fn; /* optional scheduler registration hook */
+    GeneHostRegisterPortFn register_port_fn; /* optional extension port registration hook */
+    GeneHostCallPortFn call_port_fn;         /* optional extension port call hook */
     Namespace** result_namespace;  /* extension sets this to its namespace */
 } GeneHostAbi;
 

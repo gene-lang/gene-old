@@ -7,9 +7,12 @@ when defined(gene_wasm):
   import ../wasm_host_abi
 
 when not defined(gene_wasm):
+  import ../serdes
   import dynlib
   import ./extension_abi
   import ./actor
+  import ./thread
+  import ./llm_host_abi
 
   const VmExtensionLogger = "gene/vm/extension"
 
@@ -91,9 +94,408 @@ type
     pool_size*: int
     handles*: seq[Value]
 
+  LlmHostBridge = ref object
+    handle: LibHandle
+    abi_version_fn: GeneLlmHostAbiVersionFn
+    load_model_fn: GeneLlmHostLoadModelFn
+    new_session_fn: GeneLlmHostNewSessionFn
+    infer_fn: GeneLlmHostInferFn
+    close_model_fn: GeneLlmHostCloseModelFn
+    close_session_fn: GeneLlmHostCloseSessionFn
+    free_cstring_fn: GeneLlmHostFreeCStringFn
+    model_class: Class
+    session_class: Class
+    actor_handle: Value
+
 var host_scheduler_callback_entries: seq[HostSchedulerCallbackEntry] = @[]
 var host_scheduler_dispatcher_registered = false
 var registered_extension_ports*: Table[string, RegisteredExtensionPort] = initTable[string, RegisteredExtensionPort]()
+var llm_host_bridge: LlmHostBridge = nil
+
+proc current_llm_bridge(): LlmHostBridge {.gcsafe.} =
+  {.cast(gcsafe).}:
+    llm_host_bridge
+
+proc resolve_extension_symbol[T](handle: LibHandle, symbol_name: string): T =
+  if handle.isNil:
+    return cast[T](nil)
+  cast[T](handle.symAddr(symbol_name))
+
+proc llm_take_cstring(p: cstring): string {.gcsafe.} =
+  if p == nil:
+    return ""
+  result = $p
+  var free_fn: GeneLlmHostFreeCStringFn = nil
+  {.cast(gcsafe).}:
+    if llm_host_bridge != nil:
+      free_fn = llm_host_bridge.free_cstring_fn
+  if free_fn != nil:
+    free_fn(p)
+
+proc llm_expect_map_arg(args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool,
+                        positional_index: int, context: string): Value =
+  let positional = get_positional_count(arg_count, has_keyword_args)
+  if positional < positional_index:
+    return NIL
+  let value = get_positional_arg(args, positional_index - 1, has_keyword_args)
+  if value == NIL:
+    return NIL
+  if value.kind != VkMap:
+    raise new_exception(types.Exception, context & " options must be a map")
+  value
+
+proc llm_serialize_options(value: Value): string {.gcsafe.} =
+  if value == NIL:
+    return ""
+  {.cast(gcsafe).}:
+    serialize_literal(value).to_s()
+
+proc llm_model_id_key(): Key = "__model_id__".to_key()
+proc llm_session_id_key(): Key = "__session_id__".to_key()
+
+proc llm_model_id(value: Value, context: string): int64 =
+  if value.kind != VkInstance:
+    raise new_exception(types.Exception, context & " requires an LLM model instance")
+  if value.instance_class == nil or value.instance_class.name != "Model":
+    raise new_exception(types.Exception, context & " requires an LLM model instance")
+  let id_val = instance_props(value).getOrDefault(llm_model_id_key(), NIL)
+  if id_val.kind != VkInt:
+    raise new_exception(types.Exception, context & " model id is missing")
+  id_val.to_int()
+
+proc llm_session_id(value: Value, context: string): int64 =
+  if value.kind != VkInstance:
+    raise new_exception(types.Exception, context & " requires an LLM session instance")
+  if value.instance_class == nil or value.instance_class.name != "Session":
+    raise new_exception(types.Exception, context & " requires an LLM session instance")
+  let id_val = instance_props(value).getOrDefault(llm_session_id_key(), NIL)
+  if id_val.kind != VkInt:
+    raise new_exception(types.Exception, context & " session id is missing")
+  id_val.to_int()
+
+proc new_llm_model_instance(id: int64): Value =
+  var cls: Class = nil
+  {.cast(gcsafe).}:
+    cls = llm_host_bridge.model_class
+  let inst = new_instance_value(cls)
+  instance_props(inst)[llm_model_id_key()] = id.to_value()
+  inst
+
+proc new_llm_session_instance(id: int64): Value =
+  var cls: Class = nil
+  {.cast(gcsafe).}:
+    cls = llm_host_bridge.session_class
+  let inst = new_instance_value(cls)
+  instance_props(inst)[llm_session_id_key()] = id.to_value()
+  inst
+
+proc llm_raise_bridge_error(message: string, fallback: string) {.noreturn.} =
+  if message.len > 0:
+    raise new_exception(types.Exception, message)
+  raise new_exception(types.Exception, fallback)
+
+proc llm_load_model_native(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                           has_keyword_args: bool): Value {.gcsafe.}
+proc llm_model_new_session_native(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                                  has_keyword_args: bool): Value {.gcsafe.}
+proc llm_session_infer_native(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                              has_keyword_args: bool): Value {.gcsafe.}
+proc llm_model_close_native(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                            has_keyword_args: bool): Value {.gcsafe.}
+proc llm_session_close_native(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                              has_keyword_args: bool): Value {.gcsafe.}
+
+proc ensure_llm_host_classes(ext_ns: Namespace) =
+  if llm_host_bridge == nil:
+    return
+  if llm_host_bridge.model_class == nil:
+    let model_class = new_class("Model")
+    if App.app.object_class.kind == VkClass:
+      model_class.parent = App.app.object_class.ref.class
+    model_class.def_native_method("new_session", llm_model_new_session_native)
+    model_class.def_native_method("close", llm_model_close_native)
+    llm_host_bridge.model_class = model_class
+  if llm_host_bridge.session_class == nil:
+    let session_class = new_class("Session")
+    if App.app.object_class.kind == VkClass:
+      session_class.parent = App.app.object_class.ref.class
+    session_class.def_native_method("infer", llm_session_infer_native)
+    session_class.def_native_method("close", llm_session_close_native)
+    llm_host_bridge.session_class = session_class
+
+  let model_class_ref = new_ref(VkClass)
+  model_class_ref.class = llm_host_bridge.model_class
+  let session_class_ref = new_ref(VkClass)
+  session_class_ref.class = llm_host_bridge.session_class
+  let load_fn = new_ref(VkNativeFn)
+  load_fn.native_fn = llm_load_model_native
+
+  ext_ns["Model".to_key()] = model_class_ref.to_ref_value()
+  ext_ns["Session".to_key()] = session_class_ref.to_ref_value()
+  ext_ns["load_model".to_key()] = load_fn.to_ref_value()
+
+proc install_llm_host_bridge(ext_ns: Namespace, handle: LibHandle) =
+  if handle.isNil or ext_ns == nil:
+    return
+
+  let abi_version_fn = resolve_extension_symbol[GeneLlmHostAbiVersionFn](handle, "gene_llm_host_abi_version")
+  if abi_version_fn == nil:
+    return
+  if abi_version_fn() != GENE_LLM_HOST_ABI_VERSION:
+    raise new_exception(types.Exception, "[GENE.EXT.ABI_MISMATCH] Unsupported LLM host bridge ABI")
+
+  let bridge = LlmHostBridge(
+    handle: handle,
+    abi_version_fn: abi_version_fn,
+    load_model_fn: resolve_extension_symbol[GeneLlmHostLoadModelFn](handle, "gene_llm_host_load_model"),
+    new_session_fn: resolve_extension_symbol[GeneLlmHostNewSessionFn](handle, "gene_llm_host_new_session"),
+    infer_fn: resolve_extension_symbol[GeneLlmHostInferFn](handle, "gene_llm_host_infer"),
+    close_model_fn: resolve_extension_symbol[GeneLlmHostCloseModelFn](handle, "gene_llm_host_close_model"),
+    close_session_fn: resolve_extension_symbol[GeneLlmHostCloseSessionFn](handle, "gene_llm_host_close_session"),
+    free_cstring_fn: resolve_extension_symbol[GeneLlmHostFreeCStringFn](handle, "gene_llm_host_free_cstring"),
+    actor_handle: NIL
+  )
+  if bridge.load_model_fn == nil or bridge.new_session_fn == nil or bridge.infer_fn == nil or
+     bridge.close_model_fn == nil or bridge.close_session_fn == nil or bridge.free_cstring_fn == nil:
+    raise new_exception(types.Exception, "[GENE.EXT.SYMBOL_MISSING] Incomplete LLM host bridge symbols")
+
+  llm_host_bridge = bridge
+  ensure_llm_host_classes(ext_ns)
+
+proc llm_bridge_poll_reply(vm: ptr VirtualMachine, future_value: Value, context: string): Value {.gcsafe.} =
+  let deadline = epochTime() + 10.0
+  let future_obj = future_value.ref.future
+  while future_obj.state == FsPending and epochTime() < deadline:
+    vm.event_loop_counter = 100
+    {.cast(gcsafe).}:
+      vm_poll_event_loop(vm)
+    sleep(10)
+
+  case future_obj.state
+  of FsSuccess:
+    return future_obj.value
+  of FsFailure:
+    let err = future_obj.value
+    if err.kind == VkInstance:
+      let msg = instance_props(err).getOrDefault("message".to_key(), NIL)
+      if msg.kind == VkString:
+        llm_raise_bridge_error(msg.str, context & " failed")
+    elif err.kind == VkString:
+      llm_raise_bridge_error(err.str, context & " failed")
+    llm_raise_bridge_error(context & " failed", context & " failed")
+  of FsCancelled:
+    llm_raise_bridge_error("Future cancelled", context & " cancelled")
+  of FsPending:
+    llm_raise_bridge_error(context & " timed out", context & " timed out")
+
+proc llm_bridge_request_actor_native(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                                     has_keyword_args: bool): Value {.gcsafe.} =
+  discard arg_count
+  let ctx = get_positional_arg(args, 0, has_keyword_args)
+  let msg = get_positional_arg(args, 1, has_keyword_args)
+  let bridge = current_llm_bridge()
+  if bridge == nil:
+    raise new_exception(types.Exception, "LLM host bridge is not installed")
+  if msg.kind != VkMap:
+    raise new_exception(types.Exception, "LLM actor request requires a message map")
+
+  let op_val = map_data(msg).getOrDefault("op".to_key(), NIL)
+  if op_val.kind != VkString:
+    raise new_exception(types.Exception, "LLM actor request requires an op")
+
+  let opts = map_data(msg).getOrDefault("options".to_key(), NIL)
+  let options_ser = llm_serialize_options(opts)
+
+  case op_val.str
+  of "load_model":
+    let path_val = map_data(msg).getOrDefault("path".to_key(), NIL)
+    if path_val.kind != VkString:
+      raise new_exception(types.Exception, "LLM load_model requires a path")
+    var model_id: int64 = 0
+    var err: cstring = nil
+    let status = bridge.load_model_fn(path_val.str.cstring,
+      if options_ser.len > 0: options_ser.cstring else: nil,
+      addr model_id, addr err)
+    let err_msg = llm_take_cstring(err)
+    if status != int32(GlhsOk):
+      llm_raise_bridge_error(err_msg, "genex/llm/load_model failed")
+    actor_reply_for_test(ctx, new_map_value({"model_id".to_key(): model_id.to_value()}.toTable()))
+  of "new_session":
+    let model_id_val = map_data(msg).getOrDefault("model_id".to_key(), NIL)
+    if model_id_val.kind != VkInt:
+      raise new_exception(types.Exception, "LLM new_session requires model_id")
+    var session_id: int64 = 0
+    var err: cstring = nil
+    let status = bridge.new_session_fn(model_id_val.to_int(),
+      if options_ser.len > 0: options_ser.cstring else: nil,
+      addr session_id, addr err)
+    let err_msg = llm_take_cstring(err)
+    if status != int32(GlhsOk):
+      llm_raise_bridge_error(err_msg, "Model.new_session failed")
+    actor_reply_for_test(ctx, new_map_value({"session_id".to_key(): session_id.to_value()}.toTable()))
+  of "infer":
+    let session_id_val = map_data(msg).getOrDefault("session_id".to_key(), NIL)
+    let prompt_val = map_data(msg).getOrDefault("prompt".to_key(), NIL)
+    if session_id_val.kind != VkInt or prompt_val.kind != VkString:
+      raise new_exception(types.Exception, "LLM infer requires session_id and prompt")
+    var result_ser: cstring = nil
+    var err: cstring = nil
+    let status = bridge.infer_fn(session_id_val.to_int(), prompt_val.str.cstring,
+      if options_ser.len > 0: options_ser.cstring else: nil,
+      addr result_ser, addr err)
+    let err_msg = llm_take_cstring(err)
+    if status != int32(GlhsOk):
+      llm_raise_bridge_error(err_msg, "Session.infer failed")
+    if result_ser == nil:
+      llm_raise_bridge_error("", "Session.infer returned no payload")
+    let payload = llm_take_cstring(result_ser)
+    actor_reply_for_test(ctx, deserialize_literal(payload))
+  of "close_model":
+    let model_id_val = map_data(msg).getOrDefault("model_id".to_key(), NIL)
+    if model_id_val.kind != VkInt:
+      raise new_exception(types.Exception, "LLM close_model requires model_id")
+    var err: cstring = nil
+    let status = bridge.close_model_fn(model_id_val.to_int(), addr err)
+    let err_msg = llm_take_cstring(err)
+    if status != int32(GlhsOk):
+      llm_raise_bridge_error(err_msg, "Model.close failed")
+    actor_reply_for_test(ctx, "ok".to_symbol_value())
+  of "close_session":
+    let session_id_val = map_data(msg).getOrDefault("session_id".to_key(), NIL)
+    if session_id_val.kind != VkInt:
+      raise new_exception(types.Exception, "LLM close_session requires session_id")
+    var err: cstring = nil
+    let status = bridge.close_session_fn(session_id_val.to_int(), addr err)
+    let err_msg = llm_take_cstring(err)
+    if status != int32(GlhsOk):
+      llm_raise_bridge_error(err_msg, "Session.close failed")
+    actor_reply_for_test(ctx, "ok".to_symbol_value())
+  else:
+    raise new_exception(types.Exception, "Unknown LLM actor op: " & op_val.str)
+
+  NIL
+
+proc ensure_llm_host_actor(vm: ptr VirtualMachine): Value =
+  let bridge = current_llm_bridge()
+  if bridge == nil:
+    raise new_exception(types.Exception, "LLM host bridge is not installed")
+  if bridge.actor_handle.kind == VkActor:
+    return bridge.actor_handle
+
+  if THREAD_DATA[0].channel == nil:
+    init_thread_pool()
+  if not actor_runtime_active():
+    init_actor_runtime()
+    actor_enable_for_test(1)
+
+  let actor = actor_spawn_value(NativeFn(llm_bridge_request_actor_native).to_value(), NIL)
+  bridge.actor_handle = actor
+  return actor
+
+proc llm_load_model_native(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                           has_keyword_args: bool): Value {.gcsafe.} =
+  if current_llm_bridge() == nil:
+    raise new_exception(types.Exception, "LLM host bridge is not installed")
+  if get_positional_count(arg_count, has_keyword_args) < 1:
+    raise new_exception(types.Exception, "genex/llm/load_model requires a file path")
+  let path_val = get_positional_arg(args, 0, has_keyword_args)
+  if path_val.kind != VkString:
+    raise new_exception(types.Exception, "Model path must be a string")
+  let opts = llm_expect_map_arg(args, arg_count, has_keyword_args, 2, "load_model")
+  var actor = NIL
+  {.cast(gcsafe).}:
+    actor = ensure_llm_host_actor(vm)
+  let msg = new_map_value()
+  map_data(msg)["op".to_key()] = "load_model".to_value()
+  map_data(msg)["path".to_key()] = path_val
+  if opts != NIL:
+    map_data(msg)["options".to_key()] = opts
+  var future = NIL
+  {.cast(gcsafe).}:
+    future = actor_send_value(vm, actor, msg, true)
+  let reply = llm_bridge_poll_reply(vm, future, "genex/llm/load_model")
+  new_llm_model_instance(map_data(reply)["model_id".to_key()].to_int())
+
+proc llm_model_new_session_native(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                                  has_keyword_args: bool): Value {.gcsafe.} =
+  if current_llm_bridge() == nil:
+    raise new_exception(types.Exception, "LLM host bridge is not installed")
+  let model_id = llm_model_id(get_positional_arg(args, 0, has_keyword_args), "Model.new_session")
+  let opts = llm_expect_map_arg(args, arg_count, has_keyword_args, 2, "new_session")
+  var actor = NIL
+  {.cast(gcsafe).}:
+    actor = ensure_llm_host_actor(vm)
+  let msg = new_map_value()
+  map_data(msg)["op".to_key()] = "new_session".to_value()
+  map_data(msg)["model_id".to_key()] = model_id.to_value()
+  if opts != NIL:
+    map_data(msg)["options".to_key()] = opts
+  var future = NIL
+  {.cast(gcsafe).}:
+    future = actor_send_value(vm, actor, msg, true)
+  let reply = llm_bridge_poll_reply(vm, future, "Model.new_session")
+  new_llm_session_instance(map_data(reply)["session_id".to_key()].to_int())
+
+proc llm_session_infer_native(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                              has_keyword_args: bool): Value {.gcsafe.} =
+  if current_llm_bridge() == nil:
+    raise new_exception(types.Exception, "LLM host bridge is not installed")
+  if get_positional_count(arg_count, has_keyword_args) < 2:
+    raise new_exception(types.Exception, "Session.infer requires self and a prompt string")
+  let session_id = llm_session_id(get_positional_arg(args, 0, has_keyword_args), "Session.infer")
+  let prompt_val = get_positional_arg(args, 1, has_keyword_args)
+  if prompt_val.kind != VkString:
+    raise new_exception(types.Exception, "Session.infer prompt must be a string")
+  let opts = llm_expect_map_arg(args, arg_count, has_keyword_args, 3, "infer")
+  var actor = NIL
+  {.cast(gcsafe).}:
+    actor = ensure_llm_host_actor(vm)
+  let msg = new_map_value()
+  map_data(msg)["op".to_key()] = "infer".to_value()
+  map_data(msg)["session_id".to_key()] = session_id.to_value()
+  map_data(msg)["prompt".to_key()] = prompt_val
+  if opts != NIL:
+    map_data(msg)["options".to_key()] = opts
+  var future = NIL
+  {.cast(gcsafe).}:
+    future = actor_send_value(vm, actor, msg, true)
+  llm_bridge_poll_reply(vm, future, "Session.infer")
+
+proc llm_model_close_native(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                            has_keyword_args: bool): Value {.gcsafe.} =
+  discard arg_count
+  if current_llm_bridge() == nil:
+    raise new_exception(types.Exception, "LLM host bridge is not installed")
+  let model_id = llm_model_id(get_positional_arg(args, 0, has_keyword_args), "Model.close")
+  var actor = NIL
+  {.cast(gcsafe).}:
+    actor = ensure_llm_host_actor(vm)
+  let msg = new_map_value()
+  map_data(msg)["op".to_key()] = "close_model".to_value()
+  map_data(msg)["model_id".to_key()] = model_id.to_value()
+  var future = NIL
+  {.cast(gcsafe).}:
+    future = actor_send_value(vm, actor, msg, true)
+  discard llm_bridge_poll_reply(vm, future, "Model.close")
+  NIL
+
+proc llm_session_close_native(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                              has_keyword_args: bool): Value {.gcsafe.} =
+  discard arg_count
+  if current_llm_bridge() == nil:
+    raise new_exception(types.Exception, "LLM host bridge is not installed")
+  let session_id = llm_session_id(get_positional_arg(args, 0, has_keyword_args), "Session.close")
+  var actor = NIL
+  {.cast(gcsafe).}:
+    actor = ensure_llm_host_actor(vm)
+  let msg = new_map_value()
+  map_data(msg)["op".to_key()] = "close_session".to_value()
+  map_data(msg)["session_id".to_key()] = session_id.to_value()
+  var future = NIL
+  {.cast(gcsafe).}:
+    future = actor_send_value(vm, actor, msg, true)
+  discard llm_bridge_poll_reply(vm, future, "Session.close")
+  NIL
 
 proc host_scheduler_dispatcher(vm: ptr VirtualMachine) {.gcsafe.} =
   {.cast(gcsafe).}:
@@ -294,6 +696,26 @@ proc load_extension*(vm: ptr VirtualMachine, path: string): Namespace =
         types.Exception,
         "[GENE.EXT.INIT_FAILED] Extension did not publish a namespace: " & lib_path
       )
+
+    let ext_name = infer_extension_name(lib_path)
+    if ext_ns.module == nil:
+      ext_ns.module = Module(
+        source_type: StFile,
+        source: lib_path.to_value(),
+        pkg: nil,
+        name: ext_name,
+        ns: ext_ns,
+        handle: handle,
+        props: initTable[Key, Value]()
+      )
+    else:
+      ext_ns.module.handle = handle
+      ext_ns.module.ns = ext_ns
+      if ext_ns.module.name.len == 0:
+        ext_ns.module.name = ext_name
+
+    if ext_name == "llm":
+      install_llm_host_bridge(ext_ns, handle)
 
     result = ext_ns
 
