@@ -100,7 +100,7 @@ Plans:
 | 1.5. Freezable closures | 2/2 | Complete | 2026-04-19 |
 | 2. Actor runtime | 5/5 | Complete | 2026-04-20 |
 | 3. Port actors for extensions | 4/4 | Complete | 2026-04-22 |
-| 4. Remove legacy thread-first concurrency surfaces | 0/? | Unplanned | - |
+| 4. Remove legacy thread-first concurrency surfaces | 0/3 | Planned | - |
 
 ### Phase 1.5: Freezable closures *(complete)*
 **Goal**: Allow closures whose captured environments are themselves freezable to
@@ -174,4 +174,9 @@ thread-first concurrency APIs once actors are proven out.
      points) are deprecated or removed with migration guidance.
   3. Other concurrent features that duplicate actor behavior are either routed
      through actors or explicitly retired.
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 04-01-PLAN.md — Remove or retire the public thread-first language/runtime surface while preserving the internal worker substrate actors still use
+- [ ] 04-02-PLAN.md — Rename the worker-facing public naming to `GENE_WORKERS` and purge remaining thread-first docs/examples
+- [ ] 04-03-PLAN.md — Run Phase 4 closeout verification and publish final removal metadata
