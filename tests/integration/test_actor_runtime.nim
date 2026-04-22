@@ -1,4 +1,4 @@
-import std/[os, times, unittest]
+import std/unittest
 
 import gene/types except Exception
 import gene/vm
@@ -6,18 +6,6 @@ import gene/vm/thread
 
 proc exec_gene(code: string, trace_name: string): Value =
   VM.exec(code, trace_name)
-
-proc await_vm_future(future_value: Value, timeout_ms = 2_000): Value =
-  let deadline = epochTime() + (timeout_ms.float / 1000.0)
-  let future = future_value.ref.future
-  while future.state == FsPending and epochTime() < deadline:
-    VM.event_loop_counter = 100
-    VM.poll_event_loop()
-    sleep(10)
-
-  check future.state != FsPending
-  check future.state == FsSuccess
-  future.value
 
 suite "Actor runtime":
   setup:

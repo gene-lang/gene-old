@@ -5,11 +5,11 @@
 This roadmap tracks the approved actor-design migration from
 `docs/proposals/actor-design.md`. Phase 0 (substrate cleanup) landed in commit
 `e2e776c`. Phase 1 (deep-frozen bit, shared heap, `(freeze v)`) is now
-implemented across commits `f153f95`..`a36452b`. Phase 3 is now complete:
-`03-01` landed the extension port substrate, `03-02` moved `genex/llm`
-behind a stable host-owned bridge, and `03-03`/`03-04` moved HTTP and AI
-extension concurrency onto actor/port boundaries and closed the migration docs
-and verification sweep.
+implemented across commits `f153f95`..`a36452b`. The actor migration track is
+now complete: `03-01` landed the extension port substrate, `03-02` moved
+`genex/llm` behind a stable host-owned bridge, `03-03` moved HTTP and AI
+extension concurrency onto actor/port boundaries, and Phase 4 removed the
+public thread-first surface.
 
 The legacy `.planning/phases/01-architecture-comparison/` directory was
 preserved historical exploratory material and has been moved to
