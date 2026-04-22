@@ -1,0 +1,9 @@
+(fn actor_demo []
+  (gene/actor/enable ^workers 1)
+  (var counter
+    (gene/actor/spawn
+      ^state 123
+      (fn [ctx msg state]
+        (ctx .reply state)
+        state)))
+  (await (counter .send_expect_reply {^kind "get"})))
