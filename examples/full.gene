@@ -202,6 +202,11 @@
 (fn adder [x y] (x + y))
 (println "adder.call(3,4) =" (adder .call 3 4))
 
+# Actor send_expect_reply + await
+(import actor_demo from "examples/full_actor_helper")
+(var actor_sum (actor_demo))
+(println "actor send_expect_reply result =" actor_sum)
+
 # ============================================================================
 # 5) PATTERN BINDING AND CASE/WHEN MATCHING
 # ============================================================================
@@ -432,17 +437,6 @@
 # Async file I/O
 (var text (await (gene/io/read_async "tests/fixtures/test.txt")))
 (println "read_async length =" text/.length)
-
-# actor send_expect_reply + await
-(gene/actor/enable ^workers 1)
-(var full_counter
-  (gene/actor/spawn
-    ^state 123
-    (fn [ctx msg state]
-      (ctx .reply state)
-      state)))
-(var actor_sum (await (full_counter .send_expect_reply {^kind "get"})))
-(println "actor send_expect_reply result =" actor_sum)
 
 # ============================================================================
 # 12) GENERATORS
