@@ -11,6 +11,12 @@ Actors build on the frozen-value substrate from Phases 1 and 1.5:
 Legacy thread-first APIs still exist in Phase 2 as compatibility boundaries.
 They are documented in [docs/thread_support.md](/Users/gcao/gene-workspace/gene-old/docs/thread_support.md), but they are no longer the recommended starting point for new concurrent code.
 
+Phase 3 extends that actor-first boundary into stateful extensions:
+
+- `genex/llm` uses a host-owned bridge and serialization actor
+- `genex/http` uses actor-backed request ports for concurrent request work
+- `genex/ai/bindings` uses actor-owned Socket Mode binding state
+
 ## Enabling the runtime
 
 The actor runtime is disabled by default.
@@ -129,9 +135,10 @@ The actor sees the cloned `payload` from the send, not the later local mutation.
 
 ## Phase boundary
 
-Phase 2 keeps the compatibility boundary explicit:
+Phases 2 and 3 keep the compatibility boundary explicit:
 
 - use `gene/actor/*` for new concurrency work
+- prefer actor/port-backed extension ownership over extension-local worker or callback state
 - keep `spawn`, `Thread.send`, `Thread.send_expect_reply`, and `keep_alive` only for legacy/migration cases
 - Phase 4 is where the thread-first surface is retired
 

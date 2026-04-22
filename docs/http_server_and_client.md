@@ -96,6 +96,15 @@ Current keywords:
 - `^workers <int>`
 - `^websocket {^path "/ws" ^handler handler}`
 
+Current ownership model:
+
+- `^concurrent true` routes request execution through actor-backed request
+  ports instead of the older extension-local Gene thread pool.
+- SSE and websocket upgrade handling stay on the live server-owner lane because
+  they still require the live socket/client object.
+- Phase 4 still owns removal of the legacy thread API itself; Phase 3 only
+  moved extension-side concurrency ownership behind actor/port boundaries.
+
 The current example is [examples/http_server.gene](../examples/http_server.gene).
 
 Actor-backed example:
@@ -205,3 +214,6 @@ examples around websocket usage are still thin.
   of performing true async network I/O.
 - WebSocket support exists in the extension, but it needs better examples and
   focused tests.
+- Dynamic extension loading of `genex/http` now uses host-side JSON helper
+  wrappers for `json_parse` / `json_stringify` to avoid depending on the older
+  top-level string return path from the dylib.

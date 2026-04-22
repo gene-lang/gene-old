@@ -1,9 +1,9 @@
 # Requirements: Gene Actor Runtime Migration
 
 **Defined:** 2026-04-17
-**Core Value:** The remaining migration work must move extension-owned mutable
-resources behind actor-safe or bridge-safe ownership boundaries without
-breaking the public Gene APIs added in earlier phases.
+**Core Value:** The remaining migration work must remove the surviving
+thread-first public surface now that the runtime and main stateful extensions
+already operate on actor-safe ownership boundaries.
 
 ## v1 Requirements (Phase 0 — Complete)
 
@@ -93,9 +93,10 @@ breaking the public Gene APIs added in earlier phases.
 - **ACT-03**: Migrate process-global native resources behind port actors.
 - **ACT-04**: Deprecate the legacy thread API after the actor API is verified.
 
-**Phase 3 status:** `03-01` and `03-02` are complete. The LLM lane now uses an
-explicit exported-function ABI, host-owned `Model` / `Session` wrappers, and a
-host-owned singleton actor front instead of live extension-owned objects.
+**Phase 3 status:** complete. The extension substrate is in place, `genex/llm`
+uses the explicit exported-function bridge, `genex/http` uses actor-backed
+request ports for concurrent request work, and Socket Mode binding ownership in
+`genex/ai/bindings` is actor-scoped instead of process-global.
 
 ## Out of Scope
 
@@ -128,15 +129,15 @@ host-owned singleton actor front instead of live extension-owned objects.
 | NAME-01 | Phase 1 | Complete |
 | CLO-01 | Phase 1.5 | Complete |
 | ACT-02 | Phase 2 | Complete |
-| ACT-03 | Phase 3 | Executing (`03-01` and `03-02` complete) |
-| ACT-04 | Phase 4 | Deferred |
+| ACT-03 | Phase 3 | Complete |
+| ACT-04 | Phase 4 | Active next phase |
 
 **Coverage:**
 - v1 requirements (Phase 0): 9 complete
 - v2 requirements (Phase 1): 7 complete
-- v3 requirements (Phase 1.5+): 2 complete, 1 executing, 1 deferred
+- v3 requirements (Phase 1.5+): 3 complete, 1 pending
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-17*
-*Last updated: 2026-04-21 after Phase 3 `03-02` execution*
+*Last updated: 2026-04-22 after Phase 3 completion*

@@ -1,10 +1,16 @@
 # Thread Support in the Gene VM (current implementation)
 
-Phase 2 introduces actors as the primary public concurrency surface.
+Phases 2 and 3 make actors and actor-backed extension ownership the primary
+public concurrency surface.
 
 This page now documents the surviving thread-first API as a compatibility
 boundary for existing code and migration cases. For new concurrent work, start
 with [docs/handbook/actors.md](/Users/gcao/gene-workspace/gene-old/docs/handbook/actors.md).
+
+Phase 3 already moved the main extension-side concurrency owners (`genex/llm`,
+`genex/http`, and Socket Mode state in `genex/ai/bindings`) behind actor/port
+boundaries. Phase 4 is the phase that still owns the actual removal or
+deprecation of the public thread-first surface documented here.
 
 This document describes the thread system as implemented in the Nim VM today (not the older design notes).
 

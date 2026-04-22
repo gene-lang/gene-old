@@ -2,7 +2,7 @@ import unittest
 import std/json
 import std/os
 
-import ../src/genex/ai/scheduler
+import ../../src/genex/ai/scheduler
 
 suite "AI scheduler":
   test "interval job dispatch and persistence":

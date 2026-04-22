@@ -2,44 +2,44 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Executing Phase 03
-last_updated: "2026-04-21T20:15:51Z"
-last_activity: 2026-04-21 -- Phase 03-02 landed explicit LLM bridge with a host-owned singleton actor front
+status: ready
+stopped_at: Phase 03 complete
+last_updated: "2026-04-22T00:00:00Z"
+last_activity: 2026-04-22 -- Phase 03 closed after HTTP/AI port-boundary migration and verification sweep
 progress:
   total_phases: 6
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 22
-  completed_plans: 20
-  percent: 91
+  completed_plans: 22
+  percent: 100
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-17)
+See: .planning/PROJECT.md (updated 2026-04-22)
 
-**Core value:** Phase 1 introduced the deep-frozen bit, shared-heap allocation
-path, and `(freeze v)` stdlib operation that every subsequent actor-runtime
-phase depends on, without adding a new concurrency API.
-**Current focus:** Phase 03 — port-actors-for-extensions
+**Core value:** The runtime and main stateful extensions are now on actor-safe
+ownership boundaries; the remaining work is removing the surviving thread-first
+public surface.
+**Current focus:** Phase 04 — remove-legacy-thread-first-concurrency-surfaces
 
 ## Current Position
 
-Phase: 03 (port-actors-for-extensions) — EXECUTING
-Plan: 2 of 4
-Status: Executing Phase 03 (03-02 complete, 03-03 next)
-Last activity: 2026-04-21 -- Phase 03-02 landed explicit LLM bridge with a host-owned singleton actor front
-Depends on the verified Phase 2 actor runtime across `d3822be`..`46cada9`
+Phase: 04 (remove-legacy-thread-first-concurrency-surfaces) — NEXT
+Plan: not yet planned
+Status: Phase 03 complete; next target is Phase 04 planning/execution
+Last activity: 2026-04-22 -- Phase 03 closed after HTTP/AI port-boundary migration and verification sweep
+Depends on completed Phase 03 across `bf4661f`..`593189a`
 
-Progress: [█████████░] 91%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 18
+- Total plans completed: 22
 - Average duration: -
 - Total execution time: not recorded
 
@@ -51,7 +51,7 @@ Progress: [█████████░] 91%
 | 1 | 6 | - | - |
 | 1.5 | 2 | - | - |
 | 2 | 5 | - | - |
-| 3 | 2 | - | - |
+| 3 | 4 | - | - |
 
 **Recent Trend:**
 
@@ -110,8 +110,9 @@ Recent decisions affecting current work:
 - [Phase 02]: Stop semantics fail queued reply waiters immediately and fail the current in-flight reply future if stop wins before an explicit reply.
 - [Phase 02]: Public docs now treat actors as the primary concurrency API while threads remain a Phase 2 compatibility boundary.
 - [Phase 03]: `genex/llm` is the singleton-port proof migration because its global locks and registries are the clearest remaining process-global ownership debt.
-- [Phase 03]: `genex/http` and AI bindings are the next migration targets because they still own extension-local worker or callback state outside the actor runtime.
-- [Phase 03]: Thread API removal remains Phase 4 work; Phase 3 only moves extension concurrency behind actor/port boundaries.
+- [Phase 03]: `genex/http` now uses actor-backed request ports for concurrent request work instead of an extension-local Gene thread pool.
+- [Phase 03]: Socket Mode binding ownership in `genex/ai/bindings` is now actor-scoped instead of one process-global callback/client tuple.
+- [Phase 03]: Thread API removal remains Phase 4 work; Phase 3 only moved extension concurrency behind actor/port boundaries.
 
 ### Pending Todos
 
@@ -128,13 +129,13 @@ None yet.
 |----------|------|--------|-------------|
 | Concurrency | Freezable closures (Phase 1.5 — hard prerequisite for Phase 2) | Complete | 2026-04-19 |
 | Concurrency | Actor scheduler, tiered send, reply futures, stop semantics (Phase 2) | Complete | 2026-04-20 |
-| Concurrency | Port-actor protocol for extensions (Phase 3) | Executing | 2026-04-21 |
-| Concurrency | Thread API deprecation / `GENE_WORKERS` rename (Phase 4) | Deferred | 2026-04-17 |
+| Concurrency | Port-actor protocol for extensions (Phase 3) | Complete | 2026-04-22 |
+| Concurrency | Thread API deprecation / `GENE_WORKERS` rename (Phase 4) | Next | 2026-04-22 |
 | Perf | Move-semantics `send!`, work-stealing scheduler, `^frozen-default` class annotation | Deferred indefinitely per proposal | 2026-04-17 |
 
 ## Session Continuity
 
-Last session: 2026-04-21T20:15:51Z
-Stopped at: Executing Phase 03
-Next step: Execute Phase 03-03 on `genex/http` and AI bindings
+Last session: 2026-04-22T00:00:00Z
+Stopped at: Phase 03 complete
+Next step: Plan and execute Phase 04 thread-first concurrency removal
 Resume file: None
