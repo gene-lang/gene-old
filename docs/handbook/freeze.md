@@ -91,25 +91,11 @@ are frozen." The following values are still outside the frozen surface here:
 If a closure capture reaches one of those non-freezable values, `(freeze v)`
 still raises `FreezeScopeError` rather than partially publishing the closure.
 
-## Migration boundary
+## Actor boundary
 
-Phase 1.5 stops at closure freezeability. It does not rewrite the legacy
-thread-first concurrency surfaces, which remain visible as migration
-boundaries:
-
-- `spawn`
-- `spawn_return`
-- `Thread.send`
-- `Thread.send_expect_reply`
-- `Thread.on_message`
-- `keep_alive`
-- `GENE_MAX_THREADS`
-
-Those surfaces remain part of the current runtime until the later migration
-phase that retires the thread-first API. Phase 2 consumes frozen closures in
-the actor runtime so callable payloads can use the same frozen-by-pointer rules
-as other frozen graphs. The eventual deprecation and removal of the legacy
-thread surfaces belongs to Phase 4, not Phase 1.5.
+Phase 1.5 stops at closure freezeability. Later phases consume that work in the
+actor runtime so callable payloads can use the same frozen-by-pointer rules as
+other frozen graphs.
 
 ## Sealed versus frozen by example
 
@@ -148,13 +134,10 @@ are deep.
 
 ## Forward reference
 
-Phase 2 now consumes this closure-freeze rule in the shipped actor runtime.
-Frozen closures are part of the send-by-pointer surface alongside other frozen
-graphs, while mutable ordinary data is cloned on send. The remaining legacy
-thread-first APIs stay in place only as a compatibility boundary until the
-later migration/removal phase.
+The shipped actor runtime consumes this closure-freeze rule directly. Frozen
+closures are part of the send-by-pointer surface alongside other frozen graphs,
+while mutable ordinary data is cloned on send.
 
 See also:
 
 - [docs/handbook/actors.md](/Users/gcao/gene-workspace/gene-old/docs/handbook/actors.md)
-- [docs/thread_support.md](/Users/gcao/gene-workspace/gene-old/docs/thread_support.md)

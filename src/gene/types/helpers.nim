@@ -242,21 +242,10 @@ proc init_app_and_vm*() =
   refresh_env_map()
   set_program_args("", @[])
 
-  # Initialize thread-local namespace for main thread
-  # This holds thread-specific variables like $thread and $main_thread
+  # Initialize the runtime-local namespace for the main worker
   VM.thread_local_ns = new_namespace("thread_local")
-
-  # For main thread, $thread and $main_thread are the same
-  let main_thread_ref = type_defs.Thread(
-    id: 0,
-    secret: THREADS[0].secret
-  )
   VM.thread_local_ns["app".to_key()] = App
   VM.thread_local_ns["$app".to_key()] = App
-  VM.thread_local_ns["$thread".to_key()] = main_thread_ref.to_value()
-  VM.thread_local_ns["$main_thread".to_key()] = main_thread_ref.to_value()
-  VM.thread_local_ns["thread".to_key()] = main_thread_ref.to_value()
-  VM.thread_local_ns["main_thread".to_key()] = main_thread_ref.to_value()
 
   # Pre-intern hot keys used in the exec loop to avoid repeated lock acquisition.
   KEY_SELF  = "self".to_key()

@@ -8,7 +8,6 @@ for implemented subsystems now live under [`docs/proposals/`](proposals/README.m
 
 ## Spec Companion Docs
 
-- [thread_support.md](thread_support.md) — current thread model and APIs
 - [generator_functions.md](generator_functions.md) — shipped generator semantics
 - [regex.md](regex.md) — current regex syntax and helper behavior
 - [package_support.md](package_support.md) — current package/import behavior

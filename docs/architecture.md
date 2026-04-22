@@ -191,7 +191,6 @@ Core documentation:
 - [`performance.md`](performance.md) — Hotspot analysis and optimisation roadmap
 
 Current subsystem docs:
-- [`thread_support.md`](thread_support.md) — Threading model
 - [`generator_functions.md`](generator_functions.md) — Generator implementation
 
 Proposal and design-era docs:

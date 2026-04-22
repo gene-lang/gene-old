@@ -1,9 +1,9 @@
 # Requirements: Gene Actor Runtime Migration
 
 **Defined:** 2026-04-17
-**Core Value:** The remaining migration work must remove the surviving
-thread-first public surface now that the runtime and main stateful extensions
-already operate on actor-safe ownership boundaries.
+**Core Value:** The actor migration track is complete. Future work should build
+on the actor-first runtime rather than preserving or reintroducing a public
+thread-first surface.
 
 ## v1 Requirements (Phase 0 — Complete)
 
@@ -130,14 +130,14 @@ request ports for concurrent request work, and Socket Mode binding ownership in
 | CLO-01 | Phase 1.5 | Complete |
 | ACT-02 | Phase 2 | Complete |
 | ACT-03 | Phase 3 | Complete |
-| ACT-04 | Phase 4 | Active next phase |
+| ACT-04 | Phase 4 | Complete |
 
 **Coverage:**
 - v1 requirements (Phase 0): 9 complete
 - v2 requirements (Phase 1): 7 complete
-- v3 requirements (Phase 1.5+): 3 complete, 1 pending
+- v3 requirements (Phase 1.5+): 4 complete
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-17*
-*Last updated: 2026-04-22 after Phase 3 completion*
+*Last updated: 2026-04-22 after Phase 4 completion*

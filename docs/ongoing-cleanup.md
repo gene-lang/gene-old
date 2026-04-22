@@ -38,7 +38,7 @@ Living document tracking cleanup work across design, implementation, documentati
 ## P1 — Important Next
 
 ### Documentation Consolidation & Missing Docs
-- [ ] Merge overlapping docs: `proposals/future/ai-first.md` vs `proposals/future/ai-first-design.md`, `thread_support.md` vs `proposals/archive/threading.md`, `proposals/future/selector_design.md` vs `proposals/future/dynamic_selector_design.md` vs `proposals/implemented/dispatch-design.md` vs `proposals/future/dynamic_method_dispatch.md`
+- [ ] Merge overlapping docs: `proposals/future/ai-first.md` vs `proposals/future/ai-first-design.md`, `proposals/future/selector_design.md` vs `proposals/future/dynamic_selector_design.md` vs `proposals/implemented/dispatch-design.md` vs `proposals/future/dynamic_method_dispatch.md`
 - [ ] Merge `proposals/future/type-serialization.md` / `proposals/future/type-serialization-design.md` / `proposals/future/serialization_design.md` / `proposals/future/json_serialization.md` into one serialization doc
 - [ ] Merge `package_support.md` and `proposals/future/packaging.md`
 - [ ] Consolidate `proposals/future/oop_inheritance.md` / `proposals/future/oop_updated_design.md` / `proposals/future/constructor_design.md` into one OOP design doc

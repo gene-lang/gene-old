@@ -11,7 +11,6 @@ examples=(
   examples/datetime.gene
   examples/fib.gene
   examples/async.gene
-  examples/thread.gene
   examples/io.gene
   examples/oop.gene
   examples/sample_typed.gene

@@ -1354,18 +1354,6 @@ proc compile_gene(self: Compiler, input: Value) =
       of "await":
         self.compile_await(gene)
         return
-      of "spawn":
-        self.compile_spawn(gene)
-        return
-      of "spawn_return":
-        # spawn_return is an alias for (spawn ^return true expr) / (spawn ^^return expr)
-        # Transform by setting the ^return prop
-        var modified_gene = new_gene(gene.type)
-        modified_gene.props = gene.props
-        modified_gene.props["return".to_key()] = TRUE
-        modified_gene.children = gene.children
-        self.compile_spawn(modified_gene)
-        return
       of "yield":
         self.compile_yield(gene)
         return

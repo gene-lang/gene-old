@@ -45,37 +45,6 @@ proc compile_await(self: Compiler, gene: ptr Gene) =
       # Awaited value is on stack, will be collected by IkArrayEnd
     self.emit(Instruction(kind: IkArrayEnd))
 
-proc compile_spawn(self: Compiler, gene: ptr Gene) =
-  # (spawn expr) - spawn thread to execute expression
-  # (spawn ^return true expr) or (spawn ^^return expr) - spawn and return future
-  if gene.children.len == 0:
-    not_allowed("spawn expects at least 1 argument")
-
-  var return_value = false
-  # Use ^return / ^^return on props
-  let return_key = "return".to_key()
-  if gene.props.has_key(return_key):
-    let v = gene.props[return_key]
-    # Treat presence with NIL/placeholder as true, otherwise use bool value
-    return_value = (v == NIL or v == PLACEHOLDER) or v.to_bool()
-
-  # Preserve full spawn body. A single form is passed directly; multiple
-  # forms are wrapped as a stream so the worker executes them sequentially.
-  let expr = if gene.children.len == 1:
-    gene.children[0]
-  else:
-    new_stream_value(gene.children)
-
-  # Pass the Gene AST as-is to the thread (it will compile locally)
-  # This avoids sharing CompilationUnit refs across threads
-  self.emit(Instruction(kind: IkPushValue, arg0: cast[Value](expr)))
-
-  # Push return_value flag
-  self.emit(Instruction(kind: IkPushValue, arg0: if return_value: TRUE else: FALSE))
-
-  # Emit spawn instruction
-  self.emit(Instruction(kind: IkSpawnThread))
-
 proc compile_yield(self: Compiler, gene: ptr Gene) =
   # (yield value) - suspend generator and return value
   if gene.children.len == 0:

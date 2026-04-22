@@ -88,11 +88,11 @@ var App*: Value
 # Threading support
 const CHANNEL_LIMIT* = 1000  # Maximum messages in channel
 
-# Absolute safety ceiling. Env var GENE_MAX_THREADS is clamped to this.
+# Absolute safety ceiling. Env var GENE_WORKERS is clamped to this.
 const HARD_MAX_THREADS* = 4096
 
 # Compile-time default thread cap, chosen per platform/arch.
-# Overridable at runtime via GENE_MAX_THREADS env var.
+# Overridable at runtime via GENE_WORKERS env var.
 const DEFAULT_MAX_THREADS* =
   when defined(gene_wasm) or defined(emscripten) or defined(js):
     1
@@ -122,14 +122,14 @@ var THREADS*: ptr UncheckedArray[ThreadMetadata] =
     allocShared0(sizeof(ThreadMetadata) * DEFAULT_MAX_THREADS))
 
 proc resolve_max_threads*(): int =
-  ## Read GENE_MAX_THREADS env var, clamp to [1, HARD_MAX_THREADS].
+  ## Read GENE_WORKERS env var, clamp to [1, HARD_MAX_THREADS].
   ## Returns DEFAULT_MAX_THREADS if unset or invalid.
   ## On WASM targets, always returns 1 regardless of env.
   when defined(gene_wasm) or defined(emscripten) or defined(js):
     return 1
   else:
     result = DEFAULT_MAX_THREADS
-    let env_val = getEnv("GENE_MAX_THREADS")
+    let env_val = getEnv("GENE_WORKERS")
     if env_val.len > 0:
       try:
         let n = parseInt(env_val)

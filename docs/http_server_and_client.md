@@ -102,8 +102,6 @@ Current ownership model:
   ports instead of the older extension-local Gene thread pool.
 - SSE and websocket upgrade handling stay on the live server-owner lane because
   they still require the live socket/client object.
-- Phase 4 still owns removal of the legacy thread API itself; Phase 3 only
-  moved extension-side concurrency ownership behind actor/port boundaries.
 
 The current example is [examples/http_server.gene](../examples/http_server.gene).
 

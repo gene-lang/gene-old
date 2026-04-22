@@ -333,7 +333,7 @@ Core files for the current implementation:
 - `src/gene/types/helpers.nim` — app init, `Exception` hierarchy,
   `normalize_exception`, `infer_exception_class`, `wrap_nim_exception`
 - `src/gene/types/type_defs.nim` — `VirtualMachine`, `FutureObj`, host
-  `Exception`, `ThreadMessage`
+  `Exception`
 - `src/gene/compiler/control_flow.nim` — `throw`, `try`, `catch`, `finally`
 - `src/gene/vm/exceptions.nim` — exception dispatch, unwinding, async capture
 - `src/gene/vm/exec.nim` — instruction execution, `IkThrow`, `await`, unhandled

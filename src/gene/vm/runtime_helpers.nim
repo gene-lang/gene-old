@@ -66,27 +66,12 @@ proc new_thread_vm*(): ptr VirtualMachine =
   new_vm_ptr()
 
 proc create_thread_namespace*(thread_id: int): Namespace =
-  ## Build the thread-local namespace with thread metadata.
+  ## Build the runtime-local namespace for a worker VM.
   let thread_ns = new_namespace("thread_local")
-
-  let main_thread_ref = types.Thread(
-    id: 0,
-    secret: THREADS[0].secret
-  )
-  thread_ns["$main_thread".to_key()] = main_thread_ref.to_value()
-  thread_ns["main_thread".to_key()] = main_thread_ref.to_value()
-
-  let current_thread_ref = types.Thread(
-    id: thread_id,
-    secret: THREADS[thread_id].secret
-  )
-  thread_ns["$thread".to_key()] = current_thread_ref.to_value()
-  thread_ns["thread".to_key()] = current_thread_ref.to_value()
-
   thread_ns
 
 proc setup_thread_vm(thread_id: int) =
-  ## Centralized per-thread VM initialization (no App mutations).
+  ## Centralized per-worker VM initialization (no App mutations).
   current_thread_id = thread_id
   VM = new_thread_vm()
   ensure_frame_pool()
@@ -141,7 +126,7 @@ when not defined(gene_wasm):
               VM.frame = new_frame()
               VM.frame.stack_index = 0
               VM.frame.scope = new_scope(scope_tracker)
-              # Fresh per-thread module namespace; gene_ns as parent gives read
+              # Fresh per-worker module namespace; gene_ns as parent gives read
               # access to built-ins without sharing writable state across threads.
               let thread_module_ns = new_namespace(App.app.gene_ns.ref.ns, "thread")
               VM.frame.ns = thread_module_ns
@@ -255,7 +240,7 @@ when not defined(gene_wasm):
     let thread_id = get_free_thread()
 
     if thread_id == -1:
-      raise newException(ValueError, "Thread pool exhausted (max " & $g_max_threads & " threads; set GENE_MAX_THREADS to raise)")
+      raise newException(ValueError, "Worker pool exhausted (max " & $g_max_threads & " workers; set GENE_WORKERS to raise)")
 
     # Initialize thread
     let parent_id = current_thread_id

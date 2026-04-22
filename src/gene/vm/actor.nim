@@ -57,23 +57,8 @@ proc actor_runtime_active*(): bool =
   actor_system_enabled
 
 proc actor_thread_namespace(thread_id: int): Namespace =
-  let thread_ns = new_namespace("thread_local")
-
-  let main_thread_ref = types.Thread(
-    id: 0,
-    secret: THREADS[0].secret
-  )
-  thread_ns["$main_thread".to_key()] = main_thread_ref.to_value()
-  thread_ns["main_thread".to_key()] = main_thread_ref.to_value()
-
-  let current_thread_ref = types.Thread(
-    id: thread_id,
-    secret: THREADS[thread_id].secret
-  )
-  thread_ns["$thread".to_key()] = current_thread_ref.to_value()
-  thread_ns["thread".to_key()] = current_thread_ref.to_value()
-
-  thread_ns
+  discard thread_id
+  new_namespace("thread_local")
 
 proc actor_transport_error(payload: Value): ref types.Exception {.noinline.} =
   new_exception(

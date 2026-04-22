@@ -1,15 +1,12 @@
 # Actors
 
-Phase 2 makes actors the primary public concurrency API in Gene.
+Actors are the public concurrency API in Gene.
 
 Actors build on the frozen-value substrate from Phases 1 and 1.5:
 
 - mutable ordinary data is cloned on send
 - frozen graphs and frozen closures can be shared by pointer
 - replies use the existing `Future` surface
-
-Legacy thread-first APIs still exist in Phase 2 as compatibility boundaries.
-They are documented in [docs/thread_support.md](/Users/gcao/gene-workspace/gene-old/docs/thread_support.md), but they are no longer the recommended starting point for new concurrent code.
 
 Phase 3 extends that actor-first boundary into stateful extensions:
 
@@ -133,17 +130,15 @@ That means this pattern is safe:
 
 The actor sees the cloned `payload` from the send, not the later local mutation.
 
-## Phase boundary
+## Public boundary
 
-Phases 2 and 3 keep the compatibility boundary explicit:
+The public concurrency surface is actor-first:
 
 - use `gene/actor/*` for new concurrency work
 - prefer actor/port-backed extension ownership over extension-local worker or callback state
-- keep `spawn`, `Thread.send`, `Thread.send_expect_reply`, and `keep_alive` only for legacy/migration cases
-- Phase 4 is where the thread-first surface is retired
+- do not use the retired thread-first surface in new code
 
 ## References
 
 - [docs/handbook/freeze.md](/Users/gcao/gene-workspace/gene-old/docs/handbook/freeze.md)
-- [docs/thread_support.md](/Users/gcao/gene-workspace/gene-old/docs/thread_support.md)
 - `testsuite/10-async/actors/`

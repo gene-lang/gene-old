@@ -43,10 +43,10 @@ slot can be used for the real Phase 1.
   resources and extension-side concurrency behind actor/port boundaries
   *(completed 2026-04-22, `03-01` in `bf4661f`/`0915da9`/`3301f31`, `03-02`
   in `f19293f`, `03-03`/`03-04` in `593189a`)*
-- [ ] **Phase 4: Remove legacy thread-first concurrency surfaces** - Deprecate
+- [x] **Phase 4: Remove legacy thread-first concurrency surfaces** - Deprecate
   and remove the legacy thread API once actor support is verified, including
   `GENE_WORKERS` naming cleanup and other thread-centric concurrency entry
-  points that should no longer be primary
+  points that should no longer be primary *(completed 2026-04-22, `04-01`/`04-02`/`04-03` on local branch)*
 
 ## Phase Details
 
@@ -100,7 +100,7 @@ Plans:
 | 1.5. Freezable closures | 2/2 | Complete | 2026-04-19 |
 | 2. Actor runtime | 5/5 | Complete | 2026-04-20 |
 | 3. Port actors for extensions | 4/4 | Complete | 2026-04-22 |
-| 4. Remove legacy thread-first concurrency surfaces | 0/3 | Planned | - |
+| 4. Remove legacy thread-first concurrency surfaces | 3/3 | Complete | 2026-04-22 |
 
 ### Phase 1.5: Freezable closures *(complete)*
 **Goal**: Allow closures whose captured environments are themselves freezable to
@@ -163,7 +163,7 @@ Plans:
 - [x] 03-03-PLAN.md — Move HTTP and AI extension concurrency onto port pool/factory boundaries
 - [x] 03-04-PLAN.md — Publish migration guidance and run Phase 3 verification
 
-### Phase 4: Remove legacy thread-first concurrency surfaces
+### Phase 4: Remove legacy thread-first concurrency surfaces *(complete)*
 **Goal**: Finish the migration by deprecating and then removing the legacy
 thread-first concurrency APIs once actors are proven out.
 **Depends on**: Phase 2, Phase 3
@@ -177,6 +177,6 @@ thread-first concurrency APIs once actors are proven out.
 **Plans**: 3 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — Remove or retire the public thread-first language/runtime surface while preserving the internal worker substrate actors still use
-- [ ] 04-02-PLAN.md — Rename the worker-facing public naming to `GENE_WORKERS` and purge remaining thread-first docs/examples
-- [ ] 04-03-PLAN.md — Run Phase 4 closeout verification and publish final removal metadata
+- [x] 04-01-PLAN.md — Remove the public thread-first language/runtime surface while preserving the internal worker substrate actors still use
+- [x] 04-02-PLAN.md — Rename the worker-facing public naming to `GENE_WORKERS` and purge remaining thread-first docs/examples
+- [x] 04-03-PLAN.md — Run Phase 4 closeout verification and publish final removal metadata

@@ -1,7 +1,5 @@
-import locks, random, options, tables, os
+import locks, random, options, os
 import ../types
-import ../serdes
-import ./utils
 
 # Simple channel implementation for MVP
 type
@@ -109,7 +107,7 @@ var next_message_id* {.threadvar.}: int
 
 proc init_thread_pool*() =
   ## Initialize the thread pool (call once from main thread).
-  ## Reads GENE_MAX_THREADS env var to determine pool size.
+  ## Reads GENE_WORKERS env var to determine pool size.
   randomize()  # Initialize random number generator
   initLock(thread_pool_lock)
   next_message_id = 0
@@ -178,7 +176,7 @@ proc get_free_thread*(): int =
   return -1
 
 proc init_thread*(thread_id: int, parent_id: int = 0) =
-  ## Initialize thread metadata
+  ## Initialize worker metadata
   THREADS[thread_id].id = thread_id
   THREADS[thread_id].parent_id = parent_id
   THREADS[thread_id].parent_secret = THREADS[parent_id].secret
@@ -232,261 +230,8 @@ proc reset_vm_state*() =
 
 # Thread class initialization
 proc init_thread_class*() =
-  ## Initialize Thread class and methods
-  ## Called during VM initialization
-  if not gene_namespace_initialized:
-    return
-
-  # Check if already initialized (idempotency for worker threads)
-  # Prevents worker threads from racing to mutate shared App
-  if App.app.thread_class.kind == VkClass:
-    THREAD_CLASS_VALUE = App.app.thread_class
-    THREAD_MESSAGE_CLASS_VALUE = App.app.thread_message_class
-    return
-
-  # Create Thread class
-  let thread_class = new_class("Thread")
-  # Don't set parent yet - will be set later when object_class is available
-
-  # Add Thread constructor (not typically called directly - threads created via spawn)
-  proc thread_constructor(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
-    raise new_exception(types.Exception, "Thread cannot be constructed directly - use spawn or spawn_return")
-
-  thread_class.def_native_constructor(thread_constructor)
-
-  # Add .send methods
-  proc thread_send_internal(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool, force_reply: bool): Value {.gcsafe.} =
-    if arg_count < 2:
-      raise new_exception(types.Exception, "Thread.send requires a thread and a message")
-
-    let thread_arg = get_positional_arg(args, 0, has_keyword_args)
-    let message_arg = get_positional_arg(args, 1, has_keyword_args)
-
-    if thread_arg.kind != VkThread:
-      raise new_exception(types.Exception, "send can only be called on a Thread")
-
-    # Check if reply is requested
-    let reply_val =
-      if force_reply: TRUE
-      elif has_keyword_args: get_keyword_arg(args, "reply")
-      elif arg_count > 2: args[2]
-      else: NIL
-    let reply_requested = reply_val != NIL and reply_val.to_bool()
-
-    # Get thread info
-    let thread_id = thread_arg.ref.thread.id
-    let thread_secret = thread_arg.ref.thread.secret
-
-    # Validate thread
-    if thread_id < 0 or thread_id >= g_max_threads:
-      raise new_exception(types.Exception, "Invalid thread ID")
-    if not THREADS[thread_id].in_use or THREADS[thread_id].secret != thread_secret:
-      raise new_exception(types.Exception, "Thread is no longer valid")
-
-    # Create message
-    var msg: ThreadMessage
-    new(msg)
-    msg.id = next_message_id
-    msg.msg_type = if reply_requested: MtSendExpectReply else: MtSend
-    msg.payload = NIL
-
-    # Serialize payload to isolate across threads
-    # NOTE: Only literal values are allowed (primitives, strings, and containers with literal contents).
-    # Functions, classes, instances, threads, futures are NOT allowed.
-    # See serialize_literal in serdes.nim for detailed rationale.
-    let ser = serialize_literal(message_arg)
-    let ser_str = block:
-      {.cast(gcsafe).}:
-        ser.to_s()
-    msg.payload_bytes.bytes = string_to_bytes(ser_str)
-    msg.code = NIL
-    msg.from_thread_id = current_thread_id
-    msg.from_thread_secret = THREADS[current_thread_id].secret
-    let message_id = next_message_id
-    next_message_id += 1
-
-    # Send message to thread
-    THREAD_DATA[thread_id].channel.send(msg)
-
-    # Return value
-    if reply_requested:
-      # Create a future for the reply
-      let future_obj = FutureObj(
-        state: FsPending,
-        value: NIL,
-        success_callbacks: @[],
-        failure_callbacks: @[],
-        nim_future: nil
-      )
-
-      # Store future in vm's thread_futures table keyed by message ID
-      vm.thread_futures[message_id] = future_obj
-      vm.poll_enabled = true
-
-      # Return the future
-      let future_val = new_ref(VkFuture)
-      future_val.future = future_obj
-      return future_val.to_ref_value()
-    else:
-      return NIL
-
-  thread_class.def_native_method("send", (proc (vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} = thread_send_internal(vm, args, arg_count, has_keyword_args, false)))
-  thread_class.def_native_method("send_expect_reply", (proc (vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} = thread_send_internal(vm, args, arg_count, has_keyword_args, true)))
-
-  # Add .on_message method
-  proc thread_on_message(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
-    # Register callback for incoming messages
-    # Usage: (.on_message $thread callback)
-    if arg_count < 2:
-      raise new_exception(types.Exception, "Thread.on_message requires a thread and a callback")
-
-    let thread_arg = get_positional_arg(args, 0, has_keyword_args)
-    let callback_arg = get_positional_arg(args, 1, has_keyword_args)
-
-    if thread_arg.kind != VkThread:
-      raise new_exception(types.Exception, "on_message can only be called on a Thread")
-
-    # Validate callback is callable
-    if callback_arg.kind notin {VkFunction, VkNativeFn, VkBlock}:
-      raise new_exception(types.Exception, "on_message callback must be a function or block")
-
-    let thread_id = thread_arg.ref.thread.id
-    let thread_secret = thread_arg.ref.thread.secret
-
-    if thread_id < 0 or thread_id >= g_max_threads:
-      raise new_exception(types.Exception, "Invalid thread ID")
-    if not THREADS[thread_id].in_use or THREADS[thread_id].secret != thread_secret:
-      raise new_exception(types.Exception, "Thread is no longer valid")
-
-    if thread_id == current_thread_id:
-      vm.message_callbacks.add(callback_arg)
-      return NIL
-
-    # Cross-thread callback registration is only safe for native callbacks.
-    # Function/block values capture thread-owned scope/frame state and cannot be
-    # shared across worker VMs without a deeper ownership model.
-    if callback_arg.kind != VkNativeFn:
-      raise new_exception(types.Exception, "remote on_message registration requires a native function")
-
-    var msg: ThreadMessage
-    new(msg)
-    msg.id = next_message_id
-    msg.msg_type = MtRegisterCallback
-    msg.payload = callback_arg
-    msg.payload_bytes = ThreadPayload(bytes: @[])
-    msg.code = NIL
-    msg.from_thread_id = current_thread_id
-    msg.from_thread_secret = THREADS[current_thread_id].secret
-    next_message_id += 1
-    THREAD_DATA[thread_id].channel.send(msg)
-
-    return NIL
-
-  thread_class.def_native_method("on_message", thread_on_message)
-
-  # Store in Application
-  let thread_class_ref = new_ref(VkClass)
-  thread_class_ref.class = thread_class
-  App.app.thread_class = thread_class_ref.to_ref_value()
-  THREAD_CLASS_VALUE = App.app.thread_class
-
-  # Add to gene namespace if it exists
-  if App.app.gene_ns.kind == VkNamespace:
-    let thread_key = "Thread".to_key()
-    App.app.gene_ns.ref.ns[thread_key] = App.app.thread_class
-    # Global helper to force reply expectation
-    proc thread_send_expect_reply_fn(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
-      thread_send_internal(vm, args, arg_count, has_keyword_args, true)
-    App.app.gene_ns.ref.ns["send_expect_reply".to_key()] = (cast[NativeFn](thread_send_expect_reply_fn)).to_value()
-
-  # Create ThreadMessage class
-  let thread_message_class = new_class("ThreadMessage")
-
-  # Add .payload method
-  proc thread_message_payload(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
-    if arg_count < 1:
-      raise new_exception(types.Exception, "ThreadMessage.payload requires self argument")
-
-    let msg_arg = get_positional_arg(args, 0, has_keyword_args)
-    if msg_arg.kind != VkThreadMessage:
-      raise new_exception(types.Exception, "payload can only be called on a ThreadMessage")
-
-    return msg_arg.ref.thread_message.payload
-
-  thread_message_class.def_native_method("payload", thread_message_payload)
-
-  # Add .reply method
-  proc thread_message_reply(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
-    if arg_count < 2:
-      raise new_exception(types.Exception, "ThreadMessage.reply requires a message and a value")
-
-    let msg_arg = get_positional_arg(args, 0, has_keyword_args)
-    let value_arg = get_positional_arg(args, 1, has_keyword_args)
-
-    if msg_arg.kind != VkThreadMessage:
-      raise new_exception(types.Exception, "reply can only be called on a ThreadMessage")
-
-    let msg = msg_arg.ref.thread_message
-
-    # Create reply message
-    var reply: ThreadMessage
-    new(reply)
-    reply.id = next_message_id
-    reply.msg_type = MtReply
-    reply.payload = NIL
-    let ser = serialize_literal(value_arg)
-    let ser_str = block:
-      {.cast(gcsafe).}:
-        ser.to_s()
-    reply.payload_bytes.bytes = string_to_bytes(ser_str)
-    reply.from_message_id = msg.id
-    reply.from_thread_id = current_thread_id
-    reply.from_thread_secret = THREADS[current_thread_id].secret
-    next_message_id += 1
-
-    # Send reply to sender
-    THREAD_DATA[msg.from_thread_id].channel.send(reply)
-
-    # Mark message as handled
-    msg.handled = true
-
-    return NIL
-
-  thread_message_class.def_native_method("reply", thread_message_reply)
-
-  # Store ThreadMessage class
-  let thread_message_class_ref = new_ref(VkClass)
-  thread_message_class_ref.class = thread_message_class
-  App.app.thread_message_class = thread_message_class_ref.to_ref_value()
-  THREAD_MESSAGE_CLASS_VALUE = App.app.thread_message_class
-
-  # Add to gene namespace if it exists
-  if App.app.gene_ns.kind == VkNamespace:
-    let thread_message_key = "ThreadMessage".to_key()
-    App.app.gene_ns.ref.ns[thread_message_key] = App.app.thread_message_class
-
-# keep_alive function - keeps thread running to receive messages
-proc keep_alive_fn*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
-  ## Keep thread alive to receive messages
-  ## Thread workers already stay alive in `thread_handler`; this function acts as
-  ## a marker and optional bounded delay.
-  ## Usage: (keep_alive) or (keep_alive timeout_ms)
-
-  let positional_count = get_positional_count(arg_count, has_keyword_args)
-  if positional_count == 0:
-    return NIL
-
-  let timeout_arg = get_positional_arg(args, 0, has_keyword_args)
-  var timeout_ms: int
-  case timeout_arg.kind:
-  of VkInt:
-    timeout_ms = timeout_arg.int64.int
-  of VkFloat:
-    timeout_ms = (timeout_arg.float64 * 1000.0).int
-  else:
-    raise new_exception(types.Exception, "keep_alive timeout must be a number (milliseconds or seconds)")
-
-  if timeout_ms > 0:
-    sleep(timeout_ms)
-
-  return NIL
+  ## Phase 4 removes the public thread-first surface.
+  ## The internal worker substrate still exists for actor scheduling, but
+  ## Thread / ThreadMessage are no longer published as public classes.
+  THREAD_CLASS_VALUE = NIL
+  THREAD_MESSAGE_CLASS_VALUE = NIL

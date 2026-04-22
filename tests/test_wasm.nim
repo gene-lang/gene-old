@@ -14,10 +14,9 @@ suite "WASM runtime ABI":
     check output.contains("error:")
 
   when defined(gene_wasm):
-    test "unsupported thread API returns stable wasm code":
+    test "retired thread-first surface returns an error":
       let output = $gene_eval("(spawn 1)")
-      check output.contains("GENE.WASM.UNSUPPORTED")
-      check output.contains("threads")
+      check output.contains("error:")
 
     test "unsupported process API returns stable wasm code":
       let output = $gene_eval("(system/exec \"echo\" \"hi\")")

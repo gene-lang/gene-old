@@ -26,7 +26,7 @@ The goal is to keep examples small, current, and runnable against the codebase a
 ## Concurrency
 
 - `async.gene` - Futures, callbacks, and `await`
-- `thread.gene` - `spawn` and `spawn_return`
+- `http_actor_server.gene` - Actor-backed background work behind an HTTP front door
 
 ## Extensions and Web
 
@@ -59,6 +59,6 @@ Some examples depend on extension modules:
 nimble buildext
 ```
 
-That is required for `html.gene`, `http_server.gene`, `sqlite.gene`, and `openai_chat.gene`.
+That is required for `html.gene`, `http_server.gene`, `http_actor_server.gene`, `sqlite.gene`, and `openai_chat.gene`.
 
 `http_server.gene` and `http_actor_server.gene` are long-running by design. `openai_chat.gene` also requires `OPENAI_API_KEY`.

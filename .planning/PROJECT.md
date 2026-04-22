@@ -3,17 +3,17 @@
 ## What This Is
 
 This workstream ports the approved actor-based concurrency design in
-`docs/proposals/actor-design.md` into the existing `gene-old` runtime. Phases 0
-through 3 are complete: the substrate is safe, frozen/shared values are in
-place, freezable closures landed, the actor runtime is the primary new
-concurrency surface, and the main stateful extensions now route ownership
-through actor/port boundaries instead of extension-local thread/global state.
+`docs/proposals/actor-design.md` into the existing `gene-old` runtime. The
+actor migration track is complete: the substrate is safe, frozen/shared values
+are in place, freezable closures landed, the actor runtime is the public
+concurrency API, the stateful extensions route ownership through actor/port
+boundaries, and the old thread-first public surface has been removed from the
+active repo surface.
 
 ## Core Value
 
-The remaining core value is now Phase 4: remove the surviving thread-first
-concurrency surface and complete the migration so actors are not only primary
-in practice but also the sole recommended public model.
+The actor migration milestone is complete. The next work should start a new
+milestone or roadmap track rather than reopening the old thread-first lane.
 
 ## Requirements
 
@@ -40,7 +40,7 @@ in practice but also the sole recommended public model.
   Phase 1.5 substrate.
 - [x] Plan Phase 3 extension migration on top of the now-verified Phase 2
   actor runtime.
-- [ ] Plan and execute Phase 4 thread-first concurrency removal after the now-complete Phase 3 extension migration.
+- [ ] Start the next post-actor milestone or roadmap track.
 
 ### Out of Scope
 
@@ -97,6 +97,7 @@ Phase 0 without renumbering or rewriting historical exploratory docs.
 | Resolve the dynamic `genex/llm` boundary with an explicit exported-function bridge plus host-owned `Model` / `Session` wrappers fronted by one host-owned actor | Live extension-owned `Value` returns across the dylib boundary proved unstable; host-owned wrappers preserve the public API while keeping backend handles internal | ✓ Complete (`03-02`) |
 | Close Phase 3 by moving `genex/http` and `genex/ai/bindings` off extension-local thread/global callback ownership | HTTP now uses actor-backed request ports, and Socket Mode binding ownership is actor-scoped instead of process-global | ✓ Complete (`03-03`) |
 | Keep legacy thread docs explicit during Phase 3 and defer actual thread-surface removal to Phase 4 | Extension migration and public API removal are different risks; Phase 3 closes ownership, Phase 4 removes the old surface | ✓ Complete |
+| Remove the surviving thread-first public surface while preserving the internal worker substrate actors still use | The actor runtime still depends on worker threads internally, so Phase 4 removed only the public/compiler/docs lane and worker naming debt | ✓ Complete (`04-01`/`04-02`) |
 
 ## Evolution
 
@@ -116,4 +117,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-22 after Phase 3 completion*
+*Last updated: 2026-04-22 after Phase 4 completion*

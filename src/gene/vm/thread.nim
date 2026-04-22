@@ -57,48 +57,7 @@ when defined(gene_wasm):
     raise_wasm_unsupported("threads")
 
   proc init_thread_class*() =
-    if not gene_namespace_initialized:
-      return
-
-    if App.app.thread_class.kind == VkClass:
-      THREAD_CLASS_VALUE = App.app.thread_class
-      THREAD_MESSAGE_CLASS_VALUE = App.app.thread_message_class
-      return
-
-    let thread_class = new_class("Thread")
-    if App.app.object_class.kind == VkClass:
-      thread_class.parent = App.app.object_class.ref.class
-    thread_class.def_native_constructor(thread_unsupported)
-    thread_class.def_native_method("send", thread_unsupported)
-    thread_class.def_native_method("send_expect_reply", thread_unsupported)
-    thread_class.def_native_method("on_message", thread_unsupported)
-
-    let thread_class_ref = new_ref(VkClass)
-    thread_class_ref.class = thread_class
-    App.app.thread_class = thread_class_ref.to_ref_value()
-    THREAD_CLASS_VALUE = App.app.thread_class
-
-    let thread_message_class = new_class("ThreadMessage")
-    if App.app.object_class.kind == VkClass:
-      thread_message_class.parent = App.app.object_class.ref.class
-    thread_message_class.def_native_method("payload", thread_unsupported)
-    thread_message_class.def_native_method("reply", thread_unsupported)
-
-    let thread_message_class_ref = new_ref(VkClass)
-    thread_message_class_ref.class = thread_message_class
-    App.app.thread_message_class = thread_message_class_ref.to_ref_value()
-    THREAD_MESSAGE_CLASS_VALUE = App.app.thread_message_class
-
-    if App.app.gene_ns.kind == VkNamespace:
-      App.app.gene_ns.ref.ns["Thread".to_key()] = App.app.thread_class
-      App.app.gene_ns.ref.ns["ThreadMessage".to_key()] = App.app.thread_message_class
-      App.app.gene_ns.ref.ns["send_expect_reply".to_key()] = thread_unsupported.to_value()
-
-  proc keep_alive_fn*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value =
-    discard vm
-    discard args
-    discard arg_count
-    discard has_keyword_args
-    raise_wasm_unsupported("threads")
+    THREAD_CLASS_VALUE = NIL
+    THREAD_MESSAGE_CLASS_VALUE = NIL
 else:
   include ./thread_native

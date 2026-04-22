@@ -1143,7 +1143,7 @@ type
     next_pubsub_subscription_id*: int
     pubsub_draining*: bool
     # Thread support
-    thread_futures*: Table[int, FutureObj]  # Map message_id -> future for spawn_return
+    thread_futures*: Table[int, FutureObj]  # Map message_id -> future for reply-capable worker traffic
     message_callbacks*: seq[Value]  # List of callbacks for incoming messages
     thread_local_ns*: Namespace  # Thread-local namespace for $thread, $main_thread, etc.
     # Scheduler mode

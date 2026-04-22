@@ -42,7 +42,7 @@ suite "Actor runtime":
 
     check blocked == TRUE
 
-  test "gene/actor bootstrap keeps actor and thread surfaces separate":
+  test "gene/actor bootstrap keeps actors working while thread-first entrypoints are retired":
     let actor_state = exec_gene("""
       (do
         (gene/actor/enable)
@@ -66,19 +66,10 @@ suite "Actor runtime":
     check actor_state.kind == VkInt
     check actor_state.int64 == 2
 
-    let thread_future = exec_gene("""
-      (do
-        (var worker
-          (spawn
-            (do
-              (thread .on_message
-                (fn [msg]
-                  (msg .reply (+ (msg .payload) 1))))
-              (keep_alive))))
-        (worker .send_expect_reply 41))
-    """, "thread_spawn_compatibility.gene")
-
-    let thread_result = await_vm_future(thread_future)
-
-    check thread_result.kind == VkInt
-    check thread_result.int64 == 42
+    try:
+      discard exec_gene("""
+        (spawn 1)
+      """, "thread_spawn_retired.gene")
+      check false
+    except CatchableError:
+      discard

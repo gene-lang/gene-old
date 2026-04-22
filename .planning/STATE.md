@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready
-stopped_at: Phase 03 complete
-last_updated: "2026-04-22T00:00:00Z"
-last_activity: 2026-04-22 -- Phase 03 closed after HTTP/AI port-boundary migration and verification sweep
+stopped_at: Phase 04 complete
+last_updated: "2026-04-22T23:59:00Z"
+last_activity: 2026-04-22 -- Phase 04 removed the public thread-first surface and closed the actor migration track
 progress:
   total_phases: 6
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 25
-  completed_plans: 22
-  percent: 88
+  completed_plans: 25
+  percent: 100
 ---
 
 # Project State
@@ -20,26 +20,24 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-04-22)
 
-**Core value:** The runtime and main stateful extensions are now on actor-safe
-ownership boundaries; the remaining work is removing the surviving thread-first
-public surface.
-**Current focus:** Phase 04 — remove-legacy-thread-first-concurrency-surfaces
+**Core value:** The actor migration track is complete.
+**Current focus:** Actor migration track complete
 
 ## Current Position
 
-Phase: 04 (remove-legacy-thread-first-concurrency-surfaces) — NEXT
-Plan: not yet planned
-Status: Phase 03 complete; next target is Phase 04 planning/execution
-Last activity: 2026-04-22 -- Phase 03 closed after HTTP/AI port-boundary migration and verification sweep
+Phase: 04 (remove-legacy-thread-first-concurrency-surfaces) — COMPLETE
+Plan: 3 of 3
+Status: Actor migration complete
+Last activity: 2026-04-22 -- Phase 04 removed the public thread-first surface and closed the actor migration track
 Depends on completed Phase 03 across `bf4661f`..`593189a`
 
-Progress: [████████░░] 88%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 22
+- Total plans completed: 25
 - Average duration: -
 - Total execution time: not recorded
 
@@ -52,6 +50,7 @@ Progress: [████████░░] 88%
 | 1.5 | 2 | - | - |
 | 2 | 5 | - | - |
 | 3 | 4 | - | - |
+| 4 | 3 | - | - |
 
 **Recent Trend:**
 
@@ -130,12 +129,12 @@ None yet.
 | Concurrency | Freezable closures (Phase 1.5 — hard prerequisite for Phase 2) | Complete | 2026-04-19 |
 | Concurrency | Actor scheduler, tiered send, reply futures, stop semantics (Phase 2) | Complete | 2026-04-20 |
 | Concurrency | Port-actor protocol for extensions (Phase 3) | Complete | 2026-04-22 |
-| Concurrency | Thread API deprecation / `GENE_WORKERS` rename (Phase 4) | Next | 2026-04-22 |
+| Concurrency | Thread API deprecation / `GENE_WORKERS` rename (Phase 4) | Complete | 2026-04-22 |
 | Perf | Move-semantics `send!`, work-stealing scheduler, `^frozen-default` class annotation | Deferred indefinitely per proposal | 2026-04-17 |
 
 ## Session Continuity
 
 Last session: 2026-04-22T00:00:00Z
-Stopped at: Phase 03 complete
-Next step: Plan and execute Phase 04 thread-first concurrency removal
+Stopped at: Phase 04 complete
+Next step: Start the next roadmap track or milestone
 Resume file: None

@@ -433,9 +433,16 @@
 (var text (await (gene/io/read_async "tests/fixtures/test.txt")))
 (println "read_async length =" text/.length)
 
-# spawn_return + await
-(var thread_sum (await (spawn_return (+ 100 23))))
-(println "spawn_return result =" thread_sum)
+# actor send_expect_reply + await
+(gene/actor/enable ^workers 1)
+(var full_counter
+  (gene/actor/spawn
+    ^state 123
+    (fn [ctx msg state]
+      (ctx .reply state)
+      state)))
+(var actor_sum (await (full_counter .send_expect_reply {^kind "get"})))
+(println "actor send_expect_reply result =" actor_sum)
 
 # ============================================================================
 # 12) GENERATORS
