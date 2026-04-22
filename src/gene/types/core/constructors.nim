@@ -65,10 +65,17 @@ proc new_str*(s: string): ptr String =
   result.ref_count = 1
   result.str = s
 
+proc new_ref_string_value*(s: string): Value =
+  let r = new_ref(VkString)
+  r.ref_count = 1
+  r.str = s
+  result = r.to_ref_value()
+
 proc new_str_value*(s: string): Value =
   let str_ptr = new_str(s)
   let ptr_addr = cast[uint64](str_ptr)
-  assert (ptr_addr and 0xFFFF_0000_0000_0000u64) == 0, "String pointer too large for NaN boxing"
+  if (ptr_addr and 0xFFFF_0000_0000_0000u64) != 0:
+    return new_ref_string_value(s)
   result = cast[Value](STRING_TAG or ptr_addr)
 
 converter to_value*(v: char): Value {.inline.} =
@@ -90,6 +97,13 @@ proc str*(v: Value): string =
           else:
             result = x.str
 
+        of REF_TAG:
+          let r = cast[ptr Reference](u and PAYLOAD_MASK)
+          if r != nil and r.kind == VkString:
+            result = r.str
+          else:
+            not_allowed(fmt"{v} is not a string.")
+
         of SYMBOL_TAG:
           let x = cast[int64](u and PAYLOAD_MASK)
           result = get_symbol(x.int)
@@ -107,7 +121,8 @@ converter to_value*(v: string): Value =
     s.ref_count = 1
     s.str = v
     let ptr_addr = cast[uint64](s)
-    assert (ptr_addr and 0xFFFF_0000_0000_0000u64) == 0, "String pointer too large for NaN boxing"
+    if (ptr_addr and 0xFFFF_0000_0000_0000u64) != 0:
+      return new_ref_string_value(v)
     result = cast[Value](STRING_TAG or ptr_addr)
 
 converter to_value*(v: Rune): Value =

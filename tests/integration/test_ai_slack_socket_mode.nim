@@ -1,13 +1,78 @@
 import unittest
 import std/json
+import std/[locks, tables, times, os]
+import gene/types except Exception
+import gene/vm
+import gene/vm/actor
+import gene/vm/extension
+import gene/vm/extension_abi
+import gene/vm/thread
 
-import ../src/genex/ai/slack_socket_mode
-import ../src/genex/ai/control_slack
-import ../src/genex/ai/slack_ingress
-import ../src/genex/ai/agent_runtime
-import ../src/genex/ai/tools
-import ../src/genex/ai/conversation
-import ../src/genex/ai/utils
+import ../../src/genex/ai/slack_socket_mode
+import ../../src/genex/ai/control_slack
+import ../../src/genex/ai/slack_ingress
+import ../../src/genex/ai/agent_runtime
+import ../../src/genex/ai/tools
+import ../../src/genex/ai/conversation
+import ../../src/genex/ai/utils
+from ../../src/genex/ai/bindings import gene_init, reset_slack_socket_mode_for_test,
+  create_slack_socket_binding_for_test, jsonToGeneValue
+
+var binding_results_lock: Lock
+var binding_results: seq[string] = @[]
+initLock(binding_results_lock)
+
+proc build_host(): GeneHostAbi =
+  GeneHostAbi(
+    abi_version: GENE_EXT_ABI_VERSION,
+    user_data: cast[pointer](VM),
+    app_value: App,
+    symbols_data: nil,
+    log_message_fn: nil,
+    register_scheduler_callback_fn: nil,
+    register_port_fn: host_register_port_bridge,
+    call_port_fn: host_call_port_bridge,
+    result_namespace: nil
+  )
+
+proc await_vm_future(future_value: Value, timeout_ms = 2_000): Value =
+  let deadline = epochTime() + (timeout_ms.float / 1000.0)
+  let future = future_value.ref.future
+  while future.state == FsPending and epochTime() < deadline:
+    VM.event_loop_counter = 100
+    poll_event_loop(VM)
+    sleep(10)
+
+  check future.state != FsPending
+  check future.state == FsSuccess
+  future.value
+
+proc command_text(value: Value): string =
+  if value.kind != VkMap:
+    return ""
+  let text_val = map_data(value).getOrDefault("text".to_key(), NIL)
+  if text_val.kind != VkString:
+    return ""
+  text_val.str
+
+proc record_binding_result(tag, text: string) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    withLock(binding_results_lock):
+      binding_results.add(tag & ":" & text)
+
+proc binding_callback_one(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                          has_keyword_args: bool): Value {.gcsafe.} =
+  discard vm
+  discard arg_count
+  record_binding_result("one", command_text(get_positional_arg(args, 0, has_keyword_args)))
+  NIL
+
+proc binding_callback_two(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                          has_keyword_args: bool): Value {.gcsafe.} =
+  discard vm
+  discard arg_count
+  record_binding_result("two", command_text(get_positional_arg(args, 0, has_keyword_args)))
+  NIL
 
 
 suite "Socket Mode envelope parsing":
@@ -320,3 +385,50 @@ suite "Socket Mode ingress integration":
     # interactive type should be ignored
     client.event_handler("interactive", %*{"type": "block_actions"})
     check store.get_recent("any:key", 10).len == 0
+
+
+suite "Socket Mode binding ownership":
+  test "separate actor-backed bindings keep independent callbacks":
+    init_thread_pool()
+    init_app_and_vm()
+    init_stdlib()
+    init_actor_runtime()
+    clear_registered_extension_ports_for_test()
+    reset_slack_socket_mode_for_test()
+    withLock(binding_results_lock):
+      binding_results.setLen(0)
+
+    var host = build_host()
+    check gene_init(addr host) == int32(GeneExtOk)
+
+    actor_enable_for_test(2)
+    let binding_one = create_slack_socket_binding_for_test(VM, NativeFn(binding_callback_one).to_value(), "")
+    let binding_two = create_slack_socket_binding_for_test(VM, NativeFn(binding_callback_two).to_value(), "")
+
+    check binding_one.kind == VkActor
+    check binding_two.kind == VkActor
+
+    let envelope_one = new_command_envelope(
+      command_id = "cmd-1",
+      source = CsSlack,
+      workspace_id = "T1",
+      user_id = "U1",
+      channel_id = "C1",
+      text = "hello one"
+    )
+    let envelope_two = new_command_envelope(
+      command_id = "cmd-2",
+      source = CsSlack,
+      workspace_id = "T2",
+      user_id = "U2",
+      channel_id = "C2",
+      text = "hello two"
+    )
+
+    discard await_vm_future(actor_send_value(VM, binding_one, jsonToGeneValue(command_to_json(envelope_one)), true))
+    discard await_vm_future(actor_send_value(VM, binding_two, jsonToGeneValue(command_to_json(envelope_two)), true))
+
+    var got: seq[string] = @[]
+    withLock(binding_results_lock):
+      got = binding_results
+    check got == @["one:hello one", "two:hello two"]

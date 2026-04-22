@@ -5,8 +5,9 @@
 This roadmap tracks the approved actor-design migration from
 `docs/proposals/actor-design.md`. Phase 0 (substrate cleanup) landed in commit
 `e2e776c`. Phase 1 (deep-frozen bit, shared heap, `(freeze v)`) is now
-implemented across commits `f153f95`..`a36452b`. Later phases stay deferred in
-the proposal until follow-on planning resumes.
+implemented across commits `f153f95`..`a36452b`. Phase 3 is now executing:
+`03-01` landed the extension port substrate, and `03-02` moved `genex/llm`
+behind a stable host-owned bridge on top of that substrate.
 
 The legacy `.planning/phases/01-architecture-comparison/` directory was
 preserved historical exploratory material and has been moved to
@@ -38,6 +39,8 @@ slot can be used for the real Phase 1.
   Phase 0/1 substrate *(completed 2026-04-20, commits `d3822be`..`49d8d7a`)*
 - [ ] **Phase 3: Port actors for extensions** - Migrate process-global native
   resources and extension-side concurrency behind actor/port boundaries
+  *(executing 2026-04-20.., `03-01` complete in `bf4661f`/`0915da9`/`3301f31`,
+  `03-02` complete in `f19293f`)*
 - [ ] **Phase 4: Remove legacy thread-first concurrency surfaces** - Deprecate
   and remove the legacy thread API once actor support is verified, including
   `GENE_WORKERS` naming cleanup and other thread-centric concurrency entry
@@ -94,7 +97,7 @@ Plans:
 | 1. Deep-frozen bit, shared heap, and `(freeze v)` | 6/6 | Complete | 2026-04-19 |
 | 1.5. Freezable closures | 2/2 | Complete | 2026-04-19 |
 | 2. Actor runtime | 5/5 | Complete | 2026-04-20 |
-| 3. Port actors for extensions | 0/4 | Planned | - |
+| 3. Port actors for extensions | 2/4 | Executing | - |
 | 4. Remove legacy thread-first concurrency surfaces | 0/? | Unplanned | - |
 
 ### Phase 1.5: Freezable closures *(complete)*
@@ -140,7 +143,7 @@ Plans:
 - [x] 02-04-PLAN.md — Wire actor reply futures and stop semantics onto the existing Future runtime
 - [x] 02-05-PLAN.md — Publish actor docs, preserve thread compatibility guidance, and add black-box actor verification
 
-### Phase 3: Port actors for extensions
+### Phase 3: Port actors for extensions *(executing)*
 **Goal**: Move process-global native resources and extension-side concurrency to
 actor/port boundaries so external systems stop bypassing the actor model.
 **Depends on**: Phase 2
@@ -153,8 +156,8 @@ actor/port boundaries so external systems stop bypassing the actor model.
 **Plans**: 4 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Define extension port registration and actor-backed port materialization
-- [ ] 03-02-PLAN.md — Migrate `genex/llm` to the singleton-port ownership model
+- [x] 03-01-PLAN.md — Define extension port registration and actor-backed port materialization
+- [x] 03-02-PLAN.md — Replace `genex/llm`'s live-handle boundary with an explicit host bridge and host-owned wrappers
 - [ ] 03-03-PLAN.md — Move HTTP and AI extension concurrency onto port pool/factory boundaries
 - [ ] 03-04-PLAN.md — Publish migration guidance and run Phase 3 verification
 

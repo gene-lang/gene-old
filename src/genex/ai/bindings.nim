@@ -1,7 +1,7 @@
 ## Gene VM bindings for OpenAI/Anthropic APIs
 ## Bridges provider clients to Gene's VM system
 
-import tables, json, strutils, deques
+import tables, json, strutils
 import asyncdispatch
 import ../../gene/types
 import ../../gene/vm
@@ -652,16 +652,15 @@ proc attach_anthropic_client_class*(cls: Class) =
 # Slack Socket Mode native binding
 # ---------------------------------------------------------------------------
 
-var slack_vm_global: ptr VirtualMachine = nil
-var slack_callback_global: Value = NIL
-var slack_reply_client_global: SlackClient = nil
-
 type
-  PendingSlackCommand = object
-    envelope: CommandEnvelope
+  SlackSocketBinding = object
+    callback: Value
+    bot_token: string
 
-var slack_pending_commands: Deque[PendingSlackCommand] = initDeque[PendingSlackCommand]()
-const max_pending_slack_commands = 256
+var ai_extension_host: GeneHostAbi
+var ai_extension_host_ready = false
+var next_slack_socket_binding_id = 1
+var slack_socket_bindings: Table[int, SlackSocketBinding] = initTable[int, SlackSocketBinding]()
 
 proc execute_gene_callback(vm: ptr VirtualMachine, fn: Value, args: seq[Value]): Value {.gcsafe.} =
   {.cast(gcsafe).}:
@@ -673,6 +672,104 @@ proc execute_gene_callback(vm: ptr VirtualMachine, fn: Value, args: seq[Value]):
     else:
       ai_bindings_log(LlError, "start_slack_socket_mode: callback is not callable (kind=" & $fn.kind & ")")
       return NIL
+
+proc ai_actor_method(vm: ptr VirtualMachine, actor_handle: Value, method_name: string,
+                     args: seq[Value]): Value {.gcsafe.} =
+  {.cast(gcsafe).}:
+    if actor_handle.kind != VkActor:
+      raise new_exception(types.Exception, "AI binding actor handle is invalid")
+    if App == NIL or App.kind != VkApplication or App.app.actor_class.kind != VkClass:
+      raise new_exception(types.Exception, "AI Socket Mode requires gene/actor/enable first")
+    let actor_class = App.app.actor_class.ref.class
+    let key = method_name.to_key()
+    if not actor_class.methods.hasKey(key):
+      raise new_exception(types.Exception, "Actor method not available: " & method_name)
+    let callable = actor_class.methods[key].callable
+    case callable.kind
+    of VkNativeFn:
+      call_native_fn(callable.ref.native_fn, vm, @[actor_handle] & args)
+    of VkNativeMethod:
+      call_native_fn(callable.ref.native_method, vm, @[actor_handle] & args)
+    else:
+      vm.exec_method(callable, actor_handle, args)
+
+proc slack_socket_actor_handler(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                                has_keyword_args: bool): Value {.gcsafe.} =
+  {.cast(gcsafe).}:
+    if get_positional_count(arg_count, has_keyword_args) < 2:
+      raise new_exception(types.Exception, "slack_socket_actor_handler requires context and envelope")
+
+    let ctx = get_positional_arg(args, 0, has_keyword_args)
+    let msg = get_positional_arg(args, 1, has_keyword_args)
+    let state = get_positional_arg(args, 2, has_keyword_args)
+
+    if ctx.kind != VkActorContext or ctx.ref.actor_context == nil:
+      raise new_exception(types.Exception, "slack_socket_actor_handler requires an ActorContext")
+
+    let actor_id = ctx.ref.actor_context.actor.id
+    if not slack_socket_bindings.hasKey(actor_id):
+      ai_bindings_log(LlWarn, "Socket Mode actor binding missing for actor " & $actor_id)
+      return state
+
+    let binding = slack_socket_bindings[actor_id]
+    let envelope = command_from_json(geneValueToJson(msg))
+
+    var result = NIL
+    try:
+      result = execute_gene_callback(vm, binding.callback, @[msg])
+    except CatchableError as e:
+      ai_bindings_log(LlError, "Socket Mode actor callback error: " & e.msg)
+      return state
+    except system.Exception as e:
+      ai_bindings_log(LlError, "Socket Mode actor callback error: " & e.msg)
+      return state
+
+    if result.kind == VkMap:
+      let response_key = "response".to_key()
+      if map_data(result).hasKey(response_key):
+        let response_val = map_data(result)[response_key]
+        if response_val.kind == VkString and response_val.str.len > 0 and binding.bot_token.len > 0:
+          let target = reply_target_from_envelope(envelope)
+          let client = new_slack_client(binding.bot_token)
+          let reply_result = client.slack_reply(target, response_val.str)
+          if not reply_result.ok:
+            ai_bindings_log(LlWarn, "Socket Mode: Slack reply failed: " & reply_result.error)
+
+    state
+
+proc register_slack_socket_binding(vm: ptr VirtualMachine, callback: Value, bot_token: string): Value {.gcsafe.} =
+  {.cast(gcsafe).}:
+    discard vm
+    if not ai_extension_host_ready:
+      raise new_exception(types.Exception, "AI extension host context is not initialized")
+
+    var handle = NIL
+    let binding_name = "genex/ai/slack_socket_mode/" & $next_slack_socket_binding_id
+    let status = register_singleton_port(
+      addr ai_extension_host,
+      binding_name,
+      NativeFn(slack_socket_actor_handler).to_value(),
+      NIL,
+      addr handle
+    )
+    if status != GeneExtOk or handle.kind != VkActor or handle.ref.actor == nil:
+      raise new_exception(types.Exception, "start_slack_socket_mode requires gene/actor/enable before actor-backed bindings can start")
+
+    slack_socket_bindings[handle.ref.actor.id] = SlackSocketBinding(
+      callback: callback,
+      bot_token: bot_token
+    )
+    inc(next_slack_socket_binding_id)
+    handle
+
+proc reset_slack_socket_mode_for_test*() {.gcsafe.} =
+  {.cast(gcsafe).}:
+    slack_socket_bindings.clear()
+    next_slack_socket_binding_id = 1
+
+proc create_slack_socket_binding_for_test*(vm: ptr VirtualMachine, callback: Value,
+                                           bot_token = "xoxb-test"): Value {.gcsafe.} =
+  register_slack_socket_binding(vm, callback, bot_token)
 
 proc vm_start_slack_socket_mode*(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
   if get_positional_count(arg_count, has_keyword_args) < 3:
@@ -691,18 +788,11 @@ proc vm_start_slack_socket_mode*(vm: ptr VirtualMachine, args: ptr UncheckedArra
 
   let app_token = app_token_val.str
   let bot_token = bot_token_val.str
-
-  # Store VM and callback for use inside the event handler closure
-  {.cast(gcsafe).}:
-    slack_vm_global = vm
-    slack_callback_global = callback_val
-
-  let slack_client = new_slack_client(bot_token)
+  let binding_actor = register_slack_socket_binding(vm, callback_val, bot_token)
 
   let event_handler: SocketModeEventHandler = proc(event_type: string; payload: JsonNode) {.gcsafe.} =
     if event_type != "events_api":
       return
-    # Parse the Slack event into a CommandEnvelope
     var envelope: CommandEnvelope
     try:
       envelope = slack_event_to_command(payload)
@@ -710,18 +800,14 @@ proc vm_start_slack_socket_mode*(vm: ptr VirtualMachine, args: ptr UncheckedArra
       ai_bindings_log(LlWarn, "Socket Mode: skipping event: " & e.msg)
       return
 
-    # Queue command and execute it from scheduler tick to avoid running Gene VM
-    # from inside async WebSocket callbacks.
-    {.cast(gcsafe).}:
-      if slack_pending_commands.len >= max_pending_slack_commands:
-        discard slack_pending_commands.popFirst()
-        ai_bindings_log(LlWarn, "Socket Mode: pending queue full, dropping oldest event")
-      slack_pending_commands.addLast(PendingSlackCommand(envelope: envelope))
+    try:
+      discard ai_actor_method(vm, binding_actor, "send", @[jsonToGeneValue(command_to_json(envelope))])
+    except CatchableError as e:
+      ai_bindings_log(LlWarn, "Socket Mode: failed to enqueue event: " & e.msg)
 
   let client = new_slack_socket_mode(app_token, bot_token, event_handler)
 
   {.cast(gcsafe).}:
-    slack_reply_client_global = slack_client
     asyncCheck client.start()
     # Give the event loop time to start the connection
     try:
@@ -928,63 +1014,14 @@ proc init*(vm: ptr VirtualMachine): Namespace {.gcsafe.} =
 
 var ai_host_scheduler_registered = false
 
-proc drain_slack_command_queue() {.gcsafe.} =
-  ## Execute queued Slack commands from scheduler context.
-  var processed = 0
-  while processed < 8:
-    var pending: PendingSlackCommand
-    var has_pending = false
-    {.cast(gcsafe).}:
-      if slack_pending_commands.len > 0:
-        pending = slack_pending_commands.popFirst()
-        has_pending = true
-    if not has_pending:
-      break
-
-    inc processed
-
-    var result: Value = NIL
-    {.cast(gcsafe).}:
-      let stored_vm = slack_vm_global
-      let stored_cb = slack_callback_global
-      if stored_vm.isNil or stored_cb == NIL:
-        ai_bindings_log(LlError, "Socket Mode: callback context is not initialized")
-        continue
-      try:
-        result = execute_gene_callback(stored_vm, stored_cb, @[
-          jsonToGeneValue(command_to_json(pending.envelope))
-        ])
-      except CatchableError as e:
-        ai_bindings_log(LlError, "Socket Mode: agent error: " & e.msg)
-        continue
-      except system.Exception as e:
-        ai_bindings_log(LlError, "Socket Mode: agent error: " & e.msg)
-        continue
-
-    if result.kind == VkMap:
-      let response_key = "response".to_key()
-      if map_data(result).hasKey(response_key):
-        let response_val = map_data(result)[response_key]
-        if response_val.kind == VkString and response_val.str.len > 0:
-          let target = reply_target_from_envelope(pending.envelope)
-          let client = block:
-            {.cast(gcsafe).}:
-              slack_reply_client_global
-          if client.isNil:
-            ai_bindings_log(LlWarn, "Socket Mode: Slack reply skipped: missing client")
-          else:
-            let reply_result = client.slack_reply(target, response_val.str)
-            if not reply_result.ok:
-              ai_bindings_log(LlWarn, "Socket Mode: Slack reply failed: " & reply_result.error)
-
 proc ai_scheduler_tick(vm_user_data: pointer, callback_user_data: pointer) {.cdecl, gcsafe.} =
   ## Called by the host's run_forever loop to pump the extension's async dispatcher.
+  discard vm_user_data
   discard callback_user_data
   try:
     poll(0)
   except CatchableError:
     discard
-  drain_slack_command_queue()
 
 proc gene_init*(host: ptr GeneHostAbi): int32 {.cdecl, exportc, dynlib.} =
   if host == nil:
@@ -992,6 +1029,8 @@ proc gene_init*(host: ptr GeneHostAbi): int32 {.cdecl, exportc, dynlib.} =
   if host.abi_version != GENE_EXT_ABI_VERSION:
     return int32(GeneExtAbiMismatch)
   let vm = apply_extension_host_context(host)
+  ai_extension_host = host[]
+  ai_extension_host_ready = true
   if host.register_scheduler_callback_fn != nil and not ai_host_scheduler_registered:
     if host.register_scheduler_callback_fn(ai_scheduler_tick, nil) != int32(GeneExtOk):
       return int32(GeneExtErr)

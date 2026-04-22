@@ -3,19 +3,19 @@
 ## What This Is
 
 This workstream ports the approved actor-based concurrency design in
-`docs/proposals/actor-design.md` into the existing `gene-old` runtime. Phase 0
-(substrate cleanup) is complete. Phase 1 introduced the runtime machinery —
-deep-frozen and shared header bits on `Value`, a shared-heap allocation path,
-an atomic-vs-plain refcount branch, and the user-facing `(freeze v)` stdlib
-operation over the MVP container scope — that every later actor-runtime phase
-depends on, without adding a new concurrency API.
+`docs/proposals/actor-design.md` into the existing `gene-old` runtime. Phases 0
+through 2 are complete: the substrate is safe, frozen/shared values are in
+place, freezable closures landed, and the actor runtime is the primary new
+concurrency surface. Phase 3 is now executing to move stateful extensions
+behind actor-owned or bridge-owned boundaries so external systems stop
+bypassing that runtime.
 
 ## Core Value
 
-Phase 1 delivered the deep-frozen / shared-heap runtime substrate and the
-`(freeze v)` user surface that every subsequent actor phase (scheduler, tiered
-send, port actors) requires, without destabilizing the existing VM or shipping
-a new concurrency API.
+The remaining core value is to make the actor runtime real for external
+integrations: `genex/llm` now uses a host-owned bridge and serialization actor,
+and the next work is the same migration for HTTP and AI binding surfaces
+without regressing the public Gene APIs.
 
 ## Requirements
 
@@ -42,8 +42,8 @@ a new concurrency API.
   Phase 1.5 substrate.
 - [x] Plan Phase 3 extension migration on top of the now-verified Phase 2
   actor runtime.
-- [ ] Execute Phase 3 extension migration and port the first stateful
-  extensions behind actor-owned boundaries.
+- [ ] Execute the remaining Phase 3 extension migration work (`03-03`,
+  `03-04`) after the completed `03-02` LLM bridge migration.
 
 ### Out of Scope
 
@@ -96,7 +96,8 @@ Phase 0 without renumbering or rewriting historical exploratory docs.
 | Split freezable closures into Phase 1.5 (not Phase 1) | Closure captured-env analysis is its own workstream; holding Phase 1 to containers keeps the scope testable | ✓ Complete — Phase 1.5 shipped across commits `9e9a97a`..`cfb9140` |
 | Keep legacy thread-first concurrency surfaces unchanged during Phase 1.5 | Closure freezeability is the last substrate gate; actor scheduling and thread-surface removal belong to later phases | ✓ Complete — Phase 1.5 docs/tests fence migration boundaries explicitly |
 | Phase 2 keeps actor replies on the existing Future runtime | Reusing `FutureObj`/`MtReply` avoids a second await subsystem and keeps callbacks/timeouts consistent | ✓ Complete |
-| Phase 3 uses `genex/llm` as the singleton-port proof and `genex/http` / AI bindings as the first pool-or-factory migrations | These are the clearest remaining extension-side concurrency surfaces after Phase 2 | ✓ Planned |
+| Phase 3 uses `genex/llm` as the first host/extension ownership migration and `genex/http` / AI bindings as the next pool-or-factory migrations | These are the clearest remaining extension-side concurrency surfaces after Phase 2 | ✓ Executing |
+| Resolve the dynamic `genex/llm` boundary with an explicit exported-function bridge plus host-owned `Model` / `Session` wrappers fronted by one host-owned actor | Live extension-owned `Value` returns across the dylib boundary proved unstable; host-owned wrappers preserve the public API while keeping backend handles internal | ✓ Complete (`03-02`) |
 
 ## Evolution
 
@@ -116,4 +117,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-19 after Phase 1.5 execution and verification pass*
+*Last updated: 2026-04-21 after Phase 3 `03-02` execution*

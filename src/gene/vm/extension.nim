@@ -8,6 +8,7 @@ when defined(gene_wasm):
 
 when not defined(gene_wasm):
   import ../serdes
+  import std/json
   import dynlib
   import ./extension_abi
   import ./actor
@@ -111,6 +112,72 @@ var host_scheduler_callback_entries: seq[HostSchedulerCallbackEntry] = @[]
 var host_scheduler_dispatcher_registered = false
 var registered_extension_ports*: Table[string, RegisteredExtensionPort] = initTable[string, RegisteredExtensionPort]()
 var llm_host_bridge: LlmHostBridge = nil
+
+proc host_json_to_gene(node: JsonNode): Value =
+  case node.kind
+  of JNull:
+    NIL
+  of JBool:
+    node.getBool.to_value()
+  of JInt:
+    node.getInt.to_value()
+  of JFloat:
+    node.getFloat.to_value()
+  of JString:
+    node.getStr.to_value()
+  of JArray:
+    let arr = new_array_value()
+    for item in node:
+      array_data(arr).add(host_json_to_gene(item))
+    arr
+  of JObject:
+    let m = new_map_value()
+    for key, value in node:
+      map_data(m)[key.to_key()] = host_json_to_gene(value)
+    m
+
+proc gene_to_host_json(value: Value): JsonNode =
+  case value.kind
+  of VkNil:
+    newJNull()
+  of VkBool:
+    %*value.to_bool
+  of VkInt:
+    %*value.to_int
+  of VkFloat:
+    %*value.to_float
+  of VkString, VkSymbol:
+    %*value.str
+  of VkArray:
+    let arr = newJArray()
+    for item in array_data(value):
+      arr.add(gene_to_host_json(item))
+    arr
+  of VkMap:
+    let obj = newJObject()
+    for key, item in map_data(value):
+      obj[cast[Value](key).str] = gene_to_host_json(item)
+    obj
+  else:
+    %*($value)
+
+proc http_json_parse_native(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                            has_keyword_args: bool): Value {.gcsafe.} =
+  discard vm
+  if get_positional_count(arg_count, has_keyword_args) < 1:
+    raise new_exception(types.Exception, "json_parse requires 1 argument (json_string)")
+  let json_arg = get_positional_arg(args, 0, has_keyword_args)
+  if json_arg.kind != VkString:
+    raise new_exception(types.Exception, "json_parse requires a string argument")
+  host_json_to_gene(parseJson(json_arg.str))
+
+proc http_json_stringify_native(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                                has_keyword_args: bool): Value {.gcsafe.} =
+  discard vm
+  if get_positional_count(arg_count, has_keyword_args) < 1:
+    raise new_exception(types.Exception, "json_stringify requires 1 argument")
+  let json_str = $gene_to_host_json(get_positional_arg(args, 0, has_keyword_args))
+  json_str.to_value()
 
 proc current_llm_bridge(): LlmHostBridge {.gcsafe.} =
   {.cast(gcsafe).}:
@@ -716,6 +783,9 @@ proc load_extension*(vm: ptr VirtualMachine, path: string): Namespace =
 
     if ext_name == "llm":
       install_llm_host_bridge(ext_ns, handle)
+    elif ext_name == "http":
+      ext_ns["json_parse".to_key()] = NativeFn(http_json_parse_native).to_value()
+      ext_ns["json_stringify".to_key()] = NativeFn(http_json_stringify_native).to_value()
 
     result = ext_ns
 

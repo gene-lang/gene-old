@@ -1,4 +1,5 @@
 import locks, tables, osproc
+import asyncfutures
 import std/exitprocs
 
 import ../types
@@ -528,12 +529,13 @@ proc actor_send_value*(vm: ptr VirtualMachine, actor_value: Value, payload: Valu
   var future_obj: FutureObj = nil
   let future_val = new_ref(VkFuture)
   if reply_requested:
+    let nim_fut = newFuture[Value]("actor_send_expect_reply")
     future_obj = FutureObj(
       state: FsPending,
       value: NIL,
       success_callbacks: @[],
       failure_callbacks: @[],
-      nim_future: nil
+      nim_future: nim_fut
     )
     vm.thread_futures[message_id] = future_obj
     vm.poll_enabled = true

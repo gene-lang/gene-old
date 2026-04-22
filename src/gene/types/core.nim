@@ -67,6 +67,7 @@ template gene*(v: Value): ptr Gene =
 
 # String/symbol helpers
 proc new_str*(s: string): ptr String
+proc new_ref_string_value*(s: string): Value
 proc new_str_value*(s: string): Value
 proc str*(v: Value): string {.inline.}
 converter to_value*(v: char): Value {.inline.}

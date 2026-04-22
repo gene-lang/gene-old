@@ -1,9 +1,9 @@
 # Requirements: Gene Actor Runtime Migration
 
 **Defined:** 2026-04-17
-**Core Value:** Phase 0 must make Gene's runtime ownership and publication
-semantics safe enough for later actor work without destabilizing the existing
-VM.
+**Core Value:** The remaining migration work must move extension-owned mutable
+resources behind actor-safe or bridge-safe ownership boundaries without
+breaking the public Gene APIs added in earlier phases.
 
 ## v1 Requirements (Phase 0 — Complete)
 
@@ -93,6 +93,10 @@ VM.
 - **ACT-03**: Migrate process-global native resources behind port actors.
 - **ACT-04**: Deprecate the legacy thread API after the actor API is verified.
 
+**Phase 3 status:** `03-01` and `03-02` are complete. The LLM lane now uses an
+explicit exported-function ABI, host-owned `Model` / `Session` wrappers, and a
+host-owned singleton actor front instead of live extension-owned objects.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -124,15 +128,15 @@ VM.
 | NAME-01 | Phase 1 | Complete |
 | CLO-01 | Phase 1.5 | Complete |
 | ACT-02 | Phase 2 | Complete |
-| ACT-03 | Phase 3 | Deferred |
+| ACT-03 | Phase 3 | Executing (`03-01` and `03-02` complete) |
 | ACT-04 | Phase 4 | Deferred |
 
 **Coverage:**
 - v1 requirements (Phase 0): 9 complete
 - v2 requirements (Phase 1): 7 complete
-- v3 requirements (Phase 1.5+): 2 complete, 2 deferred
+- v3 requirements (Phase 1.5+): 2 complete, 1 executing, 1 deferred
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-17*
-*Last updated: 2026-04-19 after Phase 1.5 completion*
+*Last updated: 2026-04-21 after Phase 3 `03-02` execution*
