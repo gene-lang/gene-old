@@ -91,6 +91,10 @@ proc prepare_actor_payload_for_send*(payload: Value): tuple[tier: ActorSendTier,
     if payload.deep_frozen and payload.shared:
       return (AstSharedFrozen, payload)
     raise actor_transport_error(payload)
+  of VkActor:
+    if payload.ref.actor == nil:
+      raise actor_transport_error(payload)
+    (AstByValue, Actor(id: payload.ref.actor.id).to_value())
   of VkArray, VkMap, VkGene:
     if payload.deep_frozen and payload.shared:
       return (AstSharedFrozen, payload)
@@ -123,6 +127,10 @@ proc clone_actor_payload(payload: Value, seen: var Table[uint64, Value]): Value 
     if payload.deep_frozen and payload.shared:
       return payload
     raise actor_transport_error(payload)
+  of VkActor:
+    if payload.ref.actor == nil:
+      raise actor_transport_error(payload)
+    Actor(id: payload.ref.actor.id).to_value()
   of VkArray:
     if payload.deep_frozen and payload.shared:
       return payload
@@ -191,13 +199,12 @@ proc actor_wake_worker(thread_id, actor_id: int) =
 
   var wake: ThreadMessage
   new(wake)
-  wake.id = next_message_id
+  wake.id = next_thread_message_id()
   wake.msg_type = MtSend
   wake.payload = actor_id.to_value()
   wake.payload_bytes = ThreadPayload(bytes: @[])
   wake.from_thread_id = current_thread_id
   wake.from_thread_secret = THREADS[current_thread_id].secret
-  next_message_id.inc()
   THREAD_DATA[thread_id].channel.send(wake)
 
 proc actor_signal_space(record: ActorRuntimeRecord) =
@@ -219,6 +226,9 @@ proc actor_enqueue_message(record: ActorRuntimeRecord, msg: ActorMailboxMessage,
     raise new_exception(types.Exception, "Actor is stopped")
 
   if from_actor and record.mailbox.len >= record.mailbox_limit:
+    if record.pending_sends.len >= record.mailbox_limit:
+      release(record.lock)
+      raise new_exception(types.Exception, "Actor mailbox is full")
     record.pending_sends.add(msg)
     release(record.lock)
     return
@@ -273,10 +283,13 @@ proc actor_spawn_value*(handler: Value, state: Value = NIL): Value =
     raise new_exception(types.Exception, "gene/actor/spawn requires gene/actor/enable first")
   if actor_worker_ids.len == 0:
     raise new_exception(types.Exception, "Actor runtime has no available workers")
-  if handler.kind notin {VkFunction, VkNativeFn, VkBlock}:
+  if handler.kind == VkBlock:
+    raise new_exception(types.Exception, "gene/actor/spawn does not accept block handlers; use fn")
+  if handler.kind notin {VkFunction, VkNativeFn}:
     raise new_exception(types.Exception, "gene/actor/spawn expects a callable handler")
   if handler.kind == VkFunction:
     discard freeze_value(handler)
+  let routed_state = prepare_actor_payload_for_send(state)
 
   let worker_id = actor_worker_ids[actor_rr_index mod actor_worker_ids.len]
   actor_rr_index.inc()
@@ -287,7 +300,7 @@ proc actor_spawn_value*(handler: Value, state: Value = NIL): Value =
     actor: actor_handle,
     thread_id: worker_id,
     handler: handler,
-    state: state,
+    state: routed_state.value,
     stopped: false,
     mailbox: @[],
     pending_sends: @[],
@@ -351,7 +364,7 @@ proc send_actor_reply(msg: ActorMailboxMessage, payload: Value) {.gcsafe.} =
 
   var reply: ThreadMessage
   new(reply)
-  reply.id = next_message_id
+  reply.id = next_thread_message_id()
   reply.msg_type = MtReply
   reply.payload = NIL
   reply.payload_bytes = ThreadPayload(bytes: @[])
@@ -361,7 +374,6 @@ proc send_actor_reply(msg: ActorMailboxMessage, payload: Value) {.gcsafe.} =
   reply.from_message_id = msg.from_message_id
   reply.from_thread_id = current_thread_id
   reply.from_thread_secret = THREADS[current_thread_id].secret
-  next_message_id.inc()
   THREAD_DATA[msg.from_thread_id].channel.send(reply)
 
 proc send_actor_reply_from_context(ctx: ActorContext, payload: Value) {.gcsafe.} =
@@ -376,7 +388,7 @@ proc send_actor_reply_from_context(ctx: ActorContext, payload: Value) {.gcsafe.}
 
   var reply: ThreadMessage
   new(reply)
-  reply.id = next_message_id
+  reply.id = next_thread_message_id()
   reply.msg_type = MtReply
   reply.payload = NIL
   reply.payload_bytes = ThreadPayload(bytes: @[])
@@ -386,7 +398,6 @@ proc send_actor_reply_from_context(ctx: ActorContext, payload: Value) {.gcsafe.}
   reply.from_message_id = ctx.reply_message_id
   reply.from_thread_id = current_thread_id
   reply.from_thread_secret = THREADS[current_thread_id].secret
-  next_message_id.inc()
   THREAD_DATA[ctx.reply_thread_id].channel.send(reply)
   ctx.reply_sent = true
 
@@ -439,7 +450,7 @@ proc actor_process_message(msg: ThreadMessage) =
   try:
     let next_state =
       case handler.kind
-      of VkFunction, VkBlock:
+      of VkFunction:
         vm_exec_callable(VM, handler, @[ctx.to_value(), mailbox_msg.payload, actor_state])
       of VkNativeFn:
         call_native_fn(handler.ref.native_fn, VM, @[ctx.to_value(), mailbox_msg.payload, actor_state])
@@ -510,7 +521,7 @@ proc actor_send_value*(vm: ptr VirtualMachine, actor_value: Value, payload: Valu
 
   let routed = prepare_actor_payload_for_send(payload)
 
-  let message_id = next_message_id
+  let message_id = next_thread_message_id()
   var future_obj: FutureObj = nil
   let future_val = new_ref(VkFuture)
   if reply_requested:
@@ -533,8 +544,6 @@ proc actor_send_value*(vm: ptr VirtualMachine, actor_value: Value, payload: Valu
     from_thread_id: current_thread_id,
     from_thread_secret: THREADS[current_thread_id].secret
   )
-  next_message_id.inc()
-
   try:
     actor_enqueue_message(record, msg, current_actor_record != nil)
   except CatchableError:
@@ -744,13 +753,12 @@ proc shutdown_actor_runtime*() =
 
     var term: ThreadMessage
     new(term)
-    term.id = next_message_id
+    term.id = next_thread_message_id()
     term.msg_type = MtTerminate
     term.payload = NIL
     term.payload_bytes = ThreadPayload(bytes: @[])
     term.from_thread_id = current_thread_id
     term.from_thread_secret = THREADS[current_thread_id].secret
-    next_message_id.inc()
     THREAD_DATA[thread_id].channel.send(term)
     joinThread(THREAD_DATA[thread_id].thread)
     THREAD_DATA[thread_id].channel = nil

@@ -7,6 +7,10 @@ when defined(gene_wasm):
   var THREAD_MESSAGE_CLASS_VALUE*: Value = NIL
   var next_message_id* {.threadvar.}: int
 
+  proc next_thread_message_id*(): int =
+    result = next_message_id
+    next_message_id.inc()
+
   proc init_thread_pool*() =
     next_message_id = 0
     THREADS[0].id = 0

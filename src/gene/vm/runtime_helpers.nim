@@ -140,7 +140,7 @@ when not defined(gene_wasm):
               if msg.msg_type == MtRunExpectReply:
                 let ser = serialize_literal(result)
                 let reply = ThreadMessage(
-                  id: next_message_id,
+                  id: next_thread_message_id(),
                   msg_type: MtReply,
                   payload: NIL,
                   payload_bytes: ThreadPayload(bytes: string_to_bytes(ser.to_s())),
@@ -148,7 +148,6 @@ when not defined(gene_wasm):
                   from_thread_id: thread_id,
                   from_thread_secret: THREADS[thread_id].secret
                 )
-                next_message_id += 1
                 THREAD_DATA[msg.from_thread_id].channel.send(reply)
             except CatchableError as e:
               when not defined(release):
@@ -160,7 +159,7 @@ when not defined(gene_wasm):
                 map_data(error_payload)["message".to_key()] = e.msg.to_value()
                 let ser = serialize_literal(error_payload)
                 let reply = ThreadMessage(
-                  id: next_message_id,
+                  id: next_thread_message_id(),
                   msg_type: MtReply,
                   payload: NIL,
                   payload_bytes: ThreadPayload(bytes: string_to_bytes(ser.to_s())),
@@ -168,7 +167,6 @@ when not defined(gene_wasm):
                   from_thread_id: thread_id,
                   from_thread_secret: THREADS[thread_id].secret
                 )
-                next_message_id += 1
                 THREAD_DATA[msg.from_thread_id].channel.send(reply)
 
           of MtSend, MtSendExpectReply:
@@ -202,14 +200,13 @@ when not defined(gene_wasm):
             if msg.msg_type == MtSendExpectReply and not msg.handled:
               var reply: ThreadMessage
               new(reply)
-              reply.id = next_message_id
+              reply.id = next_thread_message_id()
               reply.msg_type = MtReply
               reply.payload = NIL
               reply.payload_bytes = ThreadPayload(bytes: @[])
               reply.from_message_id = msg.id
               reply.from_thread_id = thread_id
               reply.from_thread_secret = THREADS[thread_id].secret
-              next_message_id += 1
               THREAD_DATA[msg.from_thread_id].channel.send(reply)
 
           of MtRegisterCallback:
@@ -252,15 +249,14 @@ when not defined(gene_wasm):
     # Create message - use new() to allocate to avoid GC issues with threading
     var msg: ThreadMessage
     new(msg)
-    msg.id = next_message_id
+    msg.id = next_thread_message_id()
     msg.msg_type = if return_value: MtRunExpectReply else: MtRun
     msg.payload = NIL
     msg.payload_bytes = ThreadPayload(bytes: @[])
     msg.code = code
     msg.from_thread_id = current_thread_id
     msg.from_thread_secret = THREADS[current_thread_id].secret
-    let message_id = next_message_id
-    next_message_id += 1
+    let message_id = msg.id
 
     # Send message to thread (send the ref directly)
     THREAD_DATA[thread_id].channel.send(msg)

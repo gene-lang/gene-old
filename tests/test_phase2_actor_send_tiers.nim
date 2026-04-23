@@ -1,4 +1,4 @@
-import std/[os, tables, times, unittest]
+import std/[os, strutils, tables, times, unittest]
 
 import ../src/gene/types except Exception
 import ../src/gene/stdlib/freeze
@@ -109,6 +109,32 @@ proc forwarder_handler(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], 
     actor_reply_for_test(ctx, "continued".to_value())
   target
 
+proc state_echo_handler(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                        has_keyword_args: bool): Value {.gcsafe, nimcall.} =
+  discard vm
+  discard arg_count
+  let ctx = get_positional_arg(args, 0, has_keyword_args)
+  let state = get_positional_arg(args, 2, has_keyword_args)
+
+  {.cast(gcsafe).}:
+    actor_reply_for_test(ctx, map_data(state)["count".to_key()])
+  state
+
+proc overflow_forwarder_handler(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int,
+                                has_keyword_args: bool): Value {.gcsafe, nimcall.} =
+  discard arg_count
+  let ctx = get_positional_arg(args, 0, has_keyword_args)
+  let target = get_positional_arg(args, 2, has_keyword_args)
+
+  {.cast(gcsafe).}:
+    try:
+      discard actor_send_value(vm, target, actor_message("parked-one"))
+      discard actor_send_value(vm, target, actor_message("parked-two"))
+      actor_reply_for_test(ctx, "unexpected".to_value())
+    except CatchableError as exc:
+      actor_reply_for_test(ctx, exc.msg.to_value())
+  target
+
 suite "Phase 2 actor send tiers":
   test "primitive payloads route by value":
     let routed = prepare_actor_payload_for_send(42.to_value())
@@ -174,6 +200,47 @@ suite "Phase 2 actor send tiers":
     expect types.Exception:
       discard prepare_actor_payload_for_send(NativeFn(native_stub).to_value())
 
+  test "actor handles clone as sendable references":
+    let actor = Actor(id: 42).to_value()
+
+    let routed = prepare_actor_payload_for_send(actor)
+
+    check routed.tier == AstByValue
+    check routed.value.kind == VkActor
+    check routed.value.ref.actor.id == 42
+    check raw_id(routed.value) != raw_id(actor)
+
+  test "block handlers are rejected at actor spawn":
+    init_thread_pool()
+    init_app_and_vm()
+    init_stdlib()
+    init_actor_runtime()
+    actor_enable_for_test(1)
+
+    let block_ref = new_ref(VkBlock)
+
+    expect types.Exception:
+      discard actor_spawn_value(block_ref.to_ref_value(), NIL)
+
+  test "actor spawn clones mutable initial state":
+    init_thread_pool()
+    init_app_and_vm()
+    init_stdlib()
+    init_actor_runtime()
+    actor_enable_for_test(1)
+
+    let initial_state = new_map_value({
+      "count".to_key(): 1.to_value()
+    }.toTable())
+    let actor = actor_spawn_value(NativeFn(state_echo_handler).to_value(), initial_state)
+    map_data(initial_state)["count".to_key()] = 9.to_value()
+
+    let actor_state = await_actor_future(
+      actor_send_value(VM, actor, actor_message("get"), true)
+    )
+
+    check actor_state == 1.to_value()
+
   test "full mailboxes park actor-originated sends instead of blocking the sender worker":
     init_thread_pool()
     init_app_and_vm()
@@ -196,6 +263,34 @@ suite "Phase 2 actor send tiers":
 
     check forward_result == "continued".to_value()
     check elapsed_ms < 150.0
+
+    sleep(300)
+    let processed = await_actor_future(
+      actor_send_value(VM, target, actor_message("get"), true)
+    )
+
+    check processed == 3.to_value()
+
+  test "actor-originated sends fail fast when parked send queue is full":
+    init_thread_pool()
+    init_app_and_vm()
+    init_stdlib()
+    init_actor_runtime()
+    set_actor_mailbox_limit_for_test(1)
+    actor_enable_for_test(2)
+
+    let target = actor_spawn_value(NativeFn(target_handler).to_value(), 0.to_value())
+    let forwarder = actor_spawn_value(NativeFn(overflow_forwarder_handler).to_value(), target)
+
+    discard actor_send_value(VM, target, actor_message("hold"))
+    discard actor_send_value(VM, target, actor_message("queued"))
+
+    let forward_result = await_actor_future(
+      actor_send_value(VM, forwarder, actor_message("overflow"), true)
+    )
+
+    check forward_result.kind == VkString
+    check "Actor mailbox is full" in forward_result.str
 
     sleep(300)
     let processed = await_actor_future(

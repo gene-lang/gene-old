@@ -104,6 +104,16 @@ var THREAD_MESSAGE_CLASS_VALUE*: Value
 # Thread pool management
 var thread_pool_lock: Lock
 var next_message_id* {.threadvar.}: int
+var message_id_lock: Lock
+var next_shared_message_id = 0
+
+initLock(message_id_lock)
+
+proc next_thread_message_id*(): int =
+  acquire(message_id_lock)
+  result = next_shared_message_id
+  next_shared_message_id.inc()
+  release(message_id_lock)
 
 proc init_thread_pool*() =
   ## Initialize the thread pool (call once from main thread).
@@ -111,6 +121,9 @@ proc init_thread_pool*() =
   randomize()  # Initialize random number generator
   initLock(thread_pool_lock)
   next_message_id = 0
+  acquire(message_id_lock)
+  next_shared_message_id = 0
+  release(message_id_lock)
 
   # Terminate and clean up any existing worker threads/channels.
   # Iterate over current slot count (may differ from target on re-init).
@@ -120,7 +133,7 @@ proc init_thread_pool*() =
       # Ask the worker to exit and wait for it to finish
       var term: ThreadMessage
       new(term)
-      term.id = next_message_id
+      term.id = next_thread_message_id()
       term.msg_type = MtTerminate
       term.payload = NIL
       term.payload_bytes = ThreadPayload(bytes: @[])
