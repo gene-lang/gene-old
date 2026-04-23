@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: ready
 stopped_at: Phase 04 complete
-last_updated: "2026-04-22T23:59:00Z"
-last_activity: 2026-04-22 -- Phase 04 removed the public thread-first surface and closed the actor migration track
+last_updated: "2026-04-23T19:24:14Z"
+last_activity: 2026-04-23 -- Completed quick task 260423-le7: Harden actor runtime concurrency concerns
 progress:
   total_phases: 6
   completed_phases: 6
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-22)
 Phase: 04 (remove-legacy-thread-first-concurrency-surfaces) — COMPLETE
 Plan: 3 of 3
 Status: Actor migration complete
-Last activity: 2026-04-22 -- Phase 04 removed the public thread-first surface and closed the actor migration track
+Last activity: 2026-04-23 -- Completed quick task 260423-le7: Harden actor runtime concurrency concerns
 Depends on completed Phase 03 across `bf4661f`..`593189a`
 
 Progress: [██████████] 100%
@@ -119,8 +119,13 @@ None yet.
 
 ### Blockers/Concerns
 
-- `gsd-sdk` is not installed on this machine; the plan-phase workflow's INIT
-  JSON parse path is bypassed and phase variables are wired manually.
+- None currently.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260423-le7 | Harden actor runtime concurrency concerns while ignoring `__thread_error__` envelope | 2026-04-23 | e0a28df | [260423-le7-harden-actor-runtime-concurrency-concern](./quick/260423-le7-harden-actor-runtime-concurrency-concern/) |
 
 ## Deferred Items
 
