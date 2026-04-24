@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: milestone
-status: ready_to_execute
-stopped_at: Phase 08 planned
-last_updated: "2026-04-24T21:10:59.325Z"
-last_activity: 2026-04-24
+status: complete
+stopped_at: Phase 08 completed
+last_updated: "2026-04-24T22:13:38Z"
+last_activity: 2026-04-24 -- Phase 08 completed
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 4
-  completed_plans: 3
-  percent: 75
+  completed_plans: 4
+  percent: 100
 ---
 
 # Project State
@@ -21,17 +21,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-24)
 
 **Core value:** Gene should feel trustworthy to build on: users can tell what is stable, import packages deterministically, and rely on VM invariants being actively checked.
-**Current focus:** Phase 08 - VM correctness harness
+**Current focus:** v1.1 milestone complete
 
 ## Current Position
 
-Phase: 8
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-04-24
+Phase: 8 — COMPLETE
+Plan: 1 of 1
+Status: Phase 08 complete
+Last activity: 2026-04-24 -- Phase 08 completed
 Depends on completed actor migration milestone through Phase 04
 
-Progress: [########--] 75%
+Progress: [##########] 100%
 
 ## Performance Metrics
 
@@ -52,7 +52,7 @@ Progress: [########--] 75%
 | 5 | 1 | 3 min | 3 min |
 | 6 | 1 | - | - |
 | 7 | 1 | - | - |
-| 8 | TBD | - | - |
+| 8 | 1 | - | - |
 
 ## Accumulated Context
 
@@ -136,6 +136,17 @@ Recent decisions affecting current work:
   local package imports honor manifest `^source-dir`, manifest
   `^main-module`, and app lockfile dependency edges.
 
+- [Phase 08]: VM correctness support is opt-in/debug-only: build with
+  `-d:geneVmChecks`, enable `--checked-vm`, and keep optimized default
+  execution unchecked.
+
+- [Phase 08]: Instruction metadata is centralized in
+  `src/gene/types/instruction_metadata.nim`; unsupported dynamic edges stay
+  visible through `metadata_gap_kinds`.
+
+- [Phase 08]: `void` is now a compilable and serializable sentinel literal so
+  user code can branch on missing selector results with `(if (g/x == void) ...)`.
+
 ### Pending Todos
 
 None yet.
@@ -164,8 +175,8 @@ None yet.
 ## Session Continuity
 
 Last session: --stopped-at
-Stopped at: Phase 08 planned
-Next step: Execute Phase 08 VM correctness harness
+Stopped at: Phase 08 completed
+Next step: Archive or audit the v1.1 milestone, then start the next milestone
 Resume file: --resume-file
 
 **Planned Phase:** 08 (vm-correctness-harness) — 1 plans — 2026-04-24T21:10:59.319Z

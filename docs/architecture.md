@@ -41,6 +41,15 @@ source.gene ──► Parser ──► AST ──► Compiler ──► Compilat
 - Async I/O with event loop integration; VM polls asyncdispatch every 100 instructions.
 - Includes tracing (`VM.trace`), profiling (`VM.profiling`, `instruction_profiling`), and GIR-aware execution.
 
+### VM Correctness Checks
+
+- `checked VM mode` is a debug/test harness, not the default execution mode.
+- The check hooks are compiled only when the binary is built with `-d:geneVmChecks`.
+- `VirtualMachine.checked_vm` defaults to `false`; `run`, `eval`, and `pipe` enable it only through `--checked-vm`.
+- In normal builds, `--checked-vm` fails early with guidance to rebuild using `-d:geneVmChecks`.
+- Checked mode validates structural runtime-state invariants around dispatch: program counter range, compilation-unit presence, instruction trace shape, stack underflow/overflow projections, local/scope bounds, exception handler shape, and selected refcount boundary checks.
+- Failures are reported as `VM invariant failed` diagnostics with the current PC, opcode kind, boundary label, and detail. The checks are intentionally practical boundary assertions, not full retain/release accounting or formal proof of every exception-flow transition.
+
 ## Value Representation (`src/gene/types/`)
 
 The type system is modularised across several files:
@@ -174,9 +183,10 @@ IkEnd
 
 ## Gene IR (GIR) Details
 
-- `GIR_VERSION` (currently 2) tracks the IR format version.
+- `GIR_VERSION` (currently 22) tracks the IR format version.
 - `VALUE_ABI_VERSION` (currently 2) tracks the Value representation version — changed when NaN-boxing layout changes.
-- Header includes compiler fingerprint, timestamp, source hash, and debug flags for cache validation.
+- `INSTRUCTION_ABI_VERSION` (currently 3) tracks instruction encoding/layout compatibility.
+- Header includes compiler fingerprint, VM ABI marker, timestamp, source hash, and debug flags for cache validation.
 - `gene compile` writes GIR files; `gene run` can execute them directly or use cached versions from `build/`.
 
 ## Current Pain Points

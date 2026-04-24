@@ -124,18 +124,28 @@ gene compile -o out src/app/main.gene  ->  out/src/app/main.gir
 ## GIR validity & cache rules
 
 A `.gir` is considered **valid** when:
-- `ir_version` matches the VM’s supported range
-- `compiler_version` / `vm_abi` fingerprint is compatible
-- The embedded **source+deps hash** matches current inputs (or the `.gir` has a **publish** flag that opts out of cache checks)
+- `GIR_VERSION` matches the VM's supported format version
+- `COMPILER_VERSION` matches the compiler that produced the artifact
+- `VALUE_ABI_VERSION` is present in the VM ABI marker
+- `INSTRUCTION_ABI_VERSION` is present in the VM ABI marker
+- The embedded **source hash** still matches the current source file
 
 If any check fails, the loader will refuse the artifact and (when invoked via `gene run x.gene`) fall back to recompilation.
+Direct `gene run x.gir` loads fail with diagnostics that include the path,
+expected value, actual value, and recompile guidance.
 
 **Flags embedded in `.gir`:**
-- `ir_version` — bump on incompatible IR changes
-- `compiler_version` — string or hash
-- `vm_abi` — endianness, word-size, NaN-boxing schema, etc.
+- `GIR_VERSION` — bump on incompatible IR format changes
+- `COMPILER_VERSION` — compiler semantic version/fingerprint
+- `vm_abi` — Nim version, word size, `VALUE_ABI_VERSION`, and `INSTRUCTION_ABI_VERSION`
 - `debug` — whether line/col maps are present
-- `published` — treat as a release artifact; skip local source hash checks
+- `published` — reserved release-artifact marker
+- `source hash` — hash of the source text used by cache validation
+
+The source runner checks headers before using a cached `.gir`. Stale compiler
+versions, Value ABI mismatches, instruction ABI mismatches, bad magic, bad GIR
+versions, and source hash mismatches all invalidate the cache and trigger a
+source recompile.
 
 ---
 

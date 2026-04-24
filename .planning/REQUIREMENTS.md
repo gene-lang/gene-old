@@ -55,16 +55,16 @@ Requirements for the current milestone. Each maps to exactly one roadmap phase.
 
 ### VM Correctness
 
-- [ ] **VMCHK-01**: Runtime maintainers can run a checked VM mode that validates
+- [x] **VMCHK-01**: Runtime maintainers can run a checked VM mode that validates
   core instruction invariants without affecting optimized default execution.
-- [ ] **VMCHK-02**: Instruction metadata exists for stack effects, operands,
+- [x] **VMCHK-02**: Instruction metadata exists for stack effects, operands,
   reference/lifetime behavior, and debug formatting for the currently supported
   opcode set.
-- [ ] **VMCHK-03**: GIR compatibility checks fail clearly for stale or
+- [x] **VMCHK-03**: GIR compatibility checks fail clearly for stale or
   incompatible bytecode caches and are covered by regression tests.
-- [ ] **VMCHK-04**: Parser, serializer/deserializer, and GIR round-trip stress
+- [x] **VMCHK-04**: Parser, serializer/deserializer, and GIR round-trip stress
   coverage exists for representative stable-core values and failure paths.
-- [ ] **VMCHK-05**: Checked-mode failures produce actionable diagnostics that
+- [x] **VMCHK-05**: Checked-mode failures produce actionable diagnostics that
   identify the instruction or runtime boundary that violated an invariant.
 
 ## Future Requirements
@@ -118,11 +118,11 @@ Deferred to later milestones.
 | PKG-04 | Phase 7 | Complete |
 | PKG-05 | Phase 7 | Complete |
 | PKG-06 | Phase 7 | Complete |
-| VMCHK-01 | Phase 8 | Pending |
-| VMCHK-02 | Phase 8 | Pending |
-| VMCHK-03 | Phase 8 | Pending |
-| VMCHK-04 | Phase 8 | Pending |
-| VMCHK-05 | Phase 8 | Pending |
+| VMCHK-01 | Phase 8 | Complete |
+| VMCHK-02 | Phase 8 | Complete |
+| VMCHK-03 | Phase 8 | Complete |
+| VMCHK-04 | Phase 8 | Complete |
+| VMCHK-05 | Phase 8 | Complete |
 
 **Coverage:**
 - v1.1 requirements: 19 total
@@ -131,4 +131,4 @@ Deferred to later milestones.
 
 ---
 *Requirements defined: 2026-04-24*
-*Last updated: 2026-04-24 after Phase 07 completion*
+*Last updated: 2026-04-24 after Phase 08 completion*

@@ -1,4 +1,4 @@
-import unittest, os
+import unittest, os, strutils
 
 import gene/parser
 import gene/compiler
@@ -55,7 +55,7 @@ proc check_array_strings(value: Value, expected: openArray[string]) =
     check item == expected[idx].to_value()
 
 suite "stable core stress":
-  test "parser roundtrips void-checking selector forms":
+  test "stable-core stress parser round trips representative values":
     for source in [
       "#(item ^present nil nil)",
       "{^present nil}",
@@ -88,7 +88,7 @@ suite "stable core stress":
       "case-nil",
     ])
 
-  test "literal containers roundtrip through serdes":
+  test "stable-core stress serdes round trips representative values":
     init_all()
     init_serdes()
     for source in [
@@ -102,7 +102,7 @@ suite "stable core stress":
       let roundtripped = deserialize(serialized)
       check value_to_gene_str(roundtripped) == value_to_gene_str(value)
 
-  test "stable core programs survive direct GIR roundtrip":
+  test "stable-core stress GIR round trips representative programs":
     let gir_path = "build/tests/stable_core_stress.gir"
     createDir(parentDir(gir_path))
 
@@ -118,7 +118,7 @@ suite "stable core stress":
     check loaded.inline_caches.len == loaded.instructions.len
     check loaded.skip_return == compiled.skip_return
 
-  test "run command executes stable core program from cached GIR":
+  test "stable-core stress cached GIR execution preserves void checks":
     let source_path = absolutePath("tmp/stable_core_cached.gene")
     createDir(parentDir(source_path))
     writeFile(source_path, cleanup("""
@@ -151,3 +151,26 @@ suite "stable core stress":
 
     let second = run_command.handle("run", @[source_path])
     check second.success
+
+  test "stable-core stress failure paths are deterministic":
+    let source_path = absolutePath("tmp/stable_core_failure.gene")
+    createDir(parentDir(source_path))
+    writeFile(source_path, cleanup("""
+      (var g `(item ^present nil nil))
+      (assert ((g/x == nil) == true))
+    """))
+
+    let gir_path = gir.get_gir_path(source_path, "build")
+    if fileExists(gir_path):
+      removeFile(gir_path)
+
+    defer:
+      if fileExists(source_path):
+        removeFile(source_path)
+      if fileExists(gir_path):
+        removeFile(gir_path)
+
+    let result = run_command.handle("run", @[source_path])
+    check not result.success
+    check result.error.contains("^severity \"error\"")
+    check result.error.contains("^stage \"runtime\"")

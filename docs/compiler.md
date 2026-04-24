@@ -220,6 +220,24 @@ Key instruction categories:
 | Types | IkMatchGeneType, IkTryUnwrap | Type checking, Result/Option |
 | Modules | IkImport, IkExport | Module system |
 
+### Instruction Metadata
+
+`src/gene/types/instruction_metadata.nim` is the source of truth for
+instruction metadata. It records each opcode's stack effect, operand kinds,
+instruction family, reference/lifetime note, checked-mode coverage flag, and
+debug formatting behavior.
+
+The VM correctness harness uses this metadata to project stack effects before
+dispatch, validate selected operands such as jump targets and local indexes, and
+format instructions consistently. `Instruction` string rendering delegates to
+`format_instruction_debug`, so compiler output, trace output, and GIR inspection
+share the same operand formatting.
+
+`metadata_gap_kinds` lists opcodes whose dynamic behavior is not fully covered
+by the current checked-mode metadata. That list is intentional: new opcodes
+should either receive concrete metadata or be added as explicit staged gaps
+instead of silently being treated as checked.
+
 ### Scope Tracking
 
 The compiler maps variable names to integer indices at compile time:

@@ -31,7 +31,7 @@ starts at Phase 5.
 - [x] **Phase 7: Package/module MVP** - Parse `package.gene`, expose package
   metadata, support local dependency declarations, deterministic package-aware
   import resolution, and a local lockfile/verification path.
-- [ ] **Phase 8: VM correctness harness** - Add checked VM invariant support,
+- [x] **Phase 8: VM correctness harness** - Add checked VM invariant support,
   instruction metadata, GIR compatibility checks, and parser/serdes/GIR stress
   coverage without slowing optimized default execution.
 
@@ -141,7 +141,7 @@ instruction metadata scope is agreed.
 | 5. Feature status matrix and stable-core boundary | 1/1 | Complete | 2026-04-24 |
 | 6. Core semantics tightening | 1/1 | Complete | 2026-04-24 |
 | 7. Package/module MVP | 1/1 | Complete    | 2026-04-24 |
-| 8. VM correctness harness | 0/TBD | Not started | - |
+| 8. VM correctness harness | 1/1 | Complete | 2026-04-24 |
 
 ## Coverage
 
