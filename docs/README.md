@@ -6,6 +6,9 @@
 operational guidance. Design proposals, speculative work, and design-era docs
 for implemented subsystems now live under [`docs/proposals/`](proposals/README.md).
 
+Start with [feature-status.md](feature-status.md) for the public feature-status
+matrix and stable-core boundary.
+
 ## Spec Companion Docs
 
 - [generator_functions.md](generator_functions.md) — shipped generator semantics

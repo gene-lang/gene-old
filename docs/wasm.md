@@ -47,7 +47,7 @@ In wasm mode, effectful runtime operations route through host ABI wrappers:
 ## Unsupported Features in WASM
 
 These operations fail deterministically with `GENE.WASM.UNSUPPORTED`:
-- Thread spawn/messaging APIs (`threads`)
+- Actor-first public concurrency surface backed by native workers (`actors`)
 - Dynamic native extension loading (`dynamic_extension_loading`)
 - Process/shell execution (`process_exec`, `process_shell`)
 - File-backed module loading (`module_file_loading`)

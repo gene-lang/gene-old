@@ -16,7 +16,7 @@ This directory contains the canonical language specification for Gene, a homoico
 7. [Object-Oriented Programming](07-oop.md) — Classes, methods, inheritance, namespaces
 8. [Modules & Namespaces](08-modules.md) — Import, export, namespace system
 9. [Error Handling & Contracts](09-errors.md) — try/catch, throw, pre/postconditions
-10. [Async & Concurrency](10-async.md) — Futures, async/await, threads
+10. [Async & Concurrency](10-async.md) — Futures, async/await, actors, and the public concurrency surface
 11. [Generators](11-generators.md) — Generator functions, yield, iteration protocol
 12. [Pattern Matching](12-patterns.md) — Destructuring, case/when, ADTs
 13. [Regular Expressions](13-regex.md) — Regex literals, matching, replacement

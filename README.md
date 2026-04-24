@@ -15,12 +15,16 @@ This repository hosts the bytecode virtual machine (VM) implementation written i
 
 ## VM Status
 
+See [`docs/feature-status.md`](docs/feature-status.md) for the public feature
+status matrix and stable-core boundary.
+
 - **Available today**
   - Bytecode compiler + stack-based VM with computed-goto dispatch
   - S-expression parser compatible with the reference interpreter
   - Macro system with unevaluated argument support
   - Basic class system (`class`, `new`, nested classes) and namespaces
   - Async I/O with event loop integration (`async`, `await`)
+  - Actor-first concurrency through `gene/actor/*`
   - Command-line toolchain (`run`, `eval`, `repl`, `parse`, `compile`)
   - File I/O helpers via the `io` namespace (`io/read`, `io/write`, async variants)
 - **In progress / known limitations**
@@ -109,7 +113,7 @@ This produces:
 WASM mode exports `gene_eval(code: cstring): cstring` and uses host ABI wrappers for time/random/file effects.
 
 Current wasm limitations are explicit runtime errors with stable code `GENE.WASM.UNSUPPORTED` for:
-- thread APIs
+- actor/native worker-backed concurrency
 - dynamic native extension loading
 - process/shell execution
 - file-backed module loading and directory/delete filesystem operations
@@ -188,10 +192,10 @@ The Nim tests exercise compiler/VM internals, while the shell suite runs real Ge
 ## Documentation
 
 The documentation index in `docs/README.md` lists the current architecture notes, design discussions, and implementation diaries. Highlights include:
+- `docs/feature-status.md` — public feature-status matrix and stable-core boundary
 - `docs/architecture.md` — VM and compiler design overview
 - `docs/gir.md` — Gene Intermediate Representation format
 - `docs/performance.md` — benchmark data and optimisation roadmap
-- `docs/IMPLEMENTATION_STATUS.md` — snapshot of feature parity vs. the reference interpreter
 
 ## Performance
 
