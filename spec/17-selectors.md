@@ -47,6 +47,25 @@ people/users/<idx>/name   # => "Bob"
 
 The expression inside `<>` contributes exactly one path segment.
 
+## Selector behavior matrix
+
+| Situation | Result |
+|-----------|--------|
+| Missing key, index, property, or child | `void` |
+| Receiver is `nil` | `nil` |
+| Default argument on `./` or selector call | Replaces only `void` |
+| `/!` or selector `!` sees `void` | Throws |
+| `/!` or selector `!` sees `nil` | Throws |
+| Value stream `*` sees a `void` match | Drops that match |
+| Entry stream `**` sees a `void` value | Drops that entry |
+
+A default argument on `./` or selector call replaces only `void`; explicit
+`nil` remains `nil`.
+
+Stream value mode `*` drops `void` matches and collects remaining values into
+an array. Stream entry mode `**` drops entries whose values are `void`; `@@`
+collects remaining entries into a map.
+
 ## 17.3 Strict Access with `/!`
 
 Append `!` to assert that the current result is not missing:
@@ -194,9 +213,13 @@ user/profile/name                # => "Ada Lovelace"
 
 Current behavior is intentionally limited:
 
-- direct property or index updates are supported
+- `$set` supports exactly one selector segment for direct property or index updates
 - shorthand expansion is ergonomic
 - generalized multi-segment update/delete APIs are not yet specified
+
+$set supports exactly one selector segment for map properties, Gene properties,
+instance properties, array indices, and Gene child indices. Deep update and
+delete behavior remains unspecified.
 
 ## 17.9 Interaction with `void` and `nil`
 

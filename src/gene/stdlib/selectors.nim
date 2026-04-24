@@ -160,8 +160,10 @@ proc init_selector_class*(object_class: Class) =
         result = expand_iterable_entries(v)
 
     proc apply_lookup(base: Value, seg: Value): Value =
-      if base == VOID or base == NIL:
+      if base == VOID:
         return VOID
+      if base == NIL:
+        return NIL
       if has_custom_materializer(base):
         return apply_lookup(materialize_custom(base), seg)
 

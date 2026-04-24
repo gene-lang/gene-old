@@ -116,6 +116,11 @@ test_vm """
   (./ {} "a" 1)
 """, 1
 
+# slash default does not replace nil receiver
+test_vm """
+  (./ nil "a" 1)
+""", NIL
+
 test_vm """
   (var x {})
   x/a
@@ -284,6 +289,16 @@ test_vm """
   (@a/b data 123)
 """, 123
 
+# selector value nil receiver returns NIL
+test_vm """
+  (@a nil)
+""", NIL
+
+# selector default does not replace explicit NIL
+test_vm """
+  (@a {^a nil} 123)
+""", NIL
+
 test_vm """
   (var arr [{^name "n"}])
   (@0/name arr)
@@ -386,6 +401,7 @@ test_vm """
   check array_data(r).len == 1
   check array_data(r)[0] == 1.to_value()
 
+# stream mode drops VOID matches
 test_vm_error """
   (var data [[10] [20]])
   ((@ * 1 !) data)
@@ -525,6 +541,12 @@ test_vm """
   check r.kind == VkArray
   check array_data(r).len == 1
   check array_data(r)[0] == 1.to_value()
+
+# $set rejects deep selector updates
+test_vm_error """
+  (var data {^a {^b 1}})
+  ($set data @a/b 2)
+"""
 
 # test_vm """
 #   (class A)

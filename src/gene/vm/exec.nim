@@ -1131,15 +1131,20 @@ proc exec*(self: ptr VirtualMachine): Value =
         var target: Value
         self.frame.pop2(target)
 
-        if target == VOID or target == NIL:
+        if target == VOID:
           retain(default_val)
           self.frame.push(default_val)
+        elif target == NIL:
+          self.frame.push(NIL)
         else:
           if has_custom_materializer(target):
             target = materialize_custom(target)
-          if target == VOID or target == NIL:
+          if target == VOID:
             retain(default_val)
             self.frame.push(default_val)
+            continue
+          if target == NIL:
+            self.frame.push(NIL)
             continue
           case target.kind:
             of VkMap:
