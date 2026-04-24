@@ -54,6 +54,7 @@ template same_value_identity(a: Value, b: Value): bool =
   cast[uint64](a) == cast[uint64](b)
 
 include ./vm/core_helpers
+include ./vm/checks
 
 import ./vm/arithmetic
 import ./vm/generator

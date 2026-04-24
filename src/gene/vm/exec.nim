@@ -123,6 +123,10 @@ proc exec*(self: ptr VirtualMachine): Value =
     # Poll for async/thread events periodically
     self.poll_event_loop()
 
+    when defined(geneVmChecks):
+      let before_stack = if self.frame != nil: self.frame.stack_index else: 0'u16
+      self.check_before_instruction(inst[])
+
     when not defined(release):
       if self.trace:
         if inst.kind == IkStart: # This is part of INDENT_LOGIC
@@ -6686,6 +6690,9 @@ proc exec*(self: ptr VirtualMachine): Value =
         continue
       else:
         raise
+
+    when defined(geneVmChecks):
+      self.check_after_instruction(inst[], before_stack)
 
     # Record instruction timing
     when not defined(release):

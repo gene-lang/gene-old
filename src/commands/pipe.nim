@@ -18,6 +18,7 @@ type
     quote_str: bool
     filter: bool
     type_check: bool
+    checked_vm: bool
     native_tier: NativeCompileTier
     native_code: bool
     pkg: string
@@ -36,6 +37,7 @@ proc init*(manager: CommandManager) =
   manager.add_help("  --quote-str: output strings with quotes")
   manager.add_help("  --filter: treat code as predicate, output $line when true")
   manager.add_help("  --no-type-check: disable static type checking (alias: --no-typecheck)")
+  manager.add_help("  --checked-vm: enable checked VM invariants (requires -d:geneVmChecks build)")
   manager.add_help("  --native-code: enable native code execution (alias for --native-tier guarded)")
   manager.add_help("  --native-tier <never|guarded|fully-typed>: set native compilation policy")
 
@@ -49,6 +51,7 @@ let long_no_val = @[
   "filter",
   "no-typecheck",
   "no-type-check",
+  "checked-vm",
   "native-code",
 ]
 
@@ -92,6 +95,8 @@ proc parse_options(args: seq[string]): PipeOptions =
         result.filter = true
       of "no-typecheck", "no-type-check":
         result.type_check = false
+      of "checked-vm":
+        result.checked_vm = true
       of "native-code":
         result.native_code = true
         if result.native_tier == NctNever:
@@ -262,6 +267,9 @@ Notes:
   VM.native_tier = options.native_tier
   VM.native_code = options.native_tier != NctNever
   VM.type_check = options.type_check
+  if options.checked_vm:
+    require_checked_vm_available()
+    VM.checked_vm = true
   init_stdlib()
   set_program_args("<pipe>", @[])
 

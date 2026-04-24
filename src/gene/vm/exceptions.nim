@@ -33,6 +33,10 @@ proc dispatch_exception(self: ptr VirtualMachine, value: Value, inst: var ptr In
   var exception_value = value
   self.current_exception = exception_value
 
+  when defined(geneVmChecks):
+    if self.checked_vm_enabled:
+      self.check_exception_handlers(inst[], require_current_exception = true)
+
   if self.aop_contexts.len > 0:
     let ctx_idx = self.aop_contexts.len - 1
     if self.exception_handlers.len == 0 or self.exception_handlers.len - 1 < self.aop_contexts[ctx_idx].handler_depth:
@@ -134,5 +138,13 @@ proc pop_frame_exception_handlers(self: ptr VirtualMachine, frame: Frame) {.inli
   ## Remove any exception handlers tied to a frame that's being returned from.
   if frame == nil:
     return
+  when defined(geneVmChecks):
+    if self.checked_vm_enabled and frame.ref_count <= 0:
+      let inst =
+        if self.cu != nil and self.pc >= 0 and self.pc < self.cu.instructions.len:
+          self.cu.instructions[self.pc]
+        else:
+          Instruction(kind: IkReturn)
+      self.vm_invariant_failure(inst, "refcount", "returning frame ref_count <= 0")
   while self.exception_handlers.len > 0 and self.exception_handlers[^1].frame == frame:
     discard self.exception_handlers.pop()

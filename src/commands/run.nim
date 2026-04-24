@@ -27,6 +27,7 @@ type
     force_compile: bool  # Force recompilation even if cache is up-to-date
     type_check: bool
     contracts_enabled: bool
+    checked_vm: bool
     native_tier: NativeCompileTier
     native_code: bool
     pkg: string
@@ -42,6 +43,7 @@ proc init*(manager: CommandManager) =
   manager.add_help("  --repl-on-error: drop into REPL on Gene exceptions")
   manager.add_help("  --no-type-check: disable static type checking (alias: --no-typecheck)")
   manager.add_help("  --contracts <on|off>: enable or disable runtime contract checks")
+  manager.add_help("  --checked-vm: enable checked VM invariants (requires -d:geneVmChecks build)")
   manager.add_help("  --native-code: enable native code execution (alias for --native-tier guarded)")
   manager.add_help("  --native-tier <never|guarded|fully-typed>: set native compilation policy")
 
@@ -57,6 +59,7 @@ let long_no_val = @[
   "force-compile",
   "no-typecheck",
   "no-type-check",
+  "checked-vm",
   "native-code",
 ]
 
@@ -138,6 +141,8 @@ proc parse_options(args: seq[string]): Options =
             result.contracts_enabled = parse_contracts_enabled(value)
           except ValueError as e:
             echo e.msg
+        of "checked-vm":
+          result.checked_vm = true
         of "pkg":
           result.pkg = value
         else:
@@ -251,6 +256,9 @@ proc handle*(cmd: string, args: seq[string]): CommandResult =
   VM.native_code = options.native_tier != NctNever
   VM.type_check = options.type_check
   VM.contracts_enabled = options.contracts_enabled
+  if options.checked_vm:
+    require_checked_vm_available()
+    VM.checked_vm = true
   App.app.gir_cache_reads_enabled = not options.no_gir_cache and not options.force_compile
   App.app.gir_cache_writes_enabled = not options.no_gir_cache
   init_stdlib()

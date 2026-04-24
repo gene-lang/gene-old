@@ -1111,6 +1111,7 @@ type
     pc*: int
     frame*: Frame
     trace*: bool
+    checked_vm*: bool
     exec_depth*: int           # Tracks nested exec() invocations
     exec_handler_base_stack*: seq[int]  # Exception handler base per exec() depth
     exception_handlers*: seq[ExceptionHandler]
