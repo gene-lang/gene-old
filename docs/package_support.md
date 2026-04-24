@@ -1,213 +1,187 @@
-# Package + Module Support in the Gene VM (current implementation)
+# Package + Module Support in the Gene VM
 
-This document describes what the current Nim VM actually implements for “packages” and `import`, and what is still only specified/aspirational.
+This document describes the current local-first package/module MVP implemented
+by the Nim VM. It is intentionally smaller than a registry package manager:
+local manifests, local/path dependencies, lockfiles, and deterministic imports
+are implemented; hosted registries and full version solving are future work.
 
-## What “package” means today
+## Local package MVP
 
-In the current VM, a **package is primarily a filesystem convention**:
+A Gene package is a directory tree with a `package.gene` file at its root. The
+runtime and `gene deps` both parse that manifest through the shared parser in
+`src/gene/vm/package_manifest.nim`.
 
-- The **package root** is the nearest ancestor directory that contains a `package.gene` file.
-- The runtime does **not** currently parse `package.gene` for metadata; the file’s presence is used mainly as a **marker** for root detection and intra-package resolution.
-
-Core implementation lives in `src/gene/vm/module.nim`.
-
-## Import syntax supported by the parser/loader
-
-The compiler turns `(import ...)` into a `VkGene` value containing:
-- `type = import`
-- `props` (e.g. `^pkg`, `^path`, `^native`)
-- `children` representing the import clause
-
-See `src/gene/compiler.nim` (`compile_import`) and `src/gene/vm/module.nim` (`parse_import_statement`, `handle_import`).
-
-### Basic form
+Supported MVP manifest fields:
 
 ```gene
-(import name from "mod")      # import `name` from a module path
-(import from "mod" name)      # same meaning
+^name "x/app"
+^version "0.1.0"
+^license "MIT"
+^homepage "https://example.invalid/app"
+^source-dir "src"
+^main-module "main"
+^test-dir "tests"
+^dependencies [
+  ($dep "x/lib" "*" ^path "./vendor/lib")
+]
 ```
 
-### Aliases
+Defaults:
+
+- `^source-dir`: `src`
+- `^main-module`: `index`
+- `^test-dir`: `tests`
+- absent `^version` and `^license`: `nil` through Package methods
+
+Manifests may be written as flat key/value pairs or as a single map:
 
 ```gene
-(import name:alias from "mod")
+{
+  ^name "x/app"
+  ^version "0.1.0"
+  ^source-dir "src"
+  ^main-module "main"
+  ^test-dir "tests"
+  ^dependencies []
+}
 ```
 
-### Nested imports
+## Package metadata
 
-These forms resolve `n/f` paths inside a module namespace:
+The current package is available as `$pkg`. The application package is available
+as `$app/.pkg`.
+
+Supported Package methods:
+
+- `$pkg/.name`
+- `$pkg/.version`
+- `$pkg/.dir`
+- `$pkg/.source_dir`
+- `$pkg/.main_module`
+- `$pkg/.test_dir`
+
+The same methods work through `$app/.pkg`, for example
+`$app/.pkg/.name` and `$app/.pkg/.version`.
+
+CLI package context is supported by `run`, `eval`, `repl`, and other command
+paths that use `src/commands/package_context.nim`. These commands preserve the
+launch working directory; `--pkg` selects package metadata and package-relative
+path resolution without changing `cwd`.
+
+## Dependencies and lockfiles
+
+`gene deps` is the canonical local lockfile writer for the MVP.
+
+Common commands:
+
+```sh
+gene deps install --root .
+gene deps update --root .
+gene deps verify --root .
+gene deps gc --root .
+gene deps clean --root .
+```
+
+Local/path dependencies use `$dep` inside `^dependencies`:
 
 ```gene
-(import n/f from "mod")
-(import n/[a b] from "mod")   # expands to imports n/a and n/b
+^dependencies [
+  ($dep "x/lib" "*" ^path "./vendor/lib")
+]
 ```
 
-### Namespace imports: `gene/*`, `genex/*`, `global/*`
+Dependency names must be `<parent>/<pkg>`, such as `x/lib` or `org/tool`.
+The MVP supports:
 
-Imports whose first path segment is one of `gene`, `genex`, or `global` are resolved directly against those namespaces (not via filesystem modules).
+- `^path` for a local package directory
+- `^subdir` for a package subdirectory inside the owner package
+- `^git` with at most one of `^commit`, `^tag`, or `^branch`
+
+The local lockfile is `package.gene.lock`. It records:
+
+- `^lock_version`
+- `^root_dependencies`
+- materialized package nodes under `^packages`
+- each node's relative `.gene/deps/...` directory
+- source metadata
+- SHA-256 content hash
+- dependency edges for transitive package imports
+
+Example shape:
 
 ```gene
-(import gene/json/parse)        # resolves under gene namespace
-(import genex/http/*)           # wildcard imports all non-NIL members
+{
+  ^lock_version 1
+  ^root_dependencies {
+    ^x/lib "x/lib@1.0.0"
+  }
+  ^packages {
+    ^x/lib@1.0.0 {
+      ^name "x/lib"
+      ^resolved "1.0.0"
+      ^node_id "x/lib@1.0.0"
+      ^dir ".gene/deps/x/lib/1.0.0"
+      ^source {^type "path" ^path "./vendor/lib"}
+      ^sha256 "..."
+      ^singleton false
+      ^dependencies {}
+    }
+  }
+}
 ```
 
-**Dynamic genex extension loading**:
+`gene deps verify` validates lockfile version, materialized directories, and
+content hashes. `gene deps install` reuses an existing lockfile by verifying it
+instead of re-resolving dependencies.
 
-- Accessing `genex/<name>` may auto-load a dynamic library at `build/lib<name>.<ext>` (`.dylib`/`.so`/`.dll`) (`src/gene/vm/module.nim`, `src/gene/vm.nim`).
+## Package-aware imports
 
-## Package-qualified imports
-
-To import a module from another package, the loader supports:
-
-- `of "<pkg-name>"` in the import children (spec form), and/or
-- `^pkg "<pkg-name>"` as an import property (used in example projects).
-
-Example:
+Package-qualified imports use either `^pkg` or `of "<pkg>"`:
 
 ```gene
-(import upcase from "index" ^pkg "x/my_lib")
+(import value from "index" ^pkg "x/lib")
+(import value from "feature" ^pkg "x/lib")
 ```
 
-### Package name validation
+Resolution behavior:
 
-Package names must:
-
-- have **at least two segments** separated by `/`
-- match the character rules described by:
-  `validate_package_name` in `src/gene/vm/module.nim`
-- not use reserved top-level namespaces: `gene`, `genex`, or any `gene*` prefix
-- allow `x`, `y`, `z` as open top-level namespaces
-
-Example valid names:
-
-- `x/my_lib`
-- `org/pkg-a`
-
-Invalid:
-
-- `my_lib` (only one segment)
-- `gene/foo` (reserved)
-
-## Package root discovery + search paths
-
-### Root detection
-
-`find_package_root(start_path)` walks up directories until it finds `package.gene` (`src/gene/vm/module.nim`).
-
-### Search paths for `(import ... of "<pkg>")` / `^pkg`
-
-`locate_package_root(package_name, importer_dir, override_path)` attempts:
-
-1. **Override** via `^path` (relative to the importer’s package root if present, otherwise relative to importer_dir). The override target must contain `package.gene`.
-2. Search bases constructed from:
-   - `importer_dir`
-   - `importer_dir/packages`
-   - entries in `GENE_PACKAGE_PATH` (split by `PathSep`)
-   - ancestors of `importer_dir` (walking upwards)
-3. Fallback to a sibling of the current package root using the final segment of the package name.
-
-This is intentionally an MVP; it is not a versioned dependency resolver.
-
-## Entrypoint resolution
-
-When importing `"index"` from a package, the loader chooses the entrypoint in priority order:
-
-1. `<root>/index.gene`
-2. `<root>/src/index.gene`
-3. `<root>/lib/index.gene`
-4. `<root>/build/index.gir`
-
-See `resolve_package_entrypoint` in `src/gene/vm/module.nim`.
-
-## Module resolution rules (filesystem)
-
-For non-namespace imports (not `gene/*`, `genex/*`, `global/*`), the resolver searches:
-
-- the importer directory
-- the package root (if found)
-- `<pkg>/src`, `<pkg>/lib`, `<pkg>/build`
-
-It supports:
-- explicit `.gene` and `.gir` paths
-- implicit `.gene` extension
-- build fallback: `<pkg>/build/<basename>.gir`
-- native fallback: `<pkg>/build/<basename>.<ext>` (treated as native module)
-
-See `resolve_module_path` and `resolve_native_module` in `src/gene/vm/module.nim`.
-
-## Execution + caching model
-
-- `ModuleCache` is a global `Table[string, Namespace]` keyed by resolved path (`src/gene/vm/module.nim`).
-- On first import of a non-native module:
-  - the VM compiles the module (`compile_module`)
-  - executes it in a fresh frame with `ns = module_ns`
-  - stores `module_ns` in `ModuleCache`
-  - binds imported symbols into the importer namespace (`src/gene/vm.nim`, `src/gene/vm/module.nim`)
-- Subsequent imports of the same path reuse the cached namespace.
-
-**Note**: `ModuleCache` is currently not synchronized for multi-threaded imports.
+1. Direct importer-relative modules are checked first for normal imports.
+2. For package-qualified imports, `package.gene.lock` is authoritative when it
+   maps the importer package node to a dependency node.
+3. Package entrypoint imports from `"index"` honor manifest `^main-module`
+   before falling back to `index`.
+4. Package module bases include manifest `^source-dir` before hard-coded
+   `src`, then retain `lib` and `build` fallbacks.
+5. Package-qualified imports enforce package boundaries so `../` paths cannot
+   escape the resolved package root.
+6. When no lockfile edge applies, the resolver falls back to explicit `^path`,
+   dependency registry overrides, materialized `.gene/deps`, `GENE_PACKAGE_PATH`,
+   and sibling search.
 
 ## Native modules
 
-Two ways to load native code:
-
-1. Explicitly mark an import as native:
+Native imports are still trusted-local only:
 
 ```gene
 (import upcase from "my_lib/libindex.dylib" ^native true)
 ```
 
-2. Let the loader auto-detect a corresponding compiled native library under `build/` for a resolved `.gene` module.
+The module resolver can also auto-detect a matching native library under
+`build/` for a resolved `.gene` module. Native trust, signing, checksum policy,
+and ABI lifecycle are not part of the local package MVP.
 
-Native modules are loaded via `load_extension` when extensions are enabled (`src/gene/vm.nim`, `src/gene/vm/extension.nim`).
+## Out of scope
 
-## `package.gene` manifest: what exists vs what is implemented
+The following remain future work:
 
-Example manifests in `example-projects/*/package.gene` contain fields like:
+- registry or hosted package installation
+- remote index discovery
+- complete semver solving and compatibility policy
+- native extension signing or trust policy
+- lockfile format compatibility beyond `^lock_version 1`
+- package publishing workflows
+- distributed package caches
 
-- `^name`, `^version`, `^license`
-- `^main-module`, `^source-dir`, `^test-dir`
-- `^dependencies` (with `($dep ...)`)
-- `^globals`, `^auto_load`
-
-However:
-
-- The VM currently **does not read/interpret** these keys for resolution.
-- `$dep` does not appear to have a runtime implementation in the VM codebase.
-- `$pkg` (expected by `tests/test_package.nim`) is not currently wired up; the `Package` type exists in Nim (`src/gene/types/type_defs.nim`) but there is no loader that constructs it from `package.gene`.
-
-So: **package manifests are presently “marker + metadata for future tooling”**, not an active dependency system.
-
-## Spec alignment
-
-There is an OpenSpec describing the MVP package loader requirements:
-
-- `openspec/changes/add-package-system/specs/package-system/spec.md`
-
-The implemented behavior around:
-- nearest-ancestor `package.gene` root detection
-- entrypoint resolution order
-- import `of "<pkg>"` syntax
-- package naming rules
-
-matches that spec.
-
-## Example projects (working patterns)
-
-- `example-projects/my_app/src/index.gene` imports from a package:
-
-```gene
-(import upcase from "index" ^pkg "x/my_lib")
-```
-
-- `example-projects/my_lib/src/index.gene` loads a native library (explicit):
-
-```gene
-(import upcase from "my_lib/libindex.dylib" ^native true)
-```
-
-## Known mismatches / papercuts
-
-- Some example project tests import `genex/tests/...`, but the current extension namespace is `genex/test` (singular). This is why running those tests directly can fail with “Symbol 'genex/tests/…' not found”.
-- There is no version selection / lockfile / package installation story in the VM yet; only root detection + path search (`GENE_PACKAGE_PATH`) and direct imports.
-
+The stable current contract is local and deterministic: parse `package.gene`,
+materialize local/path dependencies with `gene deps`, verify `package.gene.lock`,
+and resolve imports through manifest and lockfile data.

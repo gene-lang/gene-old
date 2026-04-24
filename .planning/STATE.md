@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: "Core Stabilization + Package MVP"
-status: ready_to_execute
-stopped_at: Phase 07 planned and ready for execution
-last_updated: "2026-04-24T13:44:06Z"
-last_activity: 2026-04-24 -- Planned Phase 07 package/module MVP
+status: ready_to_plan
+stopped_at: Phase 07 complete; Phase 08 ready to plan
+last_updated: "2026-04-24T18:41:45Z"
+last_activity: 2026-04-24 -- Completed Phase 07 package/module MVP
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 4
   total_plans: 3
-  completed_plans: 2
-  percent: 50
+  completed_plans: 3
+  percent: 100
 ---
 
 # Project State
@@ -21,23 +21,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-24)
 
 **Core value:** Gene should feel trustworthy to build on: users can tell what is stable, import packages deterministically, and rely on VM invariants being actively checked.
-**Current focus:** Phase 07 - Package/module MVP
+**Current focus:** Phase 08 - VM correctness harness
 
 ## Current Position
 
-Phase: 07 (package-module-mvp) - READY TO EXECUTE
-Plan: 1 of 1 (07-01-PLAN.md)
-Status: Ready to execute Phase 07
-Last activity: 2026-04-24 -- Planned Phase 07 package/module MVP
+Phase: 8
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-04-24
 Depends on completed actor migration milestone through Phase 04
 
-Progress: [#####-----] 50%
+Progress: [########--] 75%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 26
+- Total plans completed: 28
 
 **By Phase:**
 
@@ -128,6 +128,9 @@ Recent decisions affecting current work:
 - [Phase 07]: Plan around the existing local-first package implementation
   (`gene deps`, lockfiles, `$pkg`, `$dep`, and package-qualified imports)
   instead of introducing a second resolver.
+- [Phase 07]: `package.gene` parsing is now shared by runtime and `gene deps`;
+  local package imports honor manifest `^source-dir`, manifest
+  `^main-module`, and app lockfile dependency edges.
 
 ### Pending Todos
 
@@ -156,7 +159,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-24T13:44:06Z
-Stopped at: Phase 07 planned and ready for execution
-Next step: Execute Phase 07 package/module MVP
+Last session: 2026-04-24T18:41:45Z
+Stopped at: Phase 07 package/module MVP complete
+Next step: Plan Phase 08 VM correctness harness
 Resume file: None

@@ -37,20 +37,20 @@ Requirements for the current milestone. Each maps to exactly one roadmap phase.
 
 ### Package MVP
 
-- [ ] **PKG-01**: User can define `package.gene` metadata with package name,
+- [x] **PKG-01**: User can define `package.gene` metadata with package name,
   version, source directory, main module, and test directory, and the VM/tooling
   parses those fields into a package model.
-- [ ] **PKG-02**: User can access current package metadata through `$pkg` or the
+- [x] **PKG-02**: User can access current package metadata through `$pkg` or the
   documented replacement surface.
-- [ ] **PKG-03**: User can declare local/path dependencies with `$dep` or the
+- [x] **PKG-03**: User can declare local/path dependencies with `$dep` or the
   documented replacement syntax and receive deterministic diagnostics for
   malformed dependency declarations.
-- [ ] **PKG-04**: User can import modules through deterministic package-aware
+- [x] **PKG-04**: User can import modules through deterministic package-aware
   resolution that honors package root, source directory, local dependencies,
   and direct import paths.
-- [ ] **PKG-05**: User can generate and verify a local `package.gene.lock` for
+- [x] **PKG-05**: User can generate and verify a local `package.gene.lock` for
   reproducible local/path dependency resolution.
-- [ ] **PKG-06**: Package/module behavior is covered by focused tests and docs
+- [x] **PKG-06**: Package/module behavior is covered by focused tests and docs
   that explain what is MVP, deferred, and out of scope.
 
 ### VM Correctness
@@ -112,12 +112,12 @@ Deferred to later milestones.
 | CORE-03 | Phase 6 | Complete |
 | CORE-04 | Phase 6 | Complete |
 | CORE-05 | Phase 6 | Complete |
-| PKG-01 | Phase 7 | Pending |
-| PKG-02 | Phase 7 | Pending |
-| PKG-03 | Phase 7 | Pending |
-| PKG-04 | Phase 7 | Pending |
-| PKG-05 | Phase 7 | Pending |
-| PKG-06 | Phase 7 | Pending |
+| PKG-01 | Phase 7 | Complete |
+| PKG-02 | Phase 7 | Complete |
+| PKG-03 | Phase 7 | Complete |
+| PKG-04 | Phase 7 | Complete |
+| PKG-05 | Phase 7 | Complete |
+| PKG-06 | Phase 7 | Complete |
 | VMCHK-01 | Phase 8 | Pending |
 | VMCHK-02 | Phase 8 | Pending |
 | VMCHK-03 | Phase 8 | Pending |
@@ -131,4 +131,4 @@ Deferred to later milestones.
 
 ---
 *Requirements defined: 2026-04-24*
-*Last updated: 2026-04-24 after Phase 06 completion*
+*Last updated: 2026-04-24 after Phase 07 completion*

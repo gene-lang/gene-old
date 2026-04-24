@@ -86,13 +86,37 @@ $env/HOME                     # => "/Users/gcao"
 ($env/MISSING || "default")   # Fallback for missing
 ```
 
+## 8.6 Package-aware imports
+
+Package-qualified imports select a module from another package:
+
+```gene
+(import value from "index" ^pkg "x/lib")
+(import value from "feature" of "x/lib")
+```
+
+The local package MVP resolves these imports through:
+
+- nearest package root discovered by `package.gene`
+- manifest `^source-dir`, defaulting to `src`
+- manifest `^main-module`, defaulting to `index` for entrypoint imports
+- `package.gene.lock` dependency edges when present
+- materialized local dependencies under `.gene/deps`
+- explicit `^path` overrides and configured package search paths
+
+Package names are namespace-qualified, for example `x/lib` or `org/tool`.
+Single-segment dependency package names are rejected by `gene deps`.
+
+The current package metadata is available through `$pkg`; the application
+package is available through `$app/.pkg`.
+
 ---
 
 ## Potential Improvements
 
 - **Selective re-export**: No way to re-export imported names from a module. Must manually wrap.
 - **Module-level initialization order**: When modules have side effects, import order matters but is not explicitly controlled.
-- **Package registry/version workflows**: `gene deps` provides package/dependency tooling, but imports themselves are still source-oriented rather than version-pinned at the language level.
+- **Package registry/version workflows**: `gene deps` provides local/path dependency tooling, but hosted registries and complete version solving are future work.
 - **Namespace merging**: Cannot extend or augment an existing namespace from another file. Each `ns` block is self-contained.
 - **Private module members**: No explicit private members — anything not `/`-prefixed is effectively private, but this is convention, not enforced at import time.
 - **Dynamic imports**: No `(import ... if ...)` or `(require ...)` for conditional/runtime loading.

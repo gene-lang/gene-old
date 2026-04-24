@@ -28,7 +28,7 @@ starts at Phase 5.
 - [x] **Phase 6: Core semantics tightening** - Lock `nil` vs `void`, selector
   failure behavior, Gene expression property/child evaluation rules, macro
   input shape, and pattern-matching status with docs and tests.
-- [ ] **Phase 7: Package/module MVP** - Parse `package.gene`, expose package
+- [x] **Phase 7: Package/module MVP** - Parse `package.gene`, expose package
   metadata, support local dependency declarations, deterministic package-aware
   import resolution, and a local lockfile/verification path.
 - [ ] **Phase 8: VM correctness harness** - Add checked VM invariant support,
@@ -140,7 +140,7 @@ instruction metadata scope is agreed.
 |-------|----------------|--------|-----------|
 | 5. Feature status matrix and stable-core boundary | 1/1 | Complete | 2026-04-24 |
 | 6. Core semantics tightening | 1/1 | Complete | 2026-04-24 |
-| 7. Package/module MVP | 0/1 | Planned | - |
+| 7. Package/module MVP | 1/1 | Complete    | 2026-04-24 |
 | 8. VM correctness harness | 0/TBD | Not started | - |
 
 ## Coverage

@@ -259,7 +259,7 @@ suite "Run CLI":
     let result = run_command.handle("run", @[app_src])
     check result.success
 
-  test "run resolves package imports from manifest source-dir":
+  test "run resolves package source-dir from manifest":
     let root = createTempDir("gene_run_pkg_source_dir_", "")
     let app_src = root / "src" / "index.gene"
     let dep_root = root / ".gene" / "deps" / "x" / "tool" / "1.0.0"
@@ -315,7 +315,7 @@ suite "Run CLI":
     let result = run_command.handle("run", @[app_src])
     check result.success
 
-  test "transitive package import resolves through lockfile graph":
+  test "run resolves transitive package import from lockfile dependency map":
     let root = createTempDir("gene_run_pkg_transitive_lock_", "")
     let app_src = root / "src" / "index.gene"
     let core_root = root / ".gene" / "deps" / "x" / "core" / "1.0.0"
