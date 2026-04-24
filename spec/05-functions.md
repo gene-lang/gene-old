@@ -101,6 +101,15 @@ Functions ending with `!` receive their arguments **unevaluated** as AST nodes:
 (debug! (x + 5))   # Prints: DEBUG expr: (x + 5), returns 15
 ```
 
+### Macro input shape
+
+Functions ending in `!` receive unevaluated AST values. Macro arguments that
+are Gene expressions retain their type/callee, properties, and children so the
+macro can inspect or transform the call shape directly.
+
+`$caller_eval` evaluates an AST value in the caller's scope. `$render` renders a
+quoted or template value before evaluation.
+
 ### `$caller_eval`
 
 Evaluates an expression in the **caller's** scope, not the macro's scope:

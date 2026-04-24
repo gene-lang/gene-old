@@ -134,6 +134,22 @@ Fixed-arity conditional expression:
 # => small
 ```
 
+## Gene Expression Evaluation
+
+A Gene expression has a type/callee position, zero or more properties, and zero
+or more children. In ordinary calls, the type/callee is resolved to a function,
+method, macro-like function, class, or special form according to the owning
+syntax.
+
+ordinary calls evaluate property values and child expressions before calling the
+resolved function or method. Property values in ordinary calls become keyword
+arguments, while children become positional arguments.
+
+Quoted Gene values are data. They retain their `.type`, `.props`, and
+`.children` so macros, templates, and DSL code can inspect or transform them.
+Compiler-recognized metadata is form-specific; do not assume arbitrary
+properties create stable runtime metadata unless the owning spec says so.
+
 ---
 
 ## Potential Improvements

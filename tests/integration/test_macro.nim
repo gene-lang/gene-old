@@ -74,6 +74,29 @@ test_vm """
 """, proc(r: Value) =
   check r.kind == VkGene
 
+# macro input shape keeps type props and children
+test_vm """
+  (fn inspect! [expr]
+    [(expr .type) (./ (expr .props) "tag") (./ (expr .children) 0) (./ (expr .children) 1)]
+  )
+  (inspect! (demo ^tag "meta" a b))
+""", proc(r: Value) =
+  check r.kind == VkArray
+  check array_data(r).len == 4
+  check array_data(r)[0] == "demo".to_symbol_value()
+  check array_data(r)[1] == "meta".to_value()
+  check array_data(r)[2] == "a".to_symbol_value()
+  check array_data(r)[3] == "b".to_symbol_value()
+
+# caller_eval evaluates retained macro child in caller scope
+test_vm """
+  (fn eval_child! [expr]
+    ($caller_eval (./ (expr .children) 0))
+  )
+  (var x 40)
+  (eval_child! (hold (x + 2)))
+""", 42
+
 # Macro-like constructors are rejected for classes.
 test_vm_error """
   (class Regular
