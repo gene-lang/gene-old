@@ -40,3 +40,43 @@ can choose the right level of trust for each feature.
 | Formatting, CLI, and operational tooling | Beta | README, command docs, `docs/README.md` | CLI commands for run, eval, repl, parse, compile, GIR, LSP, and related operations exist. | Command coverage is split across Nim integration tests and shell tests. | Tooling coverage is uneven and should not be confused with language-core stability. | Use documented commands; verify less common tooling paths locally. |
 | Public thread-first APIs | Removed | `spec/10-async.md`, Phase 04 planning artifacts | Public thread-first entry points were retired; native workers remain as internal actor/runtime substrate. | Actor and retired-thread tests cover the migration boundary. | None for new user code; retained internals are not public API. | Use `gene/actor/*`; do not use retired thread-first APIs. |
 
+## Stable Core Boundary
+
+The stable core is the part of Gene users can build on while the broader
+runtime continues to mature. A feature is in the stable core only when the
+current implementation, public docs/specs, and focused tests all support the
+claim.
+
+Stable core includes:
+
+- syntax and literals from `spec/01-syntax.md`
+- primitive values, Gene values, arrays, maps, and other core collections
+- variables, assignment, functions, returns, closures, and lexical scope
+- core macros through unevaluated macro-function arguments, `$caller_eval`, and
+  `$render`
+- basic module and import behavior for files and namespaces
+- error handling through `throw`, `try`, `catch`, and normal exception
+  propagation
+- async futures and `await`, with `async` defined as a future-producing wrapper
+  rather than a background scheduler
+- actor-first single-process concurrency through `gene/actor/*`
+
+Stable core does not include:
+
+- package manifests, dependency declarations, package metadata objects,
+  lockfiles, registry access, installers, or version solving
+- selector edge semantics that Phase 6 still needs to tighten, especially
+  nil/void/missing behavior and strict selector failure behavior
+- advanced classes, adapters, AOP, or broad object-model guarantees beyond the
+  tested beta surface
+- the gradual type system beyond documented beta usage
+- pattern matching beyond the tested experimental subset
+- GIR compatibility guarantees that Phase 8 will formalize
+- native-extension trust, signing, ABI lifecycle, or unload policy
+- WASM parity with the native runtime
+- distributed actors, supervision trees, monitor APIs, hot code loading, or
+  public thread-first concurrency APIs
+
+The practical rule is conservative: if a surface is useful but not stable-core,
+its docs should say so directly and link to the relevant subsystem page for the
+current implementation boundary.
