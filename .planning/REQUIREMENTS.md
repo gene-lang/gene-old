@@ -1,143 +1,134 @@
-# Requirements: Gene Actor Runtime Migration
+# Requirements: Gene Core Stabilization + Package MVP
 
-**Defined:** 2026-04-17
-**Core Value:** The actor migration track is complete. Future work should build
-on the actor-first runtime rather than preserving or reintroducing a public
-thread-first surface.
+**Defined:** 2026-04-24
+**Core Value:** Gene should feel trustworthy to build on: users can tell what
+is stable, import packages deterministically, and rely on VM invariants being
+actively checked.
 
-## v1 Requirements (Phase 0 — Complete)
+## v1.1 Requirements
 
-### Lifetime Semantics
+Requirements for the current milestone. Each maps to exactly one roadmap phase.
 
-- [x] **LIFE-01**: `Value` ownership uses a single ref-counting source of truth
-  across manual VM writes, Nim `=copy` / `=destroy` hooks, and
-  function/native-trampoline boundaries.
+### Feature Status
 
-### Publication Safety
+- [ ] **STAT-01**: User can read one public feature-status matrix that marks
+  each major Gene surface as stable, beta, experimental, future, or removed.
+- [ ] **STAT-02**: User can see implementation status, test coverage status,
+  and known gaps for each major feature without hunting across README, docs,
+  specs, and planning files.
+- [ ] **STAT-03**: Public README/docs do not promote experimental or removed
+  surfaces as stable current capabilities.
 
-- [x] **PUB-01**: Lazy function and block compilation no longer publish
-  `body_compiled` through unsynchronized writes.
-- [x] **PUB-02**: Inline cache storage is pre-sized or synchronized so runtime
-  execution does not grow `inline_caches` opportunistically.
-- [x] **PUB-03**: Native code publication exposes `native_entry` only after
-  `native_ready` is visible with release/acquire semantics or an equivalent
-  eager-initialization guarantee.
+### Core Semantics
 
-### Thread Correctness
+- [ ] **CORE-01**: User can read a crisp stable-core definition covering
+  syntax, values, variables, functions, lexical scope, macros, modules/imports,
+  errors, collections, async futures, and actor-first concurrency.
+- [ ] **CORE-02**: User can distinguish `nil` from `void` consistently across
+  selectors, maps, arrays, objects, Gene properties, failed lookup, and function
+  return behavior.
+- [ ] **CORE-03**: User can understand when Gene expression properties are
+  metadata, when children are evaluated, and what structure macros receive.
+- [ ] **CORE-04**: User can identify the stable subset and known gaps of pattern
+  matching, including destructuring, ADTs, branch failure, arity, and
+  exhaustiveness behavior.
+- [ ] **CORE-05**: Core semantic claims are backed by runnable tests or focused
+  Nim tests for the stable subset.
 
-- [x] **THR-01**: `poll_event_loop` drains the caller's thread channel rather
-  than hard-coding thread 0.
-- [x] **THR-02**: `Thread.on_message` installs callbacks on the target thread VM
-  rather than the caller VM.
+### Package MVP
 
-### String Immutability
+- [ ] **PKG-01**: User can define `package.gene` metadata with package name,
+  version, source directory, main module, and test directory, and the VM/tooling
+  parses those fields into a package model.
+- [ ] **PKG-02**: User can access current package metadata through `$pkg` or the
+  documented replacement surface.
+- [ ] **PKG-03**: User can declare local/path dependencies with `$dep` or the
+  documented replacement syntax and receive deterministic diagnostics for
+  malformed dependency declarations.
+- [ ] **PKG-04**: User can import modules through deterministic package-aware
+  resolution that honors package root, source directory, local dependencies,
+  and direct import paths.
+- [ ] **PKG-05**: User can generate and verify a local `package.gene.lock` for
+  reproducible local/path dependency resolution.
+- [ ] **PKG-06**: Package/module behavior is covered by focused tests and docs
+  that explain what is MVP, deferred, and out of scope.
 
-- [x] **STR-01**: `String.append` and related mutators stop mutating shared
-  storage in place and return new strings instead.
-- [x] **STR-02**: `IkPushValue` no longer copies string literals defensively
-  before pushing them on the VM stack.
+### VM Correctness
 
-### Bootstrap Publication
+- [ ] **VMCHK-01**: Runtime maintainers can run a checked VM mode that validates
+  core instruction invariants without affecting optimized default execution.
+- [ ] **VMCHK-02**: Instruction metadata exists for stack effects, operands,
+  reference/lifetime behavior, and debug formatting for the currently supported
+  opcode set.
+- [ ] **VMCHK-03**: GIR compatibility checks fail clearly for stale or
+  incompatible bytecode caches and are covered by regression tests.
+- [ ] **VMCHK-04**: Parser, serializer/deserializer, and GIR round-trip stress
+  coverage exists for representative stable-core values and failure paths.
+- [ ] **VMCHK-05**: Checked-mode failures produce actionable diagnostics that
+  identify the instruction or runtime boundary that violated an invariant.
 
-- [x] **BOOT-01**: Bootstrap-shared runtime artifacts have an explicit
-  publication/freeze boundary that excludes runtime-created namespaces and
-  classes.
+## Future Requirements
 
-## v2 Requirements (Phase 1 — Active)
+Deferred to later milestones.
 
-### Deep-Frozen Bit and Shared Heap
+### Tooling And Ecosystem
 
-- [x] **FRZ-01**: `Value` header carries a `deep_frozen` bit readable without
-  heap allocation on both payload and managed reference types.
-- [x] **FRZ-02**: `Value` header carries a `shared` bit readable without heap
-  allocation, orthogonal to `deep_frozen` at the bit level but set in lockstep
-  by the freeze path for Phase 1 MVP scope.
-- [x] **FRZ-03**: Stdlib `(freeze v)` transitions `array`, `map`, `hash_map`,
-  `gene`, and `bytes` values to `deep_frozen`, recursively tagging nested
-  containers in MVP scope.
-- [x] **FRZ-04**: `(freeze v)` applied to a value whose MVP scope cannot be
-  satisfied (non-freezable kinds, or nested non-freezable payload) fails with
-  a typed error rather than partial tagging or a silent no-op.
+- **TOOL-01**: User receives type-checker-backed LSP diagnostics.
+- **TOOL-02**: User can run a broad benchmark suite covering selectors, maps,
+  classes, adapters, async I/O, GIR cold start, extension calls, and
+  serialization.
+- **TOOL-03**: User can install packages from a registry or remote index.
 
-### Shared-Heap Allocation
+### Runtime Trust And Types
 
-- [x] **HEAP-01**: Frozen values are reachable from any thread through the same
-  heap without per-actor cloning, with documented invariants for pointer
-  sharing distinct from owned-heap values.
-
-### Refcount Branch
-
-- [x] **RC-02**: Retain and release branch on the `shared` bit: shared values
-  continue to use atomic increments and decrements; owned (non-shared) values
-  may use plain increments and decrements where the lifetime is provably
-  thread-local, restoring the owned-side refcount performance Phase 0 traded
-  for uniformity.
-
-### Naming
-
-- [x] **NAME-01**: The two-level naming ("sealed" for shallow `#[]` / `#{}` /
-  `#()` literals, "frozen" for deep `(freeze v)` output) is finalized with
-  matching error messages, stdlib names, and documentation.
-
-## v3 Requirements (Deferred Actor Work)
-
-### Freezable Closures (Phase 1.5 — Hard Prerequisite for Phase 2)
-
-- **CLO-01**: Closures with freezable captured environments can be frozen and
-  sent by pointer across actor boundaries.
-
-### Actor Runtime
-
-- [x] **ACT-02**: Add actor scheduler, tiered send, reply futures, and actor stop
-  semantics.
-- **ACT-03**: Migrate process-global native resources behind port actors.
-- **ACT-04**: Deprecate the legacy thread API after the actor API is verified.
-
-**Phase 3 status:** complete. The extension substrate is in place, `genex/llm`
-uses the explicit exported-function bridge, `genex/http` uses actor-backed
-request ports for concurrent request work, and Socket Mode binding ownership in
-`genex/ai/bindings` is actor-scoped instead of process-global.
+- **EXT-01**: Native extensions have a documented trust, search-path, ABI, and
+  signing/checksum policy.
+- **TYPE-01**: Type descriptors flow canonically across checker, compiler, GIR,
+  and runtime objects.
+- **TYPE-02**: Advanced generic classes, flow typing, and broader interface
+  conformance checks are implemented after the package/core boundary is stable.
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Distributed actors / multi-process runtime | Proposal explicitly scopes work to single-process concurrency |
-| Erlang-style supervision / hot code reload | Not required for the current runtime migration |
-| Compile-time capability typing | Runtime-only enforcement is the approved design |
-| `StringBuilder` optimization work | Deferred until immutable string semantics land and need profiling |
+| Reintroduce public thread-first APIs | Phase 4 removed them; actors are the public concurrency surface |
+| Package registry / network resolver | Local deterministic package MVP must land before external ecosystem machinery |
+| Full package version solver | MVP needs path/local deterministic deps first; version graph policy can follow |
+| LSP expansion | Valuable, but weaker than package/core/VM trust for this milestone |
+| Native extension signing/trust model | Important future work, but separate from package MVP and VM checked mode |
+| Advanced type-system/generics work | Defer until stable core and package boundaries are clearer |
+| Distributed actors / supervision trees / hot code loading | Outside the current single-process Gene VM scope |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LIFE-01 | Phase 0 | Complete (commit e2e776c) |
-| PUB-01 | Phase 0 | Complete |
-| PUB-02 | Phase 0 | Complete |
-| PUB-03 | Phase 0 | Complete |
-| THR-01 | Phase 0 | Complete |
-| THR-02 | Phase 0 | Complete |
-| STR-01 | Phase 0 | Complete |
-| STR-02 | Phase 0 | Complete |
-| BOOT-01 | Phase 0 | Complete (commit e2e776c) |
-| FRZ-01 | Phase 1 | Complete |
-| FRZ-02 | Phase 1 | Complete |
-| FRZ-03 | Phase 1 | Complete |
-| FRZ-04 | Phase 1 | Complete |
-| HEAP-01 | Phase 1 | Complete |
-| RC-02 | Phase 1 | Complete |
-| NAME-01 | Phase 1 | Complete |
-| CLO-01 | Phase 1.5 | Complete |
-| ACT-02 | Phase 2 | Complete |
-| ACT-03 | Phase 3 | Complete |
-| ACT-04 | Phase 4 | Complete |
+| STAT-01 | Phase 5 | Pending |
+| STAT-02 | Phase 5 | Pending |
+| STAT-03 | Phase 5 | Pending |
+| CORE-01 | Phase 5 | Pending |
+| CORE-02 | Phase 6 | Pending |
+| CORE-03 | Phase 6 | Pending |
+| CORE-04 | Phase 6 | Pending |
+| CORE-05 | Phase 6 | Pending |
+| PKG-01 | Phase 7 | Pending |
+| PKG-02 | Phase 7 | Pending |
+| PKG-03 | Phase 7 | Pending |
+| PKG-04 | Phase 7 | Pending |
+| PKG-05 | Phase 7 | Pending |
+| PKG-06 | Phase 7 | Pending |
+| VMCHK-01 | Phase 8 | Pending |
+| VMCHK-02 | Phase 8 | Pending |
+| VMCHK-03 | Phase 8 | Pending |
+| VMCHK-04 | Phase 8 | Pending |
+| VMCHK-05 | Phase 8 | Pending |
 
 **Coverage:**
-- v1 requirements (Phase 0): 9 complete
-- v2 requirements (Phase 1): 7 complete
-- v3 requirements (Phase 1.5+): 4 complete
+- v1.1 requirements: 19 total
+- Mapped to phases: 19
 - Unmapped: 0
 
 ---
-*Requirements defined: 2026-04-17*
-*Last updated: 2026-04-22 after Phase 4 completion*
+*Requirements defined: 2026-04-24*
+*Last updated: 2026-04-24 after v1.1 milestone initialization*

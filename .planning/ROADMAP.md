@@ -1,182 +1,158 @@
-# Roadmap: Gene Actor Runtime Migration
+# Roadmap: Gene Core Stabilization + Package MVP
 
 ## Overview
 
-This roadmap tracks the approved actor-design migration from
-`docs/proposals/actor-design.md`. Phase 0 (substrate cleanup) landed in commit
-`e2e776c`. Phase 1 (deep-frozen bit, shared heap, `(freeze v)`) is now
-implemented across commits `f153f95`..`a36452b`. The actor migration track is
-now complete: `03-01` landed the extension port substrate, `03-02` moved
-`genex/llm` behind a stable host-owned bridge, `03-03` moved HTTP and AI
-extension concurrency onto actor/port boundaries, and Phase 4 removed the
-public thread-first surface.
+This roadmap starts the post-actor milestone. The actor migration track is
+complete through Phase 4, so v1.1 focuses on the next trust boundary surfaced
+by review: users need to know what is stable, core semantics need sharper
+contracts, packages need a deterministic local MVP, and the optimized VM needs
+checked-mode correctness support.
 
-The legacy `.planning/phases/01-architecture-comparison/` directory was
-preserved historical exploratory material and has been moved to
-`.planning/archive/01-architecture-comparison-legacy/` so the `01-` numeric
-slot can be used for the real Phase 1.
+Phase numbering continues from the completed actor migration roadmap. New work
+starts at Phase 5.
+
+## Previous Milestone
+
+- Phase 0: Lifetime/publication/string/bootstrap substrate - complete.
+- Phase 1: Deep-frozen bit, shared heap, and `(freeze v)` - complete.
+- Phase 1.5: Freezable closures - complete.
+- Phase 2: Actor runtime - complete.
+- Phase 3: Port actors for extensions - complete.
+- Phase 4: Remove legacy thread-first concurrency surfaces - complete.
 
 ## Phases
 
-**Phase Numbering:**
-- Proposal numbering is preserved for this actor-runtime track.
-- Phase 1.5 is a named half-phase per the proposal (freezable closures, hard
-  prerequisite for Phase 2); it is tracked here as a placeholder and planned
-  only after Phase 1 closes.
-
-- [x] **Phase 0: Unify lifetime and publication semantics** - Repay
-  correctness debt in ref-counting, publication, thread messaging, string
-  semantics, and bootstrap sharing before actor primitives land *(completed
-  2026-04-18, commit e2e776c)*
-- [x] **Phase 1: Deep-frozen bit, shared heap, and `(freeze v)`** - Add the
-  header bits, shared-heap allocation path, atomic-vs-plain refcount branch,
-  and the user-facing `(freeze v)` stdlib operation over the MVP container
-  scope *(completed 2026-04-19, commits `f153f95`..`a36452b`)*
-- [x] **Phase 1.5: Freezable closures** - Make closures with freezable
-  captured environments deep-freezable and pointer-shareable so Phase 2 actor
-  scheduling can use the same send semantics for callable payloads *(completed
-  2026-04-19, commits `9e9a97a`..`cfb9140`)*
-- [x] **Phase 2: Actor runtime** - Add actor scheduler, tiered send semantics,
-  reply futures, stop semantics, and the user-facing actor API on top of the
-  Phase 0/1 substrate *(completed 2026-04-20, commits `d3822be`..`49d8d7a`)*
-- [x] **Phase 3: Port actors for extensions** - Migrate process-global native
-  resources and extension-side concurrency behind actor/port boundaries
-  *(completed 2026-04-22, `03-01` in `bf4661f`/`0915da9`/`3301f31`, `03-02`
-  in `f19293f`, `03-03`/`03-04` in `593189a`)*
-- [x] **Phase 4: Remove legacy thread-first concurrency surfaces** - Deprecate
-  and remove the legacy thread API once actor support is verified, including
-  `GENE_WORKERS` naming cleanup and other thread-centric concurrency entry
-  points that should no longer be primary *(completed 2026-04-22, `04-01`/`04-02`/`04-03` on local branch)*
+- [ ] **Phase 5: Feature status matrix and stable-core boundary** - Publish the
+  public status matrix, classify stable/beta/experimental/future/removed
+  surfaces, and define the stable core before changing package or VM behavior.
+- [ ] **Phase 6: Core semantics tightening** - Lock `nil` vs `void`, selector
+  failure behavior, Gene expression property/child evaluation rules, macro
+  input shape, and pattern-matching status with docs and tests.
+- [ ] **Phase 7: Package/module MVP** - Parse `package.gene`, expose package
+  metadata, support local dependency declarations, deterministic package-aware
+  import resolution, and a local lockfile/verification path.
+- [ ] **Phase 8: VM correctness harness** - Add checked VM invariant support,
+  instruction metadata, GIR compatibility checks, and parser/serdes/GIR stress
+  coverage without slowing optimized default execution.
 
 ## Phase Details
 
-### Phase 0: Unify lifetime and publication semantics *(complete)*
-**Goal**: Remove the current runtime ownership and publication hazards that would compound under actor concurrency, while keeping the only approved user-visible break limited to the string mutator cut.
-**Depends on**: Nothing (active foundation phase)
-**Requirements**: [LIFE-01, PUB-01, PUB-02, PUB-03, THR-01, THR-02, STR-01, STR-02, BOOT-01]
+### Phase 5: Feature status matrix and stable-core boundary
+
+**Goal**: Make the public feature surface honest and navigable: users can see
+what is stable, beta, experimental, future-only, or removed, and docs stop
+presenting incomplete features as stable.
+
+**Depends on**: Completed actor migration track; GPT Pro review triage
+(`260423-s1y`).
+
+**Requirements**: [STAT-01, STAT-02, STAT-03, CORE-01]
+
 **Success Criteria** (what must be TRUE):
-  1. Ref-counting and `Value` assignment semantics are uniform enough that scope, async, and native-boundary tests do not depend on mixed manual and hook-based ownership rules.
-  2. Lazy publication points for compiled bodies, inline caches, and native entry state are synchronized or eagerly initialized with regression coverage.
-  3. Thread replies and message callback registration work on the intended worker VM, not just thread 0 or the calling VM.
-  4. Strings are immutable by default, `String.append` no longer mutates shared storage, and `IkPushValue` stops copying string literals defensively.
-  5. Bootstrap-shared runtime artifacts have an explicit publication boundary that later actor/shared-heap work can rely on.
-**Plans**: 5 plans
+  1. A public feature-status matrix exists and covers core syntax, values,
+     functions, macros, modules, packages, classes/adapters, selectors, async,
+     actors, pattern matching, GIR, native extensions, WASM, LSP, and tooling.
+  2. Each matrix row records spec/doc status, implementation status, tests,
+     known gaps, and recommended user posture.
+  3. README and docs index point users to the matrix and do not promote
+     experimental or removed surfaces as stable.
+  4. Stable-core membership is explicitly listed and tied to test coverage.
 
-Plans:
-- [x] 00-01: Unify ref-counting paths around managed `Value` hooks
-- [x] 00-02: Fix lazy publication for compiled bodies, inline caches, and
-  native entry
-- [x] 00-03: Repair thread reply polling and target-VM callback registration
-- [x] 00-04: Cut over to immutable strings and delete literal push copies
-- [x] 00-05: Enforce bootstrap publication discipline and run phase acceptance
-  sweep
+**Plans**: TBD
 
-### Phase 1: Deep-frozen bit, shared heap, and `(freeze v)` *(complete)*
-**Goal**: Introduce the runtime substrate the proposal requires before the actor scheduler lands — deep-frozen and shared bits on `Value`, a shared-heap allocation path for frozen values, an atomic-vs-plain refcount branch driven by the `shared` bit, and a user-facing `(freeze v)` stdlib operation over the MVP container scope (arrays, maps, hash maps, genes, bytes). No new concurrency API is added; existing thread code remains unaffected.
-**Depends on**: Phase 0 (landed Phase 0 substrate: unified RC, publication safety, bootstrap freeze)
-**Requirements**: [FRZ-01, FRZ-02, FRZ-03, FRZ-04, HEAP-01, RC-02, NAME-01]
+### Phase 6: Core semantics tightening
+
+**Goal**: Turn the review's semantic-boundary comments into concrete contracts
+and tests for the stable core.
+
+**Depends on**: Phase 5.
+
+**Requirements**: [CORE-02, CORE-03, CORE-04, CORE-05]
+
 **Success Criteria** (what must be TRUE):
-  1. Every `Value` exposes `deep_frozen` and `shared` as O(1) reads without heap allocation; both bits round-trip correctly through managed copy/destroy/sink hooks.
-  2. `(freeze v)` over MVP scope (array, map, hash_map, gene, bytes) produces a deep-frozen value whose contents are either already immutable or tagged `deep_frozen`; non-MVP kinds fail with a typed error rather than a silent no-op.
-  3. Shared-heap allocation is a documented, tested path: frozen values are pointer-shareable across threads and retain/release use atomic primitives; owned values may use plain refcount primitives where lifetime is provably local.
-  4. The naming in user-facing APIs, errors, and docs finalizes as "sealed" (shallow `#[]` / `#{}` / `#()` literals) vs "frozen" (deep `(freeze v)` output) with no remaining mixed usage.
-  5. No Phase 0 regression: the acceptance sweep (`./testsuite/run_tests.sh` plus `test_bootstrap_publication`, `test_scope_lifetime`, `test_cli_gir`, `test_thread`, `test_stdlib_string`, `test_native_trampoline`) still passes.
-**Plans**: 6 plans
+  1. `nil` and `void` behavior is specified with examples for maps, arrays,
+     objects/classes, Gene properties, selector failures, failed function
+     returns, and optional values.
+  2. Selector docs and tests agree on missing-key, missing-index, nil receiver,
+     strict selector, stream-mode, and update behavior.
+  3. Gene expression evaluation rules distinguish data, calls, properties,
+     children, macro input, and metadata clearly enough for DSL authors.
+  4. Pattern matching has a stable subset and known-gap list backed by runnable
+     tests or focused Nim tests.
 
-Plans:
-- [x] 01-01: Header bits + O(1) accessors
-- [x] 01-02: `(freeze v)` operation and typed errors
-- [x] 01-03: Mutation opcode guards for `deep_frozen`
-- [x] 01-04: Atomic-vs-plain refcount branch on `shared`
-- [x] 01-05: Shared-heap semantics verification
-- [x] 01-06: "sealed" vs "frozen" naming finalization
+**Plans**: TBD
+
+### Phase 7: Package/module MVP
+
+**Goal**: Deliver the smallest package workflow that makes local projects and
+local dependencies deterministic without claiming registry-level ecosystem
+support.
+
+**Depends on**: Phase 5; Phase 6 where package behavior relies on stable core
+semantics.
+
+**Requirements**: [PKG-01, PKG-02, PKG-03, PKG-04, PKG-05, PKG-06]
+
+**Success Criteria** (what must be TRUE):
+  1. `package.gene` is parsed into a package model with name, version, source
+     directory, main module, test directory, and dependency declarations.
+  2. Current package metadata is available through `$pkg` or a documented
+     replacement surface.
+  3. Local/path dependency declarations are parsed with deterministic
+     diagnostics for malformed manifests, invalid paths, and cycles.
+  4. Package-aware imports resolve deterministically from current package,
+     source directory, local dependencies, direct import paths, and lockfile
+     data.
+  5. `package.gene.lock` can be generated and verified for local/path
+     dependencies.
+  6. Package docs and tests state the MVP boundary and defer registry/version
+     solver behavior explicitly.
+
+**Plans**: TBD
+
+### Phase 8: VM correctness harness
+
+**Goal**: Add opt-in correctness checks around the optimized VM so runtime
+changes can be validated by invariant failures instead of only end-to-end
+behavioral symptoms.
+
+**Depends on**: Phase 5. Can proceed in parallel with Phase 7 after stable
+instruction metadata scope is agreed.
+
+**Requirements**: [VMCHK-01, VMCHK-02, VMCHK-03, VMCHK-04, VMCHK-05]
+
+**Success Criteria** (what must be TRUE):
+  1. Maintainers can enable a checked VM mode for tests/debug builds without
+     changing optimized default execution.
+  2. Instruction metadata records stack effects, operands, reference/lifetime
+     behavior, and debug formatting for supported opcodes.
+  3. Checked mode validates stack, frame, scope, exception, refcount/lifetime,
+     and instruction operand invariants where practical.
+  4. GIR compatibility tests fail clearly for stale or incompatible cache data.
+  5. Parser, serializer/deserializer, and GIR round-trip stress coverage exists
+     for representative stable-core values and failure paths.
+
+**Plans**: TBD
 
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 0. Unify lifetime and publication semantics | 5/5 | Complete | 2026-04-18 |
-| 1. Deep-frozen bit, shared heap, and `(freeze v)` | 6/6 | Complete | 2026-04-19 |
-| 1.5. Freezable closures | 2/2 | Complete | 2026-04-19 |
-| 2. Actor runtime | 5/5 | Complete | 2026-04-20 |
-| 3. Port actors for extensions | 4/4 | Complete | 2026-04-22 |
-| 4. Remove legacy thread-first concurrency surfaces | 3/3 | Complete | 2026-04-22 |
+| 5. Feature status matrix and stable-core boundary | 0/TBD | Not started | - |
+| 6. Core semantics tightening | 0/TBD | Not started | - |
+| 7. Package/module MVP | 0/TBD | Not started | - |
+| 8. VM correctness harness | 0/TBD | Not started | - |
 
-### Phase 1.5: Freezable closures *(complete)*
-**Goal**: Allow closures whose captured environments are themselves freezable to
-be deep-frozen and pointer-shared, closing the last major gap before the actor
-scheduler lands.
-**Depends on**: Phase 1
-**Requirements**: [CLO-01]
-**Success Criteria** (what must be TRUE):
-  1. Closures with freezable captured environments can be frozen and sent by
-     pointer without cloning their environment.
-  2. Non-freezable closures fail with typed errors that surface the offending
-     capture path or kind.
-  3. The closure-freeze rules compose with the existing Phase 1 `(freeze v)`
-     contract and do not regress Phase 0/1 acceptance sweeps.
-**Plans**: 2 plans
+## Coverage
 
-Plans:
-- [x] 01.5-01-PLAN.md — Extend the two-pass freeze walker to `VkFunction`
-  capture graphs and lock the typed failure contract with focused tests
-- [x] 01.5-02-PLAN.md — Prove frozen closures are actor-ready after scope
-  teardown, add shared-pointer stress coverage, and document the migration
-  boundary to Phase 2 / later thread-surface removal
+| Requirement Group | Requirements | Phase |
+|-------------------|--------------|-------|
+| Feature Status | STAT-01..STAT-03 | Phase 5 |
+| Stable Core Boundary | CORE-01 | Phase 5 |
+| Core Semantics | CORE-02..CORE-05 | Phase 6 |
+| Package MVP | PKG-01..PKG-06 | Phase 7 |
+| VM Correctness | VMCHK-01..VMCHK-05 | Phase 8 |
 
-### Phase 2: Actor runtime *(complete)*
-**Goal**: Deliver the actual actor model on top of the verified substrate:
-scheduler, tiered send behavior, reply futures, actor stop semantics, and the
-user-facing actor API.
-**Depends on**: Phase 1.5
-**Requirements**: [ACT-02]
-**Success Criteria** (what must be TRUE):
-  1. Actor spawn/scheduling works without reusing the legacy thread API as the
-     primary concurrency surface.
-  2. Send semantics distinguish primitive, frozen, and mutable payload paths as
-     described in the approved proposal.
-  3. Reply futures and actor stop behavior are validated under concurrent load.
-**Plans**: 5 plans
-
-Plans:
-- [x] 02-01-PLAN.md — Define actor runtime value contracts and class plumbing
-- [x] 02-02-PLAN.md — Reuse the worker substrate for actor enable/spawn and `gene/actor/*` bootstrap
-- [x] 02-03-PLAN.md — Implement tiered send behavior with bounded mailbox backpressure
-- [x] 02-04-PLAN.md — Wire actor reply futures and stop semantics onto the existing Future runtime
-- [x] 02-05-PLAN.md — Publish actor docs, preserve thread compatibility guidance, and add black-box actor verification
-
-### Phase 3: Port actors for extensions *(complete)*
-**Goal**: Move process-global native resources and extension-side concurrency to
-actor/port boundaries so external systems stop bypassing the actor model.
-**Depends on**: Phase 2
-**Requirements**: [ACT-03]
-**Success Criteria** (what must be TRUE):
-  1. Process-global or stateful extensions expose actor/port boundaries instead
-     of ad hoc shared mutable runtime state.
-  2. The actor runtime can safely isolate resource ownership for external
-     systems such as HTTP/LLM integrations.
-**Plans**: 4 plans
-
-Plans:
-- [x] 03-01-PLAN.md — Define extension port registration and actor-backed port materialization
-- [x] 03-02-PLAN.md — Replace `genex/llm`'s live-handle boundary with an explicit host bridge and host-owned wrappers
-- [x] 03-03-PLAN.md — Move HTTP and AI extension concurrency onto port pool/factory boundaries
-- [x] 03-04-PLAN.md — Publish migration guidance and run Phase 3 verification
-
-### Phase 4: Remove legacy thread-first concurrency surfaces *(complete)*
-**Goal**: Finish the migration by deprecating and then removing the legacy
-thread-first concurrency APIs once actors are proven out.
-**Depends on**: Phase 2, Phase 3
-**Requirements**: [ACT-04]
-**Success Criteria** (what must be TRUE):
-  1. The actor API is the primary supported concurrency surface.
-  2. Legacy thread APIs and related naming (`GENE_WORKERS`, thread-centric entry
-     points) are deprecated or removed with migration guidance.
-  3. Other concurrent features that duplicate actor behavior are either routed
-     through actors or explicitly retired.
-**Plans**: 3 plans
-
-Plans:
-- [x] 04-01-PLAN.md — Remove the public thread-first language/runtime surface while preserving the internal worker substrate actors still use
-- [x] 04-02-PLAN.md — Rename the worker-facing public naming to `GENE_WORKERS` and purge remaining thread-first docs/examples
-- [x] 04-03-PLAN.md — Run Phase 4 closeout verification and publish final removal metadata
+**Total requirements:** 19
+**Mapped to phases:** 19
+**Unmapped:** 0

@@ -1,19 +1,31 @@
-# Gene Actor Runtime Migration
+# Gene Core Stabilization + Package MVP
 
 ## What This Is
 
-This workstream ports the approved actor-based concurrency design in
-`docs/proposals/actor-design.md` into the existing `gene-old` runtime. The
-actor migration track is complete: the substrate is safe, frozen/shared values
-are in place, freezable closures landed, the actor runtime is the public
-concurrency API, the stateful extensions route ownership through actor/port
-boundaries, and the old thread-first public surface has been removed from the
-active repo surface.
+`gene-old` is the Nim bytecode VM implementation for Gene: parser, compiler,
+VM, GIR cache, stdlib, extensions, async futures, and the now-complete
+actor-first concurrency runtime. The current workstream moves beyond actor
+migration and stabilizes the public language/product surface: feature status,
+core semantics, package/module workflow, and VM correctness infrastructure.
 
 ## Core Value
 
-The actor migration milestone is complete. The next work should start a new
-milestone or roadmap track rather than reopening the old thread-first lane.
+Gene should feel trustworthy to build on: users can tell what is stable, import
+packages deterministically, and rely on VM invariants being actively checked.
+
+## Current Milestone: v1.1 Core Stabilization + Package MVP
+
+**Goal:** Convert the broad post-review feedback into a focused stabilization
+milestone that makes Gene easier to trust, package, and evolve.
+
+**Target features:**
+- Public feature status matrix with stable/beta/experimental boundaries.
+- Tightened core semantics for `nil`/`void`, selectors, Gene expression
+  evaluation, macros, and pattern-matching status.
+- Package/module MVP covering `package.gene` metadata, `$pkg`, `$dep`, local
+  dependency resolution, lockfile/install flow, and deterministic imports.
+- VM correctness harness for debug invariants, instruction metadata, GIR
+  compatibility checks, and parser/serdes stress coverage.
 
 ## Requirements
 
@@ -31,55 +43,73 @@ milestone or roadmap track rather than reopening the old thread-first lane.
   shared-vs-owned RC branching, shared-heap verification, and sealed-vs-frozen
   naming all landed and verified *(commits `f153f95`..`a36452b`, verified
   2026-04-19)*.
+- ✓ Actor migration track complete: freezable closures, actor runtime, port
+  actors for stateful extensions, and retired thread-first public API are all
+  landed and verified through Phase 4.
+- ✓ GPT Pro review triage complete; stale async/concurrency spec fixed in
+  `b54b8f2`, with broader review items accepted as milestone-level work.
 
 ### Active
 
-- [x] Plan Phase 1.5 (freezable closures) as the next hard prerequisite for
-  Phase 2 actor scheduling.
-- [x] Scope and execute Phase 2 actor runtime work on top of the verified
-  Phase 1.5 substrate.
-- [x] Plan Phase 3 extension migration on top of the now-verified Phase 2
-  actor runtime.
-- [ ] Start the next post-actor milestone or roadmap track.
+- [ ] Publish a feature status matrix that clearly separates stable, beta,
+  experimental, and future-only surfaces.
+- [ ] Tighten the stable core semantics that downstream package and VM work
+  depend on.
+- [ ] Ship a package/module MVP for local deterministic package use before
+  any registry or ecosystem claims.
+- [ ] Add a VM correctness harness so optimized execution has a checked mode
+  and broader compatibility coverage.
 
 ### Out of Scope
 
-- Freezable closures — deferred to Phase 1.5 as a hard prerequisite for Phase 2.
-- Actor scheduler, tiered send, reply futures, stop semantics — Phase 2.
-- Port-actor protocol and extension migration — Phase 3.
-- Thread API deprecation and `GENE_WORKERS` rename — Phase 4.
-- Move-semantics `send!`, work-stealing scheduler, `^frozen-default` — deferred
-  indefinitely per the approved proposal.
-- Distributed actors, supervision trees, hot code loading, compile-time effect
-  typing — explicitly rejected by the approved proposal.
+- Reopening the public thread-first concurrency API - actors remain the public
+  concurrency surface; worker threads are internal runtime machinery.
+- Public package registry, remote dependency discovery, or hosted ecosystem
+  services - local deterministic package workflow comes first.
+- LSP expansion, benchmark suite expansion, and native-extension trust/signing
+  model - valid future work, but lower priority than status/package/core/VM
+  stabilization.
+- Advanced type-system work such as generics, broad flow typing, or descriptor
+  pipeline unification - defer until the stable core and package boundaries are
+  clearer.
+- Distributed actors, supervision trees, hot code loading, and compile-time
+  effect typing - still outside the current product boundary.
 
 ## Context
 
-`gene-old` is a brownfield Nim runtime with a bytecode VM, async futures,
-thread messaging, extension loading, native compilation, AOP, and a broad
-stdlib surface. The approved actor design proposal identifies current
-correctness debt in ref-counting, lazy publication, thread APIs, mutable
-strings, and bootstrap sharing as the blocking substrate for every later actor
-phase.
+The actor migration milestone is complete and should stay closed. The GPT Pro
+review was useful because it identified the next product problem: Gene has
+many promising surfaces, but users need clearer status boundaries, a package
+story, and stronger VM correctness tooling before more features are added.
 
-Existing codebase analysis in `.planning/codebase/CONCERNS.md` flags scope
-lifetime, thread lifecycle, and monolithic VM execution as fragile areas. This
-track intentionally leaves the older `.planning/phases/01-architecture-
-comparison/` material untouched so current work can focus on the proposal's
-Phase 0 without renumbering or rewriting historical exploratory docs.
+Existing local evidence supports this direction:
+- `README.md` already says pattern matching, classes, modules, and packages
+  have known limitations.
+- `docs/package_support.md` says `package.gene` is marker/metadata only, `$dep`
+  is not implemented, `$pkg` is not wired, and there is no version/lock/install
+  story yet.
+- `.planning/codebase/CONCERNS.md` flags monolithic VM execution, GIR
+  compatibility, incomplete pattern/range/template coverage, and package
+  ergonomics as known risks.
+- `docs/handbook/actors.md` and `spec/10-async.md` now align on actor-first
+  concurrency.
 
 ## Constraints
 
 - **Tech stack**: Keep the existing Nim runtime and test harness - no new
   dependencies without explicit request.
-- **Compatibility**: No user-facing break in Phase 1. `(freeze v)` is additive;
-  existing thread code is unaffected.
-- **Validation**: Every Phase 1 plan must not regress the Phase 0 acceptance
-  sweep.
+- **Compatibility**: Do not break the actor-first API or the completed
+  frozen/shared-value substrate while stabilizing docs and packages.
+- **Validation**: Every implementation phase should include focused Nim tests
+  and, when relevant, runnable `testsuite/` coverage.
+- **Package scope**: Package MVP is local and deterministic first; no registry
+  or network dependency workflow in this milestone.
+- **Docs before claims**: Public docs must classify incomplete or experimental
+  behavior before promoting it as stable.
 - **Planning**: Legacy `.planning/phases/01-architecture-comparison/` is
   archived under `.planning/archive/`; do not resurrect without triage.
-- **Performance**: Owned-side refcount performance must not regress below the
-  pre-Phase-0 baseline once the atomic-vs-plain branch lands.
+- **Performance**: VM correctness instrumentation must be opt-in/debug-mode so
+  optimized execution stays fast.
 
 ## Key Decisions
 
@@ -98,6 +128,9 @@ Phase 0 without renumbering or rewriting historical exploratory docs.
 | Close Phase 3 by moving `genex/http` and `genex/ai/bindings` off extension-local thread/global callback ownership | HTTP now uses actor-backed request ports, and Socket Mode binding ownership is actor-scoped instead of process-global | ✓ Complete (`03-03`) |
 | Keep legacy thread docs explicit during Phase 3 and defer actual thread-surface removal to Phase 4 | Extension migration and public API removal are different risks; Phase 3 closes ownership, Phase 4 removes the old surface | ✓ Complete |
 | Remove the surviving thread-first public surface while preserving the internal worker substrate actors still use | The actor runtime still depends on worker threads internally, so Phase 4 removed only the public/compiler/docs lane and worker naming debt | ✓ Complete (`04-01`/`04-02`) |
+| Start v1.1 as core stabilization plus package MVP | GPT Pro review exposed broad scope/status/package risks after actor migration; package/core/VM trust are higher leverage than new feature breadth | Pending - roadmap starts at Phase 5 |
+| Keep package MVP local-first | A registry would multiply product and trust decisions before import/package semantics are stable | Pending |
+| Keep VM correctness checks debug-oriented | The optimized VM deliberately trades checks for speed, so invariant coverage belongs in checked/test modes first | Pending |
 
 ## Evolution
 
@@ -117,4 +150,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-22 after Phase 4 completion*
+*Last updated: 2026-04-24 after v1.1 milestone initialization*

@@ -1,37 +1,37 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
+milestone: v1.1
+milestone_name: "Core Stabilization + Package MVP"
 status: ready
-stopped_at: Phase 04 complete
-last_updated: "2026-04-23T19:24:14Z"
-last_activity: 2026-04-24 -- Completed quick task 260423-s1y: Triage GPT Pro review comments from tmp/gpt-pro-comments.md
+stopped_at: Phase 05 ready for planning
+last_updated: "2026-04-24T00:47:22Z"
+last_activity: 2026-04-24 -- Started milestone v1.1: Core Stabilization + Package MVP
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 25
-  completed_plans: 25
-  percent: 100
+  total_phases: 4
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-22)
+See: .planning/PROJECT.md (updated 2026-04-24)
 
-**Core value:** The actor migration track is complete.
-**Current focus:** Actor migration track complete
+**Core value:** Gene should feel trustworthy to build on: users can tell what is stable, import packages deterministically, and rely on VM invariants being actively checked.
+**Current focus:** Phase 05 - Feature status matrix and stable-core boundary
 
 ## Current Position
 
-Phase: 04 (remove-legacy-thread-first-concurrency-surfaces) — COMPLETE
-Plan: 3 of 3
-Status: Actor migration complete
-Last activity: 2026-04-24 -- Completed quick task 260423-s1y: Triage GPT Pro review comments from tmp/gpt-pro-comments.md
-Depends on completed Phase 03 across `bf4661f`..`593189a`
+Phase: 05 (feature-status-matrix-and-stable-core-boundary) - READY
+Plan: Not started
+Status: Ready to plan Phase 05
+Last activity: 2026-04-24 -- Started milestone v1.1: Core Stabilization + Package MVP
+Depends on completed actor migration milestone through Phase 04
 
-Progress: [██████████] 100%
+Progress: [----------] 0%
 
 ## Performance Metrics
 
@@ -51,11 +51,15 @@ Progress: [██████████] 100%
 | 2 | 5 | - | - |
 | 3 | 4 | - | - |
 | 4 | 3 | - | - |
+| 5 | TBD | - | - |
+| 6 | TBD | - | - |
+| 7 | TBD | - | - |
+| 8 | TBD | - | - |
 
 **Recent Trend:**
 
 - Last 5 plans: 00-01, 00-02, 00-03, 00-04, 00-05 all complete 2026-04-17..18
-- Trend: Stable
+- Trend: New milestone initialized after actor migration completion
 
 | Phase 01 P03 | 25m | 4 tasks | 3 files |
 | Phase 01 P05 | 7m | 5 tasks | 4 files |
@@ -112,6 +116,14 @@ Recent decisions affecting current work:
 - [Phase 03]: `genex/http` now uses actor-backed request ports for concurrent request work instead of an extension-local Gene thread pool.
 - [Phase 03]: Socket Mode binding ownership in `genex/ai/bindings` is now actor-scoped instead of one process-global callback/client tuple.
 - [Phase 03]: Thread API removal remains Phase 4 work; Phase 3 only moved extension concurrency behind actor/port boundaries.
+- [Milestone v1.1]: GPT Pro review triage became a focused stabilization
+  milestone rather than a broad feature-sprawl response.
+- [Milestone v1.1]: Phase numbering continues from the actor migration track,
+  so new work starts at Phase 05.
+- [Milestone v1.1]: Package MVP is local-first; registry, remote resolver, and
+  full version solver are out of scope until deterministic local packages work.
+- [Milestone v1.1]: VM correctness instrumentation should be opt-in/debug-mode
+  so optimized execution remains fast by default.
 
 ### Pending Todos
 
