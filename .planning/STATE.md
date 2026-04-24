@@ -1,14 +1,14 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.1
-milestone_name: "Core Stabilization + Package MVP"
-status: ready_to_plan
-stopped_at: Phase 07 complete; Phase 08 ready to plan
-last_updated: "2026-04-24T18:41:45Z"
-last_activity: 2026-04-24 -- Completed Phase 07 package/module MVP
+milestone_name: milestone
+status: planning
+stopped_at: Phase 08 context gathered
+last_updated: "2026-04-24T20:20:17.294Z"
+last_activity: 2026-04-24
 progress:
   total_phases: 4
-  completed_phases: 4
+  completed_phases: 3
   total_plans: 3
   completed_plans: 3
   percent: 100
@@ -121,13 +121,17 @@ Recent decisions affecting current work:
 - [Phase 05]: Public feature status and stable-core membership now live in
   `docs/feature-status.md`; Phase 06 should use that boundary when tightening
   core semantics.
+
 - [Phase 06]: `nil` is explicit data and `void` is the missing-result sentinel;
   selector defaults consume only `void`.
+
 - [Phase 06]: Pattern matching stable claims are limited to the documented
   tested subset; ADT/Option and `?` remain experimental.
+
 - [Phase 07]: Plan around the existing local-first package implementation
   (`gene deps`, lockfiles, `$pkg`, `$dep`, and package-qualified imports)
   instead of introducing a second resolver.
+
 - [Phase 07]: `package.gene` parsing is now shared by runtime and `gene deps`;
   local package imports honor manifest `^source-dir`, manifest
   `^main-module`, and app lockfile dependency edges.
@@ -159,7 +163,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-24T18:41:45Z
-Stopped at: Phase 07 package/module MVP complete
+Last session: --stopped-at
+Stopped at: Phase 08 context gathered
 Next step: Plan Phase 08 VM correctness harness
-Resume file: None
+Resume file: --resume-file
