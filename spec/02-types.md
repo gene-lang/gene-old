@@ -12,6 +12,7 @@ Gene uses a NaN-boxed 64-bit representation. Every value is one of the following
 | `String`| UTF-8 string (heap-allocated)  |
 | `Bool`  | `true` or `false`              |
 | `Nil`   | The `nil` value                |
+| `Void`  | Missing-result sentinel        |
 | `Char`  | Single Unicode character       |
 | `Symbol`| Interned identifier            |
 
@@ -27,13 +28,30 @@ Gene uses a NaN-boxed 64-bit representation. Every value is one of the following
 | `Instance`  | Class instance with properties        |
 | `Future`    | Async computation result              |
 | `Generator` | Lazy value producer                   |
-| `Thread`    | Concurrent execution                  |
+| `Actor`     | Public message-passing concurrency handle |
 | `Regex`     | Compiled regular expression           |
 | `Range`     | Numeric range (lazy)                  |
 | `Date`      | Calendar date                         |
 | `DateTime`  | Date + time snapshot                  |
 | `Bytes`     | Byte sequence                         |
 | `Enum`      | Enumeration type                      |
+
+### Nil and Void
+
+`nil` is an explicit value for intentional absence and optional values.
+`void` is the missing-result value produced when a lookup has no value to
+return. Both are observable runtime outcomes, but they mean different things:
+`nil` is data, while `void` reports that an access or match did not produce a
+value.
+
+Missing map keys, missing object or instance properties, missing Gene
+properties, and out-of-range array or Gene child indices return `void`. Lookup
+on a `nil` receiver propagates `nil`. Defaults on lookup operations replace
+`void` lookup failure, not explicit `nil` values stored in the target.
+
+A `case` expression with no matching `when` and no `else` returns `nil`.
+Function bodies return their last expression, so optional-style functions
+should return `nil` explicitly when they mean "no value".
 
 ### Range
 
@@ -211,5 +229,5 @@ Color/red     # Access member
 - **Inference completeness**: Type inference still falls back to `Any` in some complex binding positions, notably destructuring parameters and other non-trivial patterns.
 - **Union type narrowing**: Flow-sensitive narrowing works in `if` branches and ADT-aware `case/when` arms, but not in every control-flow form or arbitrary predicate.
 - **Enum values**: Enums are simple symbolic constants with no associated data. Rust-style enums with payloads would unify with ADTs.
-- **Nil safety**: No distinction between "explicitly nil" and "undefined/void". `void` exists internally but is not a first-class user concept, which can lead to confusion when accessing missing keys.
+- **Nil safety**: `nil` and `void` are distinct observable outcomes. Future work should build ergonomic optional-flow helpers and type narrowing on top of that contract.
 - **Structural typing**: All typing is nominal. Structural typing or interfaces/protocols would enable more flexible polymorphism.

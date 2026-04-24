@@ -7,8 +7,12 @@
 (var arr [1 2 3])
 arr/0              # => 1 (zero-indexed)
 arr/-1             # => 3 (negative indexing from end)
+arr/99             # => void (out of range)
 (arr/0 = 99)       # Mutation
 ```
+
+Array lookup returns `void` for an out-of-range index. A present element whose
+value is `nil` remains `nil`.
 
 ### Nested Access
 ```gene
@@ -41,8 +45,12 @@ arr/.length        # Same as size
 ```gene
 (var cfg {^host "localhost" ^port 8080 ^ssl false})
 cfg/host           # => "localhost"
+cfg/missing        # => void
 (cfg/port = 9090)  # Mutation
 ```
+
+Map lookup returns `void` for a missing key. A present key whose value is `nil`
+remains `nil`.
 
 ### Nested Maps
 ```gene
@@ -122,7 +130,13 @@ Gene values are the homoiconic core — code and data share the same structure.
 g/.type        # => Person
 g/.props       # => {^name "Alice" ^age 30}
 g/.children    # => ["child1", "child2"]
+g/missing      # => void
+g/99           # => void
 ```
+
+Gene property lookup returns `void` for a missing property, and Gene child
+lookup returns `void` for an out-of-range child index. Stored `nil` properties
+and children remain `nil`.
 
 ### Gene Property Spread
 ```gene

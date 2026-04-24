@@ -94,6 +94,7 @@ task testintegration, "Runs non-unit integration tests":
   exec "nim c -r tests/integration/test_basic.nim"
   exec "nim c -r tests/integration/test_arithmetic.nim"
   exec "nim c -r tests/integration/test_block.nim"
+  exec "nim c -r tests/integration/test_core_semantics.nim"
   exec "nim c -r tests/integration/test_case.nim"
   exec "nim c -r tests/integration/test_enum.nim"
   exec "nim c -r tests/integration/test_exception.nim"
