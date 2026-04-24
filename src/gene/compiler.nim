@@ -541,7 +541,7 @@ proc compile*(self: Compiler, input: Value) =
   
   try:
     case input.kind:
-      of VkInt, VkBool, VkNil, VkFloat, VkChar:
+      of VkInt, VkBool, VkNil, VkVoid, VkFloat, VkChar:
         self.compile_literal(input)
       of VkString:
         self.compile_literal(input) # TODO

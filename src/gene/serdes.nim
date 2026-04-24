@@ -689,7 +689,7 @@ proc serialize*(value: Value): Serialization =
 proc serialize*(self: Serialization, value: Value): Value =
   let value = materialize_lazy_tree_value(value)
   case value.kind:
-  of VkNil, VkBool, VkInt, VkFloat, VkChar:
+  of VkNil, VkVoid, VkBool, VkInt, VkFloat, VkChar:
     return value
   of VkString, VkSymbol:
     return value
@@ -1433,6 +1433,8 @@ proc value_to_gene_str*(self: Value): string =
   case self.kind:
   of VkNil:
     result = "nil"
+  of VkVoid:
+    result = "void"
   of VkBool:
     result = if self == TRUE: "true" else: "false"
   of VkInt:
