@@ -58,7 +58,7 @@ presenting incomplete features as stable.
      experimental or removed surfaces as stable.
   4. Stable-core membership is explicitly listed and tied to test coverage.
 
-**Plans**: TBD
+**Plans**: [05-01-PLAN.md](phases/05-feature-status-matrix-and-stable-core-boundary/05-01-PLAN.md)
 
 ### Phase 6: Core semantics tightening
 
@@ -138,7 +138,7 @@ instruction metadata scope is agreed.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 5. Feature status matrix and stable-core boundary | 0/TBD | Not started | - |
+| 5. Feature status matrix and stable-core boundary | 0/1 | Planned | - |
 | 6. Core semantics tightening | 0/TBD | Not started | - |
 | 7. Package/module MVP | 0/TBD | Not started | - |
 | 8. VM correctness harness | 0/TBD | Not started | - |

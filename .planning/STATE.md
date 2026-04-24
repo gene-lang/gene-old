@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: "Core Stabilization + Package MVP"
-status: ready
-stopped_at: Phase 05 ready for planning
-last_updated: "2026-04-24T00:47:22Z"
-last_activity: 2026-04-24 -- Started milestone v1.1: Core Stabilization + Package MVP
+status: planned
+stopped_at: Phase 05 planned; ready for execution
+last_updated: "2026-04-24T02:37:11Z"
+last_activity: 2026-04-24 -- Planned Phase 05 feature status matrix and stable-core boundary
 progress:
   total_phases: 4
   completed_phases: 0
-  total_plans: 0
+  total_plans: 1
   completed_plans: 0
   percent: 0
 ---
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-04-24)
 
 ## Current Position
 
-Phase: 05 (feature-status-matrix-and-stable-core-boundary) - READY
-Plan: Not started
-Status: Ready to plan Phase 05
-Last activity: 2026-04-24 -- Started milestone v1.1: Core Stabilization + Package MVP
+Phase: 05 (feature-status-matrix-and-stable-core-boundary) - PLANNED
+Plan: 05-01 - Feature status matrix and stable-core boundary
+Status: Planned; ready to execute Phase 05
+Last activity: 2026-04-24 -- Planned Phase 05 feature status matrix and stable-core boundary
 Depends on completed actor migration milestone through Phase 04
 
 Progress: [----------] 0%
@@ -51,7 +51,7 @@ Progress: [----------] 0%
 | 2 | 5 | - | - |
 | 3 | 4 | - | - |
 | 4 | 3 | - | - |
-| 5 | TBD | - | - |
+| 5 | 1 | - | - |
 | 6 | TBD | - | - |
 | 7 | TBD | - | - |
 | 8 | TBD | - | - |
@@ -124,6 +124,9 @@ Recent decisions affecting current work:
   full version solver are out of scope until deterministic local packages work.
 - [Milestone v1.1]: VM correctness instrumentation should be opt-in/debug-mode
   so optimized execution remains fast by default.
+- [Phase 05]: Use `docs/feature-status.md` as the public status hub and keep
+  Phase 05 execution docs-only unless it uncovers runtime gaps that need a
+  later implementation phase.
 
 ### Pending Todos
 
@@ -152,7 +155,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-22T00:00:00Z
-Stopped at: Phase 04 complete
-Next step: Start the next roadmap track or milestone
+Last session: 2026-04-24T02:37:11Z
+Stopped at: Phase 05 planned
+Next step: Execute `.planning/phases/05-feature-status-matrix-and-stable-core-boundary/05-01-PLAN.md`
 Resume file: None
