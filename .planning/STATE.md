@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: "Core Stabilization + Package MVP"
-status: planned
-stopped_at: Phase 05 planned; ready for execution
-last_updated: "2026-04-24T02:37:11Z"
-last_activity: 2026-04-24 -- Planned Phase 05 feature status matrix and stable-core boundary
+status: ready
+stopped_at: Phase 06 ready for planning
+last_updated: "2026-04-24T02:47:26Z"
+last_activity: 2026-04-24 -- Completed Phase 05 feature status matrix and stable-core boundary
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 1
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 25
 ---
 
 # Project State
@@ -21,26 +21,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-24)
 
 **Core value:** Gene should feel trustworthy to build on: users can tell what is stable, import packages deterministically, and rely on VM invariants being actively checked.
-**Current focus:** Phase 05 - Feature status matrix and stable-core boundary
+**Current focus:** Phase 06 - Core semantics tightening
 
 ## Current Position
 
-Phase: 05 (feature-status-matrix-and-stable-core-boundary) - PLANNED
-Plan: 05-01 - Feature status matrix and stable-core boundary
-Status: Planned; ready to execute Phase 05
-Last activity: 2026-04-24 -- Planned Phase 05 feature status matrix and stable-core boundary
+Phase: 06 (core-semantics-tightening) - READY
+Plan: Not started
+Status: Ready to plan Phase 06
+Last activity: 2026-04-24 -- Completed Phase 05 feature status matrix and stable-core boundary
 Depends on completed actor migration milestone through Phase 04
 
-Progress: [----------] 0%
+Progress: [##--------] 25%
 
 ## Performance Metrics
 
 **Velocity:**
 
 - Total plans completed: 25
-- Average duration: -
-- Total execution time: not recorded
-
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
@@ -51,22 +48,10 @@ Progress: [----------] 0%
 | 2 | 5 | - | - |
 | 3 | 4 | - | - |
 | 4 | 3 | - | - |
-| 5 | 1 | - | - |
+| 5 | 1 | 3 min | 3 min |
 | 6 | TBD | - | - |
 | 7 | TBD | - | - |
 | 8 | TBD | - | - |
-
-**Recent Trend:**
-
-- Last 5 plans: 00-01, 00-02, 00-03, 00-04, 00-05 all complete 2026-04-17..18
-- Trend: New milestone initialized after actor migration completion
-
-| Phase 01 P03 | 25m | 4 tasks | 3 files |
-| Phase 01 P05 | 7m | 5 tasks | 4 files |
-| Phase 01.5 P01 | 5m | 2 tasks | 2 files |
-| Phase 01.5 P02 | 37m | 3 tasks | 5 files |
-| Phase 02 P01 | 3m | 2 tasks | 7 files |
-| Phase 02 P02 | 14 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -127,6 +112,9 @@ Recent decisions affecting current work:
 - [Phase 05]: Use `docs/feature-status.md` as the public status hub and keep
   Phase 05 execution docs-only unless it uncovers runtime gaps that need a
   later implementation phase.
+- [Phase 05]: Public feature status and stable-core membership now live in
+  `docs/feature-status.md`; Phase 06 should use that boundary when tightening
+  core semantics.
 
 ### Pending Todos
 
@@ -155,7 +143,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-24T02:37:11Z
-Stopped at: Phase 05 planned
-Next step: Execute `.planning/phases/05-feature-status-matrix-and-stable-core-boundary/05-01-PLAN.md`
+Last session: 2026-04-24T02:47:26Z
+Stopped at: Phase 06 ready for planning
+Next step: Plan Phase 06 core semantics tightening
 Resume file: None

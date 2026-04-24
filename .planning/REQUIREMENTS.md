@@ -11,17 +11,17 @@ Requirements for the current milestone. Each maps to exactly one roadmap phase.
 
 ### Feature Status
 
-- [ ] **STAT-01**: User can read one public feature-status matrix that marks
+- [x] **STAT-01**: User can read one public feature-status matrix that marks
   each major Gene surface as stable, beta, experimental, future, or removed.
-- [ ] **STAT-02**: User can see implementation status, test coverage status,
+- [x] **STAT-02**: User can see implementation status, test coverage status,
   and known gaps for each major feature without hunting across README, docs,
   specs, and planning files.
-- [ ] **STAT-03**: Public README/docs do not promote experimental or removed
+- [x] **STAT-03**: Public README/docs do not promote experimental or removed
   surfaces as stable current capabilities.
 
 ### Core Semantics
 
-- [ ] **CORE-01**: User can read a crisp stable-core definition covering
+- [x] **CORE-01**: User can read a crisp stable-core definition covering
   syntax, values, variables, functions, lexical scope, macros, modules/imports,
   errors, collections, async futures, and actor-first concurrency.
 - [ ] **CORE-02**: User can distinguish `nil` from `void` consistently across
@@ -104,10 +104,10 @@ Deferred to later milestones.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| STAT-01 | Phase 5 | Pending |
-| STAT-02 | Phase 5 | Pending |
-| STAT-03 | Phase 5 | Pending |
-| CORE-01 | Phase 5 | Pending |
+| STAT-01 | Phase 5 | Complete |
+| STAT-02 | Phase 5 | Complete |
+| STAT-03 | Phase 5 | Complete |
+| CORE-01 | Phase 5 | Complete |
 | CORE-02 | Phase 6 | Pending |
 | CORE-03 | Phase 6 | Pending |
 | CORE-04 | Phase 6 | Pending |
@@ -131,4 +131,4 @@ Deferred to later milestones.
 
 ---
 *Requirements defined: 2026-04-24*
-*Last updated: 2026-04-24 after v1.1 milestone initialization*
+*Last updated: 2026-04-24 after Phase 05 completion*

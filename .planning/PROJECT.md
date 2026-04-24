@@ -48,11 +48,12 @@ milestone that makes Gene easier to trust, package, and evolve.
   landed and verified through Phase 4.
 - ✓ GPT Pro review triage complete; stale async/concurrency spec fixed in
   `b54b8f2`, with broader review items accepted as milestone-level work.
+- ✓ Phase 5 feature status matrix and stable-core boundary are published in
+  `docs/feature-status.md`, with README/docs/spec entry points aligned to
+  actor-first concurrency.
 
 ### Active
 
-- [ ] Publish a feature status matrix that clearly separates stable, beta,
-  experimental, and future-only surfaces.
 - [ ] Tighten the stable core semantics that downstream package and VM work
   depend on.
 - [ ] Ship a package/module MVP for local deterministic package use before
@@ -128,7 +129,8 @@ Existing local evidence supports this direction:
 | Close Phase 3 by moving `genex/http` and `genex/ai/bindings` off extension-local thread/global callback ownership | HTTP now uses actor-backed request ports, and Socket Mode binding ownership is actor-scoped instead of process-global | ✓ Complete (`03-03`) |
 | Keep legacy thread docs explicit during Phase 3 and defer actual thread-surface removal to Phase 4 | Extension migration and public API removal are different risks; Phase 3 closes ownership, Phase 4 removes the old surface | ✓ Complete |
 | Remove the surviving thread-first public surface while preserving the internal worker substrate actors still use | The actor runtime still depends on worker threads internally, so Phase 4 removed only the public/compiler/docs lane and worker naming debt | ✓ Complete (`04-01`/`04-02`) |
-| Start v1.1 as core stabilization plus package MVP | GPT Pro review exposed broad scope/status/package risks after actor migration; package/core/VM trust are higher leverage than new feature breadth | Pending - roadmap starts at Phase 5 |
+| Start v1.1 as core stabilization plus package MVP | GPT Pro review exposed broad scope/status/package risks after actor migration; package/core/VM trust are higher leverage than new feature breadth | In progress - Phase 5 complete |
+| Use `docs/feature-status.md` as the public status hub | Users need one place to see stable, beta, experimental, future, and removed surfaces before package/core/VM work expands claims | ✓ Complete (`05-01`) |
 | Keep package MVP local-first | A registry would multiply product and trust decisions before import/package semantics are stable | Pending |
 | Keep VM correctness checks debug-oriented | The optimized VM deliberately trades checks for speed, so invariant coverage belongs in checked/test modes first | Pending |
 
@@ -150,4 +152,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-24 after v1.1 milestone initialization*
+*Last updated: 2026-04-24 after Phase 05 completion*
