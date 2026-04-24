@@ -99,34 +99,44 @@ catch *
   (println "Caught:" $ex))
 ```
 
-## 10.5 Threads
+## 10.5 Actors
 
-Gene supports OS threads with message passing:
+Actors are Gene's public message-passing concurrency API. The older
+thread-first surface has been retired from user code; native worker threads
+remain an internal runtime substrate for scheduling actors.
 
 ```gene
-# Spawn a thread that returns a value
-(var result (await (spawn_return (+ 100 23))))
-# result => 123
+(gene/actor/enable)
+
+(var counter
+  (gene/actor/spawn
+    ^state 0
+    (fn [ctx msg state]
+      (var next (+ state msg))
+      (ctx .reply next)
+      next)))
+
+(await (counter .send_expect_reply 41))   # => 41
+(await (counter .send_expect_reply 1))    # => 42
 ```
 
-### Message Passing
-```gene
-(var worker (spawn (do
-  (thread .on_message (fn [msg]
-    (msg .reply (+ (msg .payload) 1))))
-  (keep_alive))))
+Actor messages use tiered send semantics:
 
-(await (send_expect_reply worker 41))   # => 42
-```
+- **Primitives** are sent by value.
+- **Frozen graphs and frozen closures** may be shared by pointer.
+- **Mutable ordinary data** is cloned for the receiving actor.
+- **Runtime capabilities** such as native handles, futures, active generators,
+  and raw internal resources are actor-local and must cross actor boundaries
+  through a port actor or an explicit value protocol.
 
-Only "literal" values can be sent between threads:
-- **Allowed**: primitives, arrays, maps, Gene values (with literal contents)
-- **Not allowed**: functions, classes, instances, threads, futures, namespaces
+### Worker Limits
 
-### Thread Limits
-- Default cap is platform-dependent (macOS: 512, Linux: 1024, 32-bit: 64, WASM: 1)
-- Override at startup: `GENE_MAX_THREADS=256 gene run ...` (clamped to 4096)
-- Each thread gets its own VM and message channel
+- The actor runtime is disabled by default; call `gene/actor/enable` before
+  spawning actors.
+- `gene/actor/enable ^workers N` controls the internal worker pool size.
+- Each worker has its own VM execution context and message channel.
+- New code should use `gene/actor/*`; do not use the retired thread-first
+  helpers.
 
 ---
 
@@ -134,8 +144,8 @@ Only "literal" values can be sent between threads:
 
 - **Structured concurrency**: No built-in way to manage groups of futures (wait-all / wait-any). Must manually track and await each.
 - **`async for`**: No async iteration protocol. Cannot `for` over a stream of async values.
-- **Thread safety of shared state**: No mutex, lock, or atomic primitives in the language. Shared mutable state across threads is unsafe.
-- **Channel type**: Message passing uses thread-specific send. A first-class Channel type (like Go channels) would enable more flexible concurrent patterns.
-- **Thread pool**: Native OS threads; cap is runtime-configurable via `GENE_MAX_THREADS`. A work-stealing M:N scheduler would reduce per-thread overhead for high-concurrency workloads.
+- **Actor supervision**: No built-in supervision tree or monitor API yet.
+- **Channel type**: Message passing is actor-oriented. A first-class Channel type is intentionally not part of the stable surface yet.
+- **Worker scheduler**: Native OS workers back actors internally. A work-stealing M:N scheduler would reduce hot-worker imbalance for high-concurrency workloads.
 - **Async in constructors/methods**: Async works in functions but the interaction with class constructors and method dispatch may have edge cases.
 - **Event loop visibility**: The internal polling interval (every 100 instructions) is not configurable and not visible to users.
