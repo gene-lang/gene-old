@@ -23,6 +23,14 @@ type
     status*: ActorTrySendStatus
     future*: Value
 
+  ActorQueueSnapshot* = object
+    exists*: bool
+    stopped*: bool
+    dispatched*: bool
+    mailbox_len*: int
+    pending_len*: int
+    mailbox_limit*: int
+
   ActorMailboxMessage = ref object
     payload: Value
     reply_requested: bool
@@ -446,6 +454,24 @@ proc actor_lookup(actor_id: int): ActorRuntimeRecord =
   acquire(actor_runtime_lock)
   defer: release(actor_runtime_lock)
   actor_registry.getOrDefault(actor_id)
+
+proc actor_queue_snapshot*(actor_value: Value): ActorQueueSnapshot {.gcsafe.} =
+  {.cast(gcsafe).}:
+    result = ActorQueueSnapshot(exists: false, stopped: false, dispatched: false,
+                                mailbox_len: 0, pending_len: 0, mailbox_limit: 0)
+    if actor_value.kind != VkActor or actor_value.ref.actor == nil:
+      return
+    let record = actor_lookup(actor_value.ref.actor.id)
+    if record == nil:
+      return
+    acquire(record.lock)
+    result.exists = true
+    result.stopped = record.stopped
+    result.dispatched = record.dispatched
+    result.mailbox_len = record.mailbox.len
+    result.pending_len = record.pending_sends.len
+    result.mailbox_limit = record.mailbox_limit
+    release(record.lock)
 
 proc actor_process_message(msg: ThreadMessage) =
   if msg.payload.kind != VkInt:

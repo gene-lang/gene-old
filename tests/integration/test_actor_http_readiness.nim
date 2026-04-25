@@ -11,7 +11,8 @@ from ../../src/genex/http import gene_init, reset_http_concurrent_state_for_test
   configure_http_handler_for_test, ensure_http_request_ports_for_test,
   try_dispatch_http_concurrent_request_for_test, dispatch_http_concurrent_request_for_test,
   configure_http_backpressure_for_test, configure_http_request_timeout_for_test,
-  http_backpressure_status_for_test, wait_http_response_future_for_test,
+  http_backpressure_status_for_test, http_server_status_for_test,
+  wait_http_response_future_for_test,
   try_begin_http_in_flight_for_test, finish_http_in_flight_for_test,
   HttpActorDispatchStatus, HttpFutureResponseStatus
 
@@ -50,6 +51,22 @@ proc response_body(response: Value): string =
   let body = map_data(response).getOrDefault("body".to_key(), NIL)
   if body.kind == VkString: body.str else: $body
 
+proc status_field(status: Value, key: string): Value =
+  check status.kind == VkMap
+  map_data(status).getOrDefault(key.to_key(), NIL)
+
+proc status_int(status: Value, key: string): int =
+  let value = status_field(status, key)
+  if value.kind == VkInt: value.to_int else: -1
+
+proc status_str(status: Value, key: string): string =
+  let value = status_field(status, key)
+  if value.kind == VkString: value.str else: $value
+
+proc status_bool(status: Value, key: string): bool =
+  let value = status_field(status, key)
+  if value.kind == VkBool: value.to_bool() else: false
+
 proc await_vm_future(future_value: Value, timeout_ms = 2_000): Value =
   let deadline = epochTime() + (timeout_ms.float / 1000.0)
   let future = future_value.ref.future
@@ -73,7 +90,9 @@ proc readiness_handler(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], 
   if path == "/slow":
     sleep(220)
   if path == "/boom":
-    raise new_exception(types.Exception, "handler boom")
+    raise new_exception(types.Exception, "handler boom token=secret request-body=hidden")
+  if path == "/bad-response":
+    return 123.to_value()
 
   new_map_value({
     "status".to_key(): 200.to_value(),
@@ -81,7 +100,7 @@ proc readiness_handler(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], 
     "headers".to_key(): new_map_value()
   }.toTable())
 
-proc init_http_actor_test(workers: int, queue_limit = 1) =
+proc init_http_actor_test(workers: int, queue_limit = 1, requested_http_workers = 0) =
   init_thread_pool()
   init_app_and_vm()
   init_stdlib()
@@ -95,7 +114,7 @@ proc init_http_actor_test(workers: int, queue_limit = 1) =
   actor_enable_for_test(workers)
   configure_http_handler_for_test(VM, NativeFn(readiness_handler).to_value())
   configure_http_backpressure_for_test(queue_limit, 100, 503)
-  discard ensure_http_request_ports_for_test(workers)
+  discard ensure_http_request_ports_for_test(if requested_http_workers > 0: requested_http_workers else: workers)
 
 suite "Actor-backed HTTP readiness backpressure":
   test "tiny actor queue returns overload immediately and later success still works":
@@ -116,6 +135,13 @@ suite "Actor-backed HTTP readiness backpressure":
     check overloaded.status == HadsOverloaded
     check overloaded.future == NIL
     check elapsed_ms < 50.0
+
+    let overloaded_status = http_server_status_for_test()
+    check status_int(overloaded_status, "overload_count") == 1
+    check status_str(overloaded_status, "last_error_kind") == "overload"
+    check status_str(overloaded_status, "last_error") == "actor request worker queue saturated"
+    check status_int(overloaded_status, "queued_requests") >= 0
+    check status_int(overloaded_status, "active_requests") >= 0
 
     check response_body(await_vm_future(first.future)) == "ok:/slow"
     check response_body(await_vm_future(queued.future)) == "ok:/slow"
@@ -211,13 +237,18 @@ suite "Actor-backed HTTP readiness backpressure":
     check timeout_status.last_timeout_error == "GENE.ASYNC.TIMEOUT: await timed out"
     check timeout_status.last_timeout_at.len > 0
 
+    let public_timeout_status = http_server_status_for_test()
+    check status_int(public_timeout_status, "timeout_count") == 1
+    check status_str(public_timeout_status, "last_error_kind") == "timeout"
+    check status_str(public_timeout_status, "last_error") == "GENE.ASYNC.TIMEOUT: await timed out"
+
     sleep(260)
     VM.event_loop_counter = 100
     poll_event_loop(VM)
     check dispatch.future.ref.future.state == FsFailure
     check VM.thread_futures.len == 0
 
-  test "handler failure before timeout is returned as failure response, not timeout":
+  test "handler failure before timeout is returned as failed reply, counted, and lane recovers":
     init_http_actor_test(1, 1)
     configure_http_request_timeout_for_test(500)
 
@@ -225,11 +256,59 @@ suite "Actor-backed HTTP readiness backpressure":
     check dispatch.status == HadsAccepted
 
     let waited = wait_http_response_future_for_test(VM, dispatch.future)
-    check waited.status == HfrSuccess
-    check waited.response.kind == VkMap
-    check map_data(waited.response)["status".to_key()].to_int == 500
-    check "handler boom" in response_body(waited.response)
-    check http_backpressure_status_for_test().timeout_count == 0
+    check waited.status == HfrFailure
+    check waited.http_status == 500
+    check waited.body == "Async response error: HTTP actor handler failed"
+    check "token=secret" notin waited.body
+    check "request-body" notin waited.body
+
+    let failure_status = http_server_status_for_test()
+    check status_int(failure_status, "handler_failure_count") == 1
+    check status_str(failure_status, "last_error_kind") == "handler_failure"
+    check status_str(failure_status, "last_error") == "HTTP actor handler failed"
+    check "token=secret" notin status_str(failure_status, "last_error")
+    check status_bool(failure_status, "redacted")
+
+    let health = try_dispatch_http_concurrent_request_for_test(VM, request_literal("/health"))
+    check health.status == HadsAccepted
+    check response_body(await_vm_future(health.future)) == "ok:/health"
+
+  test "malformed actor handler response is counted as a redacted handler failure":
+    init_http_actor_test(1, 1)
+
+    let dispatch = try_dispatch_http_concurrent_request_for_test(VM, request_literal("/bad-response"))
+    check dispatch.status == HadsAccepted
+
+    let waited = wait_http_response_future_for_test(VM, dispatch.future)
+    check waited.status == HfrFailure
+    check waited.body == "Async response error: HTTP actor handler failed"
+
+    let failure_status = http_server_status_for_test()
+    check status_int(failure_status, "handler_failure_count") == 1
+    check status_str(failure_status, "last_error_kind") == "handler_malformed_response"
+
+  test "requested workers above cap are visible as clamped effective workers":
+    init_http_actor_test(2, 1, 10)
+
+    let status = http_server_status_for_test()
+    check status_int(status, "requested_workers") == 10
+    check status_int(status, "effective_workers") == 8
+    check status_int(status, "max_workers") == 8
+    check status_bool(status, "worker_clamped")
+    check status_str(status, "worker_health") == "ready"
+    check status_str(status, "last_error_kind") == "worker_clamped"
+
+  test "status helper reports stopped state and rejects malformed handles":
+    reset_http_concurrent_state_for_test()
+
+    let stopped = http_server_status_for_test()
+    check status_str(stopped, "status") == "stopped"
+    check status_str(stopped, "worker_health") == "not-started"
+
+    let invalid = http_server_status_for_test("unknown".to_value())
+    check status_str(invalid, "status") == "invalid-handle"
+    check status_str(invalid, "status_error") == "GENE.HTTP.STATUS.INVALID_HANDLE"
+    check status_bool(invalid, "redacted")
 
   test "configured max_in_flight rejects excess accepted requests deterministically":
     init_http_actor_test(1, 1)
@@ -238,8 +317,10 @@ suite "Actor-backed HTTP readiness backpressure":
     check try_begin_http_in_flight_for_test() == HadsAccepted
     check try_begin_http_in_flight_for_test() == HadsLimitExceeded
 
-    var status = http_backpressure_status_for_test()
-    check status.in_flight == 1
+    var status = http_server_status_for_test()
+    check status_int(status, "in_flight") == 1
+    check status_int(status, "overload_count") == 1
+    check status_str(status, "last_error") == "max_in_flight limit reached"
 
     finish_http_in_flight_for_test()
     check try_begin_http_in_flight_for_test() == HadsAccepted

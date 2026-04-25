@@ -44,10 +44,22 @@ var next_http_port_idx = 0
 var http_queue_limit = DEFAULT_ACTOR_MAILBOX_LIMIT
 var http_max_in_flight = 0
 var http_in_flight = 0
+var http_requested_workers = 0
+var http_effective_workers = 0
+var http_worker_clamped = false
+var http_overload_count = 0
+var http_handler_failure_count = 0
+var http_dispatch_failure_count = 0
+var http_startup_failure_count = 0
 var http_request_timeout_ms = DEFAULT_HTTP_REQUEST_TIMEOUT_MS
 var http_timeout_count = 0
 var http_last_timeout_error = ""
 var http_last_timeout_at = ""
+var http_last_error_kind = ""
+var http_last_error = ""
+var http_last_error_at = ""
+var http_server_running = false
+var http_server_port = 0
 var http_overload_status = DEFAULT_HTTP_OVERLOAD_STATUS
 var http_overload_body = DEFAULT_HTTP_OVERLOAD_BODY
 
@@ -107,6 +119,7 @@ proc request_send(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_c
 proc response_constructor(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.}
 proc response_json(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.}
 proc vm_start_server(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.}
+proc vm_http_server_status(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.}
 proc vm_respond(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.}
 proc vm_respond_sse(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.}
 proc vm_redirect(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.}
@@ -207,6 +220,85 @@ proc keyword_int_value(args: ptr UncheckedArray[Value], name: string): int =
     raise new_exception(types.Exception, "start_server ^" & name & " expects an integer")
   value.int64.int
 
+proc http_now(): string {.gcsafe.} =
+  {.cast(gcsafe).}:
+    $epochTime()
+
+proc set_http_last_error(kind, message: string) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    http_last_error_kind = kind
+    http_last_error = message
+    http_last_error_at = http_now()
+
+proc record_http_overload(reason: string) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    inc http_overload_count
+    set_http_last_error("overload", reason)
+    if http_overload_count == 1 or (http_overload_count mod 100) == 0:
+      http_log(LlWarn, "HTTP actor request overloaded: " & reason & " (count=" & $http_overload_count & ")")
+
+proc record_http_dispatch_failure(status: HttpActorDispatchStatus) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    inc http_dispatch_failure_count
+    set_http_last_error("dispatch_failure", "HTTP concurrent dispatch failed: " & $status)
+    http_log(LlError, "HTTP concurrent dispatch failed with status " & $status)
+
+proc record_http_handler_failure(kind: string) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    inc http_handler_failure_count
+    set_http_last_error(kind, "HTTP actor handler failed")
+
+proc record_http_startup_failure(message: string) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    inc http_startup_failure_count
+    http_server_running = false
+    set_http_last_error("startup_failure", message)
+    http_log(LlError, "HTTP actor startup failed: " & message)
+
+proc reset_http_diagnostics_for_server(port: int) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    http_in_flight = 0
+    http_requested_workers = 0
+    http_effective_workers = 0
+    http_worker_clamped = false
+    http_overload_count = 0
+    http_handler_failure_count = 0
+    http_dispatch_failure_count = 0
+    http_startup_failure_count = 0
+    http_timeout_count = 0
+    http_last_timeout_error = ""
+    http_last_timeout_at = ""
+    http_last_error_kind = ""
+    http_last_error = ""
+    http_last_error_at = ""
+    http_server_running = false
+    http_server_port = port
+
+proc parse_http_worker_count(args: ptr UncheckedArray[Value], has_keyword_args: bool): int {.gcsafe.} =
+  {.cast(gcsafe).}:
+    var worker_count = 4
+    if has_keyword_args and has_keyword_arg(args, "workers"):
+      let workers_val = get_keyword_arg(args, "workers")
+      if workers_val.kind != VkInt:
+        record_http_startup_failure("start_server ^workers expects an integer")
+        raise new_exception(types.Exception, "start_server ^workers expects an integer")
+      worker_count = workers_val.int64.int
+    if worker_count <= 0:
+      record_http_startup_failure("start_server ^workers must be positive")
+      raise new_exception(types.Exception, "start_server ^workers must be positive")
+    worker_count
+
+proc effective_http_worker_count(worker_count: int): int {.gcsafe.} =
+  {.cast(gcsafe).}:
+    let effective = min(worker_count, MAX_HTTP_WORKERS)
+    http_requested_workers = worker_count
+    http_effective_workers = max(1, effective)
+    http_worker_clamped = worker_count != http_effective_workers
+    if http_worker_clamped:
+      set_http_last_error("worker_clamped", "HTTP actor worker count clamped to supported maximum")
+      http_log(LlWarn, "HTTP actor worker count clamped: requested=" & $worker_count & ", effective=" & $http_effective_workers & ", max=" & $MAX_HTTP_WORKERS)
+    http_effective_workers
+
 proc apply_http_backpressure_config(queue_limit, max_in_flight_limit,
                                     overload_status_value: int,
                                     max_in_flight_specified: bool) =
@@ -250,6 +342,7 @@ proc parse_http_backpressure_keywords(args: ptr UncheckedArray[Value], has_keywo
 proc try_acquire_http_in_flight(): bool {.gcsafe.} =
   {.cast(gcsafe).}:
     if http_max_in_flight > 0 and http_in_flight >= http_max_in_flight:
+      record_http_overload("max_in_flight limit reached")
       return false
     inc http_in_flight
     true
@@ -287,7 +380,8 @@ proc record_http_timeout(message: string) {.gcsafe.} =
   {.cast(gcsafe).}:
     inc http_timeout_count
     http_last_timeout_error = "GENE.ASYNC.TIMEOUT: " & message
-    http_last_timeout_at = $epochTime()
+    http_last_timeout_at = http_now()
+    set_http_last_error("timeout", http_last_timeout_error)
     http_log(LlWarn, "HTTP actor response timed out after " & $http_request_timeout_ms & "ms; abandoned reply future")
 
 proc await_http_response_future(vm: ptr VirtualMachine, future_value: Value): Future[HttpFutureResponseResult] {.async, gcsafe.} =
@@ -321,6 +415,8 @@ proc await_http_response_future(vm: ptr VirtualMachine, future_value: Value): Fu
     result.http_status = 500
     result.error = future_error_message(future_obj.value, "Async response failed")
     result.body = "Async response error: " & result.error
+    if result.error == "HTTP actor handler failed":
+      http_log(LlError, "HTTP actor handler failed; reply future failed safely")
   of FsCancelled:
     result.status = HfrCancelled
     result.response = future_obj.value
@@ -342,9 +438,10 @@ proc ensure_http_request_ports(worker_count: int): Value {.gcsafe.} =
     if http_request_ports.kind == VkArray:
       return http_request_ports
     if not http_extension_host_ready:
+      record_http_startup_failure("HTTP extension host context is not initialized")
       raise new_exception(types.Exception, "HTTP extension host context is not initialized")
 
-    let requested = min(max(1, worker_count), MAX_HTTP_WORKERS)
+    let requested = effective_http_worker_count(worker_count)
     var handle = NIL
     let status = register_port_pool(
       addr http_extension_host,
@@ -356,10 +453,14 @@ proc ensure_http_request_ports(worker_count: int): Value {.gcsafe.} =
       http_queue_limit
     )
     if status != GeneExtOk or handle.kind != VkArray:
+      http_effective_workers = 0
+      record_http_startup_failure("HTTP concurrent mode requires gene/actor/enable before start_server ^concurrent true")
       raise new_exception(types.Exception, "HTTP concurrent mode requires gene/actor/enable before start_server ^concurrent true")
 
     http_request_ports = handle
     http_request_port_count = array_data(handle).len
+    http_effective_workers = http_request_port_count
+    http_worker_clamped = http_requested_workers != http_effective_workers
     next_http_port_idx = 0
     handle
 
@@ -387,6 +488,13 @@ proc try_dispatch_to_http_actor(vm: ptr VirtualMachine, request_data: Value): Ht
       last_status = mapped
 
     result.status = last_status
+    case last_status
+    of HadsOverloaded, HadsLimitExceeded:
+      record_http_overload("actor request worker queue saturated")
+    of HadsStopped, HadsInvalid, HadsError:
+      record_http_dispatch_failure(last_status)
+    else:
+      discard
 
 proc dispatch_to_http_actor(vm: ptr VirtualMachine, request_data: Value): Value {.gcsafe.} =
   let dispatch = try_dispatch_to_http_actor(vm, request_data)
@@ -424,10 +532,22 @@ proc reset_http_concurrent_state_for_test*() {.gcsafe.} =
     http_queue_limit = DEFAULT_ACTOR_MAILBOX_LIMIT
     http_max_in_flight = 0
     http_in_flight = 0
+    http_requested_workers = 0
+    http_effective_workers = 0
+    http_worker_clamped = false
+    http_overload_count = 0
+    http_handler_failure_count = 0
+    http_dispatch_failure_count = 0
+    http_startup_failure_count = 0
     http_request_timeout_ms = DEFAULT_HTTP_REQUEST_TIMEOUT_MS
     http_timeout_count = 0
     http_last_timeout_error = ""
     http_last_timeout_at = ""
+    http_last_error_kind = ""
+    http_last_error = ""
+    http_last_error_at = ""
+    http_server_running = false
+    http_server_port = 0
     http_overload_status = DEFAULT_HTTP_OVERLOAD_STATUS
     http_overload_body = DEFAULT_HTTP_OVERLOAD_BODY
     concurrent_mode = false
@@ -467,6 +587,96 @@ proc http_backpressure_status_for_test*(): tuple[queue_limit: int, max_in_flight
     (http_queue_limit, http_max_in_flight, http_in_flight, http_overload_status,
      http_overload_body, http_request_timeout_ms, http_timeout_count,
      http_last_timeout_error, http_last_timeout_at)
+
+proc build_http_server_status(handle_error = ""): Value {.gcsafe.} =
+  {.cast(gcsafe).}:
+    var active_workers = 0
+    var queued_requests = 0
+    var stopped_workers = 0
+    var invalid_workers = 0
+    var observed_queue_limit = http_queue_limit
+
+    if http_request_ports.kind == VkArray:
+      for actor_handle in array_data(http_request_ports):
+        let snapshot = actor_queue_snapshot(actor_handle)
+        if not snapshot.exists:
+          inc invalid_workers
+        else:
+          if snapshot.stopped:
+            inc stopped_workers
+          if snapshot.dispatched:
+            inc active_workers
+          queued_requests += snapshot.mailbox_len + snapshot.pending_len
+          if snapshot.mailbox_limit > 0:
+            observed_queue_limit = snapshot.mailbox_limit
+
+    let has_ports = http_request_ports.kind == VkArray and http_effective_workers > 0
+    let worker_health =
+      if handle_error.len > 0:
+        "invalid"
+      elif not has_ports:
+        "not-started"
+      elif invalid_workers > 0:
+        "invalid"
+      elif stopped_workers > 0:
+        "degraded"
+      else:
+        "ready"
+    let status =
+      if handle_error.len > 0:
+        "invalid-handle"
+      elif http_startup_failure_count > 0 and not has_ports:
+        "startup-failed"
+      elif not http_server_running and not has_ports:
+        "stopped"
+      elif invalid_workers > 0 or stopped_workers > 0 or
+           http_dispatch_failure_count > 0 or http_handler_failure_count > 0 or
+           http_timeout_count > 0 or http_overload_count > 0:
+        "degraded"
+      else:
+        "ok"
+
+    result = new_map_value()
+    map_data(result)["status".to_key()] = status.to_value()
+    map_data(result)["status_error".to_key()] = handle_error.to_value()
+    map_data(result)["concurrent".to_key()] = concurrent_mode.to_value()
+    map_data(result)["actor_backed".to_key()] = (concurrent_mode and has_ports).to_value()
+    map_data(result)["server_running".to_key()] = http_server_running.to_value()
+    map_data(result)["port".to_key()] = http_server_port.to_value()
+    map_data(result)["requested_workers".to_key()] = http_requested_workers.to_value()
+    map_data(result)["effective_workers".to_key()] = http_effective_workers.to_value()
+    map_data(result)["max_workers".to_key()] = MAX_HTTP_WORKERS.to_value()
+    map_data(result)["worker_clamped".to_key()] = http_worker_clamped.to_value()
+    map_data(result)["worker_health".to_key()] = worker_health.to_value()
+    map_data(result)["worker_port_count".to_key()] = http_request_port_count.to_value()
+    map_data(result)["stopped_workers".to_key()] = stopped_workers.to_value()
+    map_data(result)["invalid_workers".to_key()] = invalid_workers.to_value()
+    map_data(result)["queue_limit".to_key()] = observed_queue_limit.to_value()
+    map_data(result)["max_in_flight".to_key()] = http_max_in_flight.to_value()
+    map_data(result)["in_flight".to_key()] = http_in_flight.to_value()
+    map_data(result)["active_workers".to_key()] = active_workers.to_value()
+    map_data(result)["active_requests".to_key()] = active_workers.to_value()
+    map_data(result)["queued_requests".to_key()] = queued_requests.to_value()
+    map_data(result)["overload_status".to_key()] = http_overload_status.to_value()
+    map_data(result)["overload_body".to_key()] = http_overload_body.to_value()
+    map_data(result)["request_timeout_ms".to_key()] = http_request_timeout_ms.to_value()
+    map_data(result)["overload_count".to_key()] = http_overload_count.to_value()
+    map_data(result)["timeout_count".to_key()] = http_timeout_count.to_value()
+    map_data(result)["handler_failure_count".to_key()] = http_handler_failure_count.to_value()
+    map_data(result)["dispatch_failure_count".to_key()] = http_dispatch_failure_count.to_value()
+    map_data(result)["startup_failure_count".to_key()] = http_startup_failure_count.to_value()
+    map_data(result)["last_error_kind".to_key()] = http_last_error_kind.to_value()
+    map_data(result)["last_error".to_key()] = http_last_error.to_value()
+    map_data(result)["last_error_at".to_key()] = http_last_error_at.to_value()
+    map_data(result)["last_timeout_error".to_key()] = http_last_timeout_error.to_value()
+    map_data(result)["last_timeout_at".to_key()] = http_last_timeout_at.to_value()
+    map_data(result)["redacted".to_key()] = true.to_value()
+
+proc http_server_status_for_test*(handle: Value = NIL): Value {.gcsafe.} =
+  if handle.kind == VkNil:
+    build_http_server_status()
+  else:
+    build_http_server_status("GENE.HTTP.STATUS.INVALID_HANDLE")
 
 proc wait_http_response_future_for_test*(vm: ptr VirtualMachine, future_value: Value): HttpFutureResponseResult {.gcsafe.} =
   waitFor await_http_response_future(vm, future_value)
@@ -894,6 +1104,10 @@ proc init*(vm: ptr VirtualMachine): Namespace {.exportc, dynlib.} =
   result["start_server".to_key()] = fn.to_ref_value()
 
   fn = new_ref(VkNativeFn)
+  fn.native_fn = vm_http_server_status
+  result["http_server_status".to_key()] = fn.to_ref_value()
+
+  fn = new_ref(VkNativeFn)
   fn.native_fn = vm_respond
   result["respond".to_key()] = fn.to_ref_value()
 
@@ -918,6 +1132,9 @@ proc gene_init*(host: ptr GeneHostAbi): int32 {.cdecl, exportc, dynlib.} =
   http_request_ports = NIL
   http_request_port_count = 0
   next_http_port_idx = 0
+  http_requested_workers = 0
+  http_effective_workers = 0
+  http_worker_clamped = false
   if host.register_scheduler_callback_fn != nil and not http_host_scheduler_registered:
     if host.register_scheduler_callback_fn(http_scheduler_tick, nil) != int32(GeneExtOk):
       return int32(GeneExtErr)
@@ -1209,6 +1426,10 @@ proc init_http_classes*() =
     start_server_fn.native_fn = vm_start_server
     App.app.global_ns.ref.ns["start_server".to_key()] = start_server_fn.to_ref_value()
 
+    let status_fn = new_ref(VkNativeFn)
+    status_fn.native_fn = vm_http_server_status
+    App.app.global_ns.ref.ns["http_server_status".to_key()] = status_fn.to_ref_value()
+
     let respond_fn = new_ref(VkNativeFn)
     respond_fn.native_fn = vm_respond
     App.app.global_ns.ref.ns["respond".to_key()] = respond_fn.to_ref_value()
@@ -1273,16 +1494,22 @@ proc http_actor_handle_request(vm: ptr VirtualMachine, args: ptr UncheckedArray[
     # Convert literal map back to ServerRequest instance
     let request = literal_to_server_request(req_data)
 
+    var handler_result = NIL
     try:
-      let result = execute_gene_function(vm, gene_handler_global, @[request])
-      let literal_result = response_to_literal(result)
-      if not is_literal_value(literal_result):
-        http_reply_from_context(ctx, literal_error_response("Internal Server Error: response is not literal"))
-      else:
-        http_reply_from_context(ctx, literal_result)
-    except CatchableError as e:
-      http_log(LlError, "Actor handler error: " & e.msg)
-      http_reply_from_context(ctx, literal_error_response("Internal Server Error: " & e.msg))
+      handler_result = execute_gene_function(vm, gene_handler_global, @[request])
+    except CatchableError:
+      record_http_handler_failure("handler_failure")
+      raise new_exception(types.Exception, "HTTP actor handler failed")
+
+    let literal_result = response_to_literal(handler_result)
+    if literal_result.kind notin {VkMap, VkString}:
+      record_http_handler_failure("handler_malformed_response")
+      raise new_exception(types.Exception, "HTTP actor handler failed")
+    if not is_literal_value(literal_result):
+      record_http_handler_failure("handler_non_literal_response")
+      raise new_exception(types.Exception, "HTTP actor handler failed")
+
+    http_reply_from_context(ctx, literal_result)
     state
 
 # HTTP Server implementation
@@ -1655,6 +1882,16 @@ proc handle_request(req: asynchttpserver.Request) {.async, gcsafe.} =
       # Unknown response type
       await req.respond(Http500, "Invalid response type: " & $response.kind)
 
+proc vm_http_server_status(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
+  discard vm
+  let positional_count = get_positional_count(arg_count, has_keyword_args)
+  if positional_count == 0:
+    return build_http_server_status()
+  let handle = get_positional_arg(args, 0, has_keyword_args)
+  if handle.kind == VkNil:
+    return build_http_server_status()
+  build_http_server_status("GENE.HTTP.STATUS.INVALID_HANDLE")
+
 # Start HTTP server
 proc vm_start_server(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_count: int, has_keyword_args: bool): Value {.gcsafe.} =
   if arg_count < 1:
@@ -1664,6 +1901,7 @@ proc vm_start_server(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], ar
   let handler = if get_positional_count(arg_count, has_keyword_args) > 1: get_positional_arg(args, 1, has_keyword_args) else: NIL
 
   let port = if port_val.kind == VkInt: port_val.int64.int else: 8080
+  reset_http_diagnostics_for_server(port)
 
   # Check for ^websocket keyword arg: {^path "/ws" ^handler ws_handler}
   {.cast(gcsafe).}:
@@ -1686,12 +1924,12 @@ proc vm_start_server(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], ar
     concurrent_mode = concurrent_val != NIL and concurrent_val.to_bool()
 
     if concurrent_mode:
-      # Get worker count (default to 4)
-      let workers_val = if has_keyword_args: get_keyword_arg(args, "workers") else: NIL
-      let worker_count = if workers_val.kind == VkInt: workers_val.int64.int else: 4
+      let worker_count = parse_http_worker_count(args, has_keyword_args)
+      let effective_workers = effective_http_worker_count(worker_count)
 
-      http_log(LlDebug, "Concurrent mode enabled with " & $worker_count &
-        " actor-backed HTTP workers, queue_limit=" & $http_queue_limit &
+      http_log(LlDebug, "Concurrent mode enabled with requested_workers=" & $worker_count &
+        ", effective_workers=" & $effective_workers &
+        ", queue_limit=" & $http_queue_limit &
         ", max_in_flight=" & (if http_max_in_flight > 0: $http_max_in_flight else: "unlimited") &
         ", request_timeout_ms=" & $http_request_timeout_ms &
         ", overload_status=" & $http_overload_status)
@@ -1724,13 +1962,18 @@ proc vm_start_server(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], ar
 
   # Create and start server
   {.cast(gcsafe).}:
-    http_server = newAsyncHttpServer()
-    asyncCheck http_server.serve(Port(port), handle_request)
-    # Give the event loop time to bind the server socket
     try:
-      poll(100)  # Wait up to 100ms for server to bind
-    except ValueError:
-      discard
+      http_server = newAsyncHttpServer()
+      asyncCheck http_server.serve(Port(port), handle_request)
+      # Give the event loop time to bind the server socket
+      try:
+        poll(100)  # Wait up to 100ms for server to bind
+      except ValueError:
+        discard
+      http_server_running = true
+    except CatchableError:
+      record_http_startup_failure("HTTP server failed to start")
+      raise
 
   http_log(LlDebug, "HTTP server started on port " & $port)
   return NIL

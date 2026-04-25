@@ -4,7 +4,7 @@
 
 (var port 8089)
 (var sleep_ms 200)
-(var actor_workers 10)
+(var actor_workers 8)
 
 (gene/actor/enable ^workers actor_workers)
 

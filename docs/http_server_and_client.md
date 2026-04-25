@@ -15,8 +15,9 @@ Typical usage:
 
 The extension registers:
 
-- global helpers: `http_get`, `http_post`, `start_server`, `respond`,
-  `respond_sse`, `redirect`, `ws_connect`
+- global helpers: `http_get`, `http_post`, `start_server`,
+  `http_server_status`, `respond`, `respond_sse`, `redirect`,
+  `ws_connect`
 - classes in the `gene` namespace: `gene/Request`, `gene/Response`,
   `gene/ServerRequest`, `gene/ServerStream`, `gene/WsConnection`
 
@@ -93,27 +94,32 @@ Current surface:
 Current keywords:
 
 - `^concurrent true|false`
-- `^workers <int>`
+- `^workers <int>`: requested actor-backed HTTP request workers. Defaults to `4`; values must be positive integers. Requests above the supported cap (`8`) are clamped visibly and exposed as `requested_workers`, `effective_workers`, and `worker_clamped` in `http_server_status`.
 - `^queue_limit <positive-int>`: actor-backed concurrent-mode mailbox capacity per HTTP request worker. Defaults to `10000`; values above `10000`, zero, negative values, and non-integers fail at server start.
 - `^max_in_flight <positive-int>`: optional cap for accepted actor-backed HTTP requests currently awaiting a worker reply. Omit it for the historical unlimited behavior; configured values must be `1..10000`.
 - `^overload_status <int>`: HTTP status returned for deterministic backpressure responses. Defaults to `503` and must be in the `400..599` range.
 - `^request_timeout_ms <positive-int>`: actor-backed concurrent-mode deadline while waiting for a worker reply. Defaults to `10000` (10 seconds); values must be `1..600000` and non-integers fail at server start.
 - `^websocket {^path "/ws" ^handler handler}`
 
-Current ownership model:
+Current ownership and diagnostics model:
 
 - `^concurrent true` routes request execution through actor-backed request
   ports instead of the older extension-local Gene thread pool.
 - Concurrent dispatch uses a non-blocking actor-port enqueue. If all request
   workers are saturated, or if `^max_in_flight` has been reached, the server
   returns the configured overload status immediately instead of waiting on actor
-  mailbox space.
+  mailbox space. Overload events increment `overload_count` and update the
+  redacted `last_error` fields in `http_server_status`.
 - The default overload response is status `503` with the small body
   `Service overloaded`. The body is intentionally fixed and does not include
   request bodies, tokens, or headers.
-- Stopped or invalid actor request ports fail closed with a safe `500` response;
-  detailed low-overhead counters/status are added by the later readiness
-  diagnostics work.
+- Worker requests above the current actor-backed HTTP cap are not silent:
+  startup logs the clamp through `http_log`, and `http_server_status` exposes
+  both `requested_workers` and `effective_workers` plus `worker_clamped`.
+- Stopped or invalid actor request ports fail closed with a safe `500` response
+  and increment dispatch diagnostics. Status exposes worker health, stopped or
+  invalid port counts, active worker count, queued request count from actor
+  mailbox snapshots, and in-flight request count.
 - Actor-backed request timeouts are cooperative abandonment boundaries. When a
   worker reply is not available within `^request_timeout_ms`, the HTTP request
   is completed with status `504` and body `Async response error: await timed out`,
@@ -121,12 +127,53 @@ Current ownership model:
   `await ^timeout`, and runtime tracking is detached so a later stale actor
   reply is ignored. The actor turn may still finish later; Gene does not
   preempt or cancel the running actor handler.
-- Timeout diagnostics currently stay in low-overhead internal counters used by
-  readiness tests (`request_timeout_ms`, timeout count, last timeout error, and
-  timestamp) and the existing `http_log` path. They intentionally omit request
-  bodies, tokens, and full headers.
+- Handler exceptions and unsupported concurrent response shapes become failed
+  actor reply futures and safe HTTP `500` responses. The actor-backed lane stays
+  alive for later requests, and `handler_failure_count` plus redacted
+  `last_error` fields identify the failure class. This is failure recovery, not
+  an actor supervision tree or monitoring API.
+- Timeout, overload, dispatch, startup, and handler-failure diagnostics use
+  low-overhead counters and the existing `http_log` path. They intentionally
+  omit request bodies, secrets, tokens, and full headers.
 - SSE and websocket upgrade handling stay on the live server-owner lane because
-  they still require the live socket/client object.
+  they still require the live socket/client object; actor-backed readiness does
+  not claim SSE or WebSocket execution.
+
+### `http_server_status`
+
+```gene
+(var status (http_server_status))
+(println status/status)
+(println status/effective_workers)
+(println status/overload_count)
+```
+
+`http_server_status` returns a map and does not wait on actor workers. The
+current helper is process-global because `start_server` does not yet return a
+server handle; call it with no arguments. Passing a non-`nil` value returns a
+safe diagnostic map with `status` set to `"invalid-handle"` and `status_error`
+set to `"GENE.HTTP.STATUS.INVALID_HANDLE"` rather than crashing callers.
+
+Important fields:
+
+- `status`: `ok`, `degraded`, `stopped`, `startup-failed`, or
+  `invalid-handle`.
+- `server_running`, `port`, `concurrent`, and `actor_backed`.
+- `requested_workers`, `effective_workers`, `max_workers`, `worker_clamped`,
+  `worker_health`, `worker_port_count`, `stopped_workers`, and
+  `invalid_workers`.
+- `queue_limit`, `queued_requests`, `active_workers`, `active_requests`,
+  `max_in_flight`, and `in_flight`.
+- `overload_count`, `timeout_count`, `handler_failure_count`,
+  `dispatch_failure_count`, and `startup_failure_count`.
+- `last_error_kind`, `last_error`, `last_error_at`, `last_timeout_error`, and
+  `last_timeout_at`.
+- `redacted`: always `true` for this helper; status values intentionally avoid
+  request bodies, secrets, tokens, and full headers.
+
+The helper reports backend-readiness signals for actor-backed request/response
+HTTP behind a reverse proxy. It is not a direct edge-hardening status endpoint
+and does not imply actor-backed SSE/WebSocket support.
 
 The current example is [examples/http_server.gene](../examples/http_server.gene).
 
