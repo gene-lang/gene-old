@@ -3,7 +3,16 @@
 (import genex/http)
 
 (var port 8088)
+(var port_str ($env .get "HTTP_AB_PORT" ""))
+(if (port_str/.length > 0)
+  (port = port_str/.to_i)
+)
+
 (var sleep_ms 200)
+(var sleep_ms_str ($env .get "HTTP_AB_SLEEP_MS" ""))
+(if (sleep_ms_str/.length > 0)
+  (sleep_ms = sleep_ms_str/.to_i)
+)
 
 (fn app [req]
   (if (req/path == "/")

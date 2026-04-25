@@ -175,6 +175,33 @@ The helper reports backend-readiness signals for actor-backed request/response
 HTTP behind a reverse proxy. It is not a direct edge-hardening status endpoint
 and does not imply actor-backed SSE/WebSocket support.
 
+### Benchmark Artifact Evidence
+
+The actor-backed HTTP benchmark runner writes durable JSON and optional Markdown
+evidence instead of relying on terminal-only `ab` output:
+
+```bash
+REQUESTS=40 CONCURRENCY=8 ./scripts/bench_http_ab_demo.sh
+./scripts/verify_http_benchmark_artifact.sh
+```
+
+The default artifact path is `benchmark-results/http-ab-<UTC timestamp>/`, with
+`http_ab_benchmark.json` as the machine-readable source of truth and
+`http_ab_benchmark.md` as a human summary. Set `BENCH_ARTIFACT_DIR` to choose a
+specific directory, or set `BENCH_DRY_RUN=1` to parse the tracked fixtures under
+`tests/fixtures/` without requiring ApacheBench or starting demo servers.
+
+The JSON records schema/run timestamps, environment metadata, request count,
+concurrency, endpoint, demo sleep duration, baseline and actor-backed ports,
+actor worker setting, build command/exit code, server log paths/readiness
+metadata, `ab` exit codes/timeouts, parsed metrics, parser errors, and redaction
+policy. It intentionally omits request bodies, secrets, tokens, and full headers.
+Use the artifact for same-machine comparative evidence; do not treat a specific
+requests-per-second value as a portable pass/fail guarantee.
+
+See [docs/benchmark_http_server.md](benchmark_http_server.md) for field details,
+fixture verification, optional live-run settings, and interpretation guidance.
+
 The current example is [examples/http_server.gene](../examples/http_server.gene).
 
 Actor-backed example:

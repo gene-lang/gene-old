@@ -3,8 +3,22 @@
 (import genex/http)
 
 (var port 8089)
+(var port_str ($env .get "HTTP_AB_PORT" ""))
+(if (port_str/.length > 0)
+  (port = port_str/.to_i)
+)
+
 (var sleep_ms 200)
+(var sleep_ms_str ($env .get "HTTP_AB_SLEEP_MS" ""))
+(if (sleep_ms_str/.length > 0)
+  (sleep_ms = sleep_ms_str/.to_i)
+)
+
 (var actor_workers 8)
+(var actor_workers_str ($env .get "HTTP_AB_ACTOR_WORKERS" ""))
+(if (actor_workers_str/.length > 0)
+  (actor_workers = actor_workers_str/.to_i)
+)
 
 (gene/actor/enable ^workers actor_workers)
 

@@ -1,0 +1,11 @@
+This is ApacheBench, Version 2.3 <$Revision: 1903618 $>
+
+Benchmarking 127.0.0.1 (be patient).....done
+
+Server Hostname:        127.0.0.1
+Server Port:            8088
+Document Path:          /slow
+
+# Intentionally malformed: this fixture omits the core numeric ApacheBench
+# metrics such as Complete requests, Failed requests, Requests per second,
+# Time per request, and Transfer rate. The verifier must reject it.
