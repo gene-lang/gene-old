@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: milestone
-status: complete
-stopped_at: Phase 08 completed
-last_updated: "2026-04-24T22:13:38Z"
-last_activity: 2026-04-24 -- Phase 08 completed
+status: ready_to_plan
+stopped_at: Phase 09 added
+last_updated: "2026-04-25T17:16:52Z"
+last_activity: 2026-04-25 -- Phase 09 added
 progress:
-  total_phases: 4
+  total_phases: 5
   completed_phases: 4
   total_plans: 4
   completed_plans: 4
-  percent: 100
+  percent: 80
 ---
 
 # Project State
@@ -21,17 +21,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-24)
 
 **Core value:** Gene should feel trustworthy to build on: users can tell what is stable, import packages deterministically, and rely on VM invariants being actively checked.
-**Current focus:** v1.1 milestone complete
+**Current focus:** Phase 09 - Actor-backed HTTP production readiness
 
 ## Current Position
 
-Phase: 8 — COMPLETE
-Plan: 1 of 1
-Status: Phase 08 complete
-Last activity: 2026-04-24 -- Phase 08 completed
+Phase: 9
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-04-25 -- Phase 09 added
 Depends on completed actor migration milestone through Phase 04
 
-Progress: [##########] 100%
+Progress: [########--] 80%
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Progress: [##########] 100%
 | 6 | 1 | - | - |
 | 7 | 1 | - | - |
 | 8 | 1 | - | - |
+| 9 | TBD | - | - |
 
 ## Accumulated Context
 
@@ -147,6 +148,15 @@ Recent decisions affecting current work:
 - [Phase 08]: `void` is now a compilable and serializable sentinel literal so
   user code can branch on missing selector results with `(if (g/x == void) ...)`.
 
+### Roadmap Evolution
+
+- Phase 9 added: Actor-backed HTTP production readiness. Captures the
+  high-performance HTTP backend readiness review: replace O(n) actor mailbox
+  dequeue behavior, define HTTP request backpressure, add actor-backed request
+  timeouts/cancellation, clarify crash/supervision semantics, revisit HTTP
+  worker caps, and produce direct-vs-actor-vs-Nim baseline benchmarks before
+  making production-grade performance claims.
+
 ### Pending Todos
 
 None yet.
@@ -175,8 +185,8 @@ None yet.
 ## Session Continuity
 
 Last session: --stopped-at
-Stopped at: Phase 08 completed
-Next step: Archive or audit the v1.1 milestone, then start the next milestone
+Stopped at: Phase 09 added
+Next step: Plan Phase 09 actor-backed HTTP production readiness
 Resume file: --resume-file
 
-**Planned Phase:** 08 (vm-correctness-harness) — 1 plans — 2026-04-24T21:10:59.319Z
+**Planned Phase:** 09 (actor-backed-http-production-readiness) — 0 plans — 2026-04-25T17:16:52Z

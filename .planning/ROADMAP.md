@@ -34,6 +34,11 @@ starts at Phase 5.
 - [x] **Phase 8: VM correctness harness** - Add checked VM invariant support,
   instruction metadata, GIR compatibility checks, and parser/serdes/GIR stress
   coverage without slowing optimized default execution.
+- [ ] **Phase 9: Actor-backed HTTP production readiness** - Move the
+  actor-backed HTTP path from experimental/beta infrastructure toward a
+  backend-grade runtime by fixing hot-path mailbox cost, request backpressure,
+  timeouts/cancellation, supervision semantics, worker configuration, and
+  benchmark evidence.
 
 ## Phase Details
 
@@ -134,6 +139,35 @@ instruction metadata scope is agreed.
 
 **Plans**: [08-01-PLAN.md](phases/08-vm-correctness-harness/08-01-PLAN.md)
 
+### Phase 9: Actor-backed HTTP production readiness
+
+**Goal**: Make the actor-backed HTTP runtime credible for serious backend
+experiments by addressing the concrete gaps identified in the performance
+readiness review before any high-performance production claim.
+
+**Depends on**: Phase 2 actor runtime; Phase 3 port actors for extensions;
+Phase 8 checked VM harness.
+
+**Requirements**: TBD
+
+**Success Criteria** (what must be TRUE):
+  1. Actor mailboxes no longer use O(n) front deletion on the hot receive path;
+     the replacement queue has focused correctness and stress coverage.
+  2. Actor-backed HTTP request dispatch has explicit backpressure behavior for
+     full queues, including deterministic reject/timeout semantics suitable for
+     mapping to 503/504 responses.
+  3. Actor-backed request handling has bounded timeout and cancellation
+     behavior so stalled actors do not retain HTTP requests indefinitely.
+  4. Handler failure, actor crash, stop, and invalid-message behavior are
+     documented and covered for backend request actors.
+  5. HTTP worker configuration is no longer hidden behind an arbitrary cap, or
+     the cap is justified and documented with operational guidance.
+  6. Benchmarks compare direct HTTP handlers, actor-backed handlers, and a
+     Nim-native baseline with throughput, p50/p95/p99 latency, CPU, memory,
+     and queue-depth observations across representative routes.
+
+**Plans**: 0 plans
+
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
@@ -142,6 +176,7 @@ instruction metadata scope is agreed.
 | 6. Core semantics tightening | 1/1 | Complete | 2026-04-24 |
 | 7. Package/module MVP | 1/1 | Complete    | 2026-04-24 |
 | 8. VM correctness harness | 1/1 | Complete | 2026-04-24 |
+| 9. Actor-backed HTTP production readiness | 0/TBD | Not started | - |
 
 ## Coverage
 
