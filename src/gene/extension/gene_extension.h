@@ -1,6 +1,6 @@
 /**
  * Gene VM C Extension API
- * 
+ *
  * This header provides the C interface for creating Gene VM extensions.
  * Extensions must export one function:
  *   - int32_t gene_init(GeneHostAbi* host)
@@ -99,14 +99,14 @@ typedef struct GeneHostAbi {
 
 /**
  * NativeFn - Function pointer type for native functions
- * 
+ *
  * @param vm - The VM instance
  * @param args - Array of argument values
  * @param arg_count - Number of arguments
  * @param has_keyword_args - Whether keyword arguments are present
  * @return Value - The return value
  */
-typedef Value (*NativeFn)(VirtualMachine* vm, Value* args, 
+typedef Value (*NativeFn)(VirtualMachine* vm, Value* args,
                           int arg_count, bool has_keyword_args);
 
 typedef int32_t (*GeneExtensionInitFn)(GeneHostAbi* host);
@@ -190,7 +190,7 @@ extern Namespace* gene_new_namespace(const char* name);
 
 /**
  * Set a value in a namespace
- * 
+ *
  * @param ns - The namespace
  * @param key - The key (symbol name as string)
  * @param value - The value to set
