@@ -21,6 +21,17 @@ template guard_deep_frozen_write(target: Value, op_name: static[string]) =
   if target.deep_frozen:
     raise_frozen_write(op_name, target)
 
+proc fail_future_with_timeout*(self: ptr VirtualMachine, future_obj: FutureObj,
+                               message = "await timed out",
+                               location = "await"): Value =
+  ## Apply the same Future timeout contract used by `await ^timeout`:
+  ## fail the pending Future with GENE.ASYNC.TIMEOUT, run callbacks, and
+  ## detach runtime tracking so later/stale producer replies are ignored.
+  result = new_async_error("GENE.ASYNC.TIMEOUT", message, location)
+  if future_obj.fail(result):
+    self.execute_future_callbacks(future_obj)
+  self.detach_future_tracking(future_obj)
+
 proc resolve_local_lookup_value(self: ptr VirtualMachine, key: Key): Value {.inline.} =
   if self == nil or self.frame == nil or self.frame.scope == nil or self.frame.scope.tracker == nil:
     return VOID
@@ -4450,10 +4461,7 @@ proc exec*(self: ptr VirtualMachine): Value =
               if timeout_ms >= 0:
                 let elapsed_ms = ((host_now_us() - start_time_us) div 1000).int
                 if elapsed_ms >= timeout_ms:
-                  let timeout_error = new_async_error("GENE.ASYNC.TIMEOUT", "await timed out", "await")
-                  if future.fail(timeout_error):
-                    self.execute_future_callbacks(future)
-                  self.detach_future_tracking(future)
+                  discard self.fail_future_with_timeout(future, "await timed out", "await")
                   break
 
               sleep(1)

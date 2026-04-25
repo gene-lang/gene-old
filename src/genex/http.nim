@@ -25,6 +25,9 @@ type
 const MAX_HTTP_WORKERS = 8
 const MAX_HTTP_QUEUE_LIMIT = DEFAULT_ACTOR_MAILBOX_LIMIT
 const MAX_HTTP_IN_FLIGHT = 10_000
+const DEFAULT_HTTP_REQUEST_TIMEOUT_MS = 10_000
+const MAX_HTTP_REQUEST_TIMEOUT_MS = 600_000
+const DEFAULT_HTTP_TIMEOUT_STATUS = 504
 const DEFAULT_HTTP_OVERLOAD_STATUS = 503
 const DEFAULT_HTTP_OVERLOAD_BODY = "Service overloaded"
 const GenexHttpLogger = "genex/http"
@@ -41,6 +44,10 @@ var next_http_port_idx = 0
 var http_queue_limit = DEFAULT_ACTOR_MAILBOX_LIMIT
 var http_max_in_flight = 0
 var http_in_flight = 0
+var http_request_timeout_ms = DEFAULT_HTTP_REQUEST_TIMEOUT_MS
+var http_timeout_count = 0
+var http_last_timeout_error = ""
+var http_last_timeout_at = ""
 var http_overload_status = DEFAULT_HTTP_OVERLOAD_STATUS
 var http_overload_body = DEFAULT_HTTP_OVERLOAD_BODY
 
@@ -56,6 +63,20 @@ type
   HttpActorDispatchResult* = object
     status*: HttpActorDispatchStatus
     future*: Value
+
+  HttpFutureResponseStatus* = enum
+    HfrSuccess
+    HfrFailure
+    HfrCancelled
+    HfrTimeout
+    HfrMissingPoll
+
+  HttpFutureResponseResult* = object
+    status*: HttpFutureResponseStatus
+    response*: Value
+    http_status*: int
+    body*: string
+    error*: string
 
 # Global variables to store classes
 var request_class_global: Class
@@ -173,6 +194,13 @@ proc validate_http_overload_status(value: int): int =
     raise new_exception(types.Exception, "start_server ^overload_status expects an HTTP error status from 400 to 599")
   value
 
+proc validate_http_request_timeout_ms(value: int): int =
+  if value <= 0:
+    raise new_exception(types.Exception, "start_server ^request_timeout_ms must be positive")
+  if value > MAX_HTTP_REQUEST_TIMEOUT_MS:
+    raise new_exception(types.Exception, "start_server ^request_timeout_ms exceeds max " & $MAX_HTTP_REQUEST_TIMEOUT_MS)
+  value
+
 proc keyword_int_value(args: ptr UncheckedArray[Value], name: string): int =
   let value = get_keyword_arg(args, name)
   if value.kind != VkInt:
@@ -190,11 +218,15 @@ proc apply_http_backpressure_config(queue_limit, max_in_flight_limit,
   http_overload_status = validate_http_overload_status(overload_status_value)
   http_overload_body = DEFAULT_HTTP_OVERLOAD_BODY
 
+proc apply_http_request_timeout_config(request_timeout_ms_value: int) =
+  http_request_timeout_ms = validate_http_request_timeout_ms(request_timeout_ms_value)
+
 proc parse_http_backpressure_keywords(args: ptr UncheckedArray[Value], has_keyword_args: bool) =
   var queue_limit = DEFAULT_ACTOR_MAILBOX_LIMIT
   var max_in_flight_limit = 0
   var max_in_flight_specified = false
   var overload_status_value = DEFAULT_HTTP_OVERLOAD_STATUS
+  var request_timeout_ms_value = DEFAULT_HTTP_REQUEST_TIMEOUT_MS
 
   if has_keyword_args:
     if has_keyword_arg(args, "queue_limit"):
@@ -204,6 +236,8 @@ proc parse_http_backpressure_keywords(args: ptr UncheckedArray[Value], has_keywo
       max_in_flight_specified = true
     if has_keyword_arg(args, "overload_status"):
       overload_status_value = keyword_int_value(args, "overload_status")
+    if has_keyword_arg(args, "request_timeout_ms"):
+      request_timeout_ms_value = keyword_int_value(args, "request_timeout_ms")
 
   apply_http_backpressure_config(
     queue_limit,
@@ -211,6 +245,7 @@ proc parse_http_backpressure_keywords(args: ptr UncheckedArray[Value], has_keywo
     overload_status_value,
     max_in_flight_specified
   )
+  apply_http_request_timeout_config(request_timeout_ms_value)
 
 proc try_acquire_http_in_flight(): bool {.gcsafe.} =
   {.cast(gcsafe).}:
@@ -235,6 +270,72 @@ proc map_extension_dispatch_status(status: GeneExtStatus): HttpActorDispatchStat
 
 proc overload_response_body(): string =
   http_overload_body
+
+proc future_error_message(err: Value, fallback: string): string =
+  if err.kind == VkInstance:
+    let msg = instance_props(err).getOrDefault("message".to_key(), NIL)
+    if msg.kind == VkString:
+      return msg.str
+  elif err.kind == VkString:
+    return err.str
+  fallback
+
+proc timeout_response_body(message: string): string =
+  "Async response error: " & message
+
+proc record_http_timeout(message: string) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    inc http_timeout_count
+    http_last_timeout_error = "GENE.ASYNC.TIMEOUT: " & message
+    http_last_timeout_at = $epochTime()
+    http_log(LlWarn, "HTTP actor response timed out after " & $http_request_timeout_ms & "ms; abandoned reply future")
+
+proc await_http_response_future(vm: ptr VirtualMachine, future_value: Value): Future[HttpFutureResponseResult] {.async, gcsafe.} =
+  result = HttpFutureResponseResult(status: HfrFailure, response: NIL, http_status: 500,
+                                    body: "Async response error: invalid future", error: "invalid future")
+  if future_value.kind != VkFuture:
+    return
+
+  let future_obj = future_value.ref.future
+  let deadline = epochTime() + (http_request_timeout_ms.float / 1000.0)
+  while future_obj.state == FsPending and epochTime() < deadline:
+    if not http_extension_host_ready or http_extension_host.poll_vm_fn == nil:
+      result.status = HfrMissingPoll
+      result.http_status = 500
+      result.error = "Future response is missing the host poll callback"
+      result.body = result.error
+      return
+    discard http_extension_host.poll_vm_fn(http_extension_host.user_data)
+    await sleepAsync(1)
+
+  case future_obj.state
+  of FsSuccess:
+    result.status = HfrSuccess
+    result.response = future_obj.value
+    result.http_status = 200
+    result.body = ""
+    result.error = ""
+  of FsFailure:
+    result.status = HfrFailure
+    result.response = future_obj.value
+    result.http_status = 500
+    result.error = future_error_message(future_obj.value, "Async response failed")
+    result.body = "Async response error: " & result.error
+  of FsCancelled:
+    result.status = HfrCancelled
+    result.response = future_obj.value
+    result.http_status = 500
+    result.error = future_error_message(future_obj.value, "Async response cancelled")
+    result.body = "Async response error: " & result.error
+  of FsPending:
+    let timeout_error = vm.fail_future_with_timeout(future_obj, "await timed out", "http_request")
+    let message = future_error_message(timeout_error, "await timed out")
+    record_http_timeout(message)
+    result.status = HfrTimeout
+    result.response = timeout_error
+    result.http_status = DEFAULT_HTTP_TIMEOUT_STATUS
+    result.error = message
+    result.body = timeout_response_body(message)
 
 proc ensure_http_request_ports(worker_count: int): Value {.gcsafe.} =
   {.cast(gcsafe).}:
@@ -323,6 +424,10 @@ proc reset_http_concurrent_state_for_test*() {.gcsafe.} =
     http_queue_limit = DEFAULT_ACTOR_MAILBOX_LIMIT
     http_max_in_flight = 0
     http_in_flight = 0
+    http_request_timeout_ms = DEFAULT_HTTP_REQUEST_TIMEOUT_MS
+    http_timeout_count = 0
+    http_last_timeout_error = ""
+    http_last_timeout_at = ""
     http_overload_status = DEFAULT_HTTP_OVERLOAD_STATUS
     http_overload_body = DEFAULT_HTTP_OVERLOAD_BODY
     concurrent_mode = false
@@ -347,11 +452,24 @@ proc configure_http_backpressure_for_test*(queue_limit, max_in_flight_limit,
       true
     )
 
+proc configure_http_request_timeout_for_test*(request_timeout_ms_value: int) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    apply_http_request_timeout_config(request_timeout_ms_value)
+
 proc http_backpressure_status_for_test*(): tuple[queue_limit: int, max_in_flight: int,
                                                 in_flight: int, overload_status: int,
-                                                overload_body: string] {.gcsafe.} =
+                                                overload_body: string,
+                                                request_timeout_ms: int,
+                                                timeout_count: int,
+                                                last_timeout_error: string,
+                                                last_timeout_at: string] {.gcsafe.} =
   {.cast(gcsafe).}:
-    (http_queue_limit, http_max_in_flight, http_in_flight, http_overload_status, http_overload_body)
+    (http_queue_limit, http_max_in_flight, http_in_flight, http_overload_status,
+     http_overload_body, http_request_timeout_ms, http_timeout_count,
+     http_last_timeout_error, http_last_timeout_at)
+
+proc wait_http_response_future_for_test*(vm: ptr VirtualMachine, future_value: Value): HttpFutureResponseResult {.gcsafe.} =
+  waitFor await_http_response_future(vm, future_value)
 
 proc try_begin_http_in_flight_for_test*(): HttpActorDispatchStatus {.gcsafe.} =
   if try_acquire_http_in_flight(): HadsAccepted else: HadsLimitExceeded
@@ -1474,38 +1592,19 @@ proc handle_request(req: asynchttpserver.Request) {.async, gcsafe.} =
           return
 
     if response.kind == VkFuture:
-      try:
-        let future_obj = response.ref.future
-        let deadline = epochTime() + 10.0
-        while future_obj.state == FsPending and epochTime() < deadline:
-          if not http_extension_host_ready or http_extension_host.poll_vm_fn == nil:
-            await req.respond(Http500, "Future response is missing the host poll callback")
-            return
-          discard http_extension_host.poll_vm_fn(http_extension_host.user_data)
-          await sleepAsync(1)
-
-        case future_obj.state
-        of FsSuccess:
-          response = future_obj.value
+      let wait_result = await await_http_response_future(gene_vm_global, response)
+      case wait_result.status
+      of HfrSuccess:
+        response = wait_result.response
+        track_response(response)
+        if response.kind == VkMap:
+          response = literal_to_server_response(response)
           track_response(response)
-          if response.kind == VkMap:
-            response = literal_to_server_response(response)
-            track_response(response)
-        of FsFailure:
-          let err = future_obj.value
-          if err.kind == VkInstance:
-            let msg = instance_props(err).getOrDefault("message".to_key(), NIL)
-            if msg.kind == VkString:
-              raise new_exception(types.Exception, msg.str)
-          elif err.kind == VkString:
-            raise new_exception(types.Exception, err.str)
-          raise new_exception(types.Exception, "Async response failed")
-        of FsCancelled:
-          raise new_exception(types.Exception, "Async response cancelled")
-        of FsPending:
-          raise new_exception(types.Exception, "Async response timed out")
-      except CatchableError as e:
-        await req.respond(Http500, "Async response error: " & e.msg)
+      of HfrTimeout:
+        await req.respond(HttpCode(wait_result.http_status), wait_result.body)
+        return
+      of HfrFailure, HfrCancelled, HfrMissingPoll:
+        await req.respond(HttpCode(wait_result.http_status), wait_result.body)
         return
 
     # Handle the response
@@ -1594,6 +1693,7 @@ proc vm_start_server(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], ar
       http_log(LlDebug, "Concurrent mode enabled with " & $worker_count &
         " actor-backed HTTP workers, queue_limit=" & $http_queue_limit &
         ", max_in_flight=" & (if http_max_in_flight > 0: $http_max_in_flight else: "unlimited") &
+        ", request_timeout_ms=" & $http_request_timeout_ms &
         ", overload_status=" & $http_overload_status)
       discard ensure_http_request_ports(worker_count)
 

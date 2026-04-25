@@ -97,6 +97,7 @@ Current keywords:
 - `^queue_limit <positive-int>`: actor-backed concurrent-mode mailbox capacity per HTTP request worker. Defaults to `10000`; values above `10000`, zero, negative values, and non-integers fail at server start.
 - `^max_in_flight <positive-int>`: optional cap for accepted actor-backed HTTP requests currently awaiting a worker reply. Omit it for the historical unlimited behavior; configured values must be `1..10000`.
 - `^overload_status <int>`: HTTP status returned for deterministic backpressure responses. Defaults to `503` and must be in the `400..599` range.
+- `^request_timeout_ms <positive-int>`: actor-backed concurrent-mode deadline while waiting for a worker reply. Defaults to `10000` (10 seconds); values must be `1..600000` and non-integers fail at server start.
 - `^websocket {^path "/ws" ^handler handler}`
 
 Current ownership model:
@@ -113,6 +114,17 @@ Current ownership model:
 - Stopped or invalid actor request ports fail closed with a safe `500` response;
   detailed low-overhead counters/status are added by the later readiness
   diagnostics work.
+- Actor-backed request timeouts are cooperative abandonment boundaries. When a
+  worker reply is not available within `^request_timeout_ms`, the HTTP request
+  is completed with status `504` and body `Async response error: await timed out`,
+  the reply future is failed with the same `GENE.ASYNC.TIMEOUT` shape used by
+  `await ^timeout`, and runtime tracking is detached so a later stale actor
+  reply is ignored. The actor turn may still finish later; Gene does not
+  preempt or cancel the running actor handler.
+- Timeout diagnostics currently stay in low-overhead internal counters used by
+  readiness tests (`request_timeout_ms`, timeout count, last timeout error, and
+  timestamp) and the existing `http_log` path. They intentionally omit request
+  bodies, tokens, and full headers.
 - SSE and websocket upgrade handling stay on the live server-owner lane because
   they still require the live socket/client object.
 
