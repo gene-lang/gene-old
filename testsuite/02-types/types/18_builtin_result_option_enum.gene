@@ -119,5 +119,70 @@ catch *
 (println "none keyword rejected")
 # Expected: none keyword rejected
 
+# ? only unwraps/returns built-in Result/Option enum identities.
+(fn builtin_unwrap_ok []
+  ((Ok 11) ?))
+(assert ((builtin_unwrap_ok) == 11))
+(println "builtin ok unwrap = " (builtin_unwrap_ok))
+# Expected: builtin ok unwrap = 11
+
+(fn builtin_unwrap_some []
+  ((Some "identity some") ?))
+(assert ((builtin_unwrap_some) == "identity some"))
+(println "builtin some unwrap = " (builtin_unwrap_some))
+# Expected: builtin some unwrap = identity some
+
+(fn builtin_early_err []
+  (var ignored ((Err "identity boom") ?))
+  "after built-in err")
+(assert ((builtin_early_err) == (Err "identity boom")))
+(println "builtin err early return = " (builtin_early_err))
+# Expected: builtin err early return = (Result/Err "identity boom")
+
+(fn builtin_early_none []
+  (var ignored (None ?))
+  "after built-in none")
+(assert ((builtin_early_none) == None))
+(println "builtin none early return = " (builtin_early_none))
+# Expected: builtin none early return = Option/None
+
+(enum ShadowResult
+  (Ok value)
+  (Err error))
+
+(enum ShadowOption
+  (Some value)
+  None)
+
+(fn shadow_ok_passthrough []
+  (var val ((ShadowResult/Ok "shadow ok") ?))
+  val)
+(var shadow_ok_result (shadow_ok_passthrough))
+(assert ((shadow_ok_result .value) == "shadow ok"))
+(println "shadow ok passthrough = " shadow_ok_result)
+# Expected: shadow ok passthrough = (ShadowResult/Ok "shadow ok")
+
+(fn shadow_err_passthrough []
+  (var val ((ShadowResult/Err "shadow err") ?))
+  "after shadow err")
+(assert ((shadow_err_passthrough) == "after shadow err"))
+(println "shadow err passthrough = " (shadow_err_passthrough))
+# Expected: shadow err passthrough = after shadow err
+
+(fn shadow_some_passthrough []
+  (var val ((ShadowOption/Some "shadow some") ?))
+  val)
+(var shadow_some_result (shadow_some_passthrough))
+(assert ((shadow_some_result .value) == "shadow some"))
+(println "shadow some passthrough = " shadow_some_result)
+# Expected: shadow some passthrough = (ShadowOption/Some "shadow some")
+
+(fn shadow_none_passthrough []
+  (var val (ShadowOption/None ?))
+  "after shadow none")
+(assert ((shadow_none_passthrough) == "after shadow none"))
+(println "shadow none passthrough = " (shadow_none_passthrough))
+# Expected: shadow none passthrough = after shadow none
+
 (println "built-in Result/Option enum constructor tests completed")
 # Expected: built-in Result/Option enum constructor tests completed

@@ -271,13 +271,16 @@ proc add_adt(self: TypeChecker, name: string, params: seq[string], variants: seq
     self.types[name] = TypeExpr(kind: TkNamed, name: name)
 
 proc register_builtin_adts(self: TypeChecker) =
+  let result_t = TypeExpr(kind: TkNamed, name: "T")
+  let result_e = TypeExpr(kind: TkNamed, name: "E")
+  let option_t = TypeExpr(kind: TkNamed, name: "T")
   self.add_adt("Result", @["T", "E"], @[
-    AdtVariant(name: "Ok", field_count: 1, param_index: 0),
-    AdtVariant(name: "Err", field_count: 1, param_index: 1)
+    AdtVariant(name: "Ok", field_count: 1, param_index: 0, fields: @["value"], field_types: @[result_t]),
+    AdtVariant(name: "Err", field_count: 1, param_index: 1, fields: @["error"], field_types: @[result_e])
   ])
   self.add_adt("Option", @["T"], @[
-    AdtVariant(name: "Some", field_count: 1, param_index: 0),
-    AdtVariant(name: "None", field_count: 0, param_index: -1)
+    AdtVariant(name: "Some", field_count: 1, param_index: 0, fields: @["value"], field_types: @[option_t]),
+    AdtVariant(name: "None", field_count: 0, param_index: -1, fields: @[], field_types: @[])
   ])
 
 proc fresh_var(self: TypeChecker): TypeExpr =
@@ -1467,9 +1470,20 @@ proc check_adt_ctor(self: TypeChecker, gene: ptr Gene): TypeExpr =
     for i in 0..<adt.params.len:
       args[i] = ANY_TYPE
 
-  if variant.param_index >= 0 and gene.children.len > 0 and variant.param_index < args.len:
-    let inner_type = self.check_expr(gene.children[0])
-    args[variant.param_index] = inner_type
+  if variant.param_index >= 0 and variant.param_index < args.len:
+    var payload: Value = NIL
+    var found_payload = false
+    if gene.children.len > 0:
+      payload = gene.children[0]
+      found_payload = true
+    elif variant.fields.len == 1:
+      let field_key = variant.fields[0].to_key()
+      if gene.props.hasKey(field_key):
+        payload = gene.props[field_key]
+        found_payload = true
+    if found_payload:
+      let inner_type = self.check_expr(payload)
+      args[variant.param_index] = inner_type
 
   if adt.params.len > 0:
     return TypeExpr(kind: TkApplied, ctor: adt.name, args: args)
@@ -2520,10 +2534,26 @@ proc check_question_op(self: TypeChecker, gene: ptr Gene): TypeExpr =
   return ANY_TYPE
 
 proc check_infix(self: TypeChecker, gene: ptr Gene): TypeExpr =
-  if gene.children.len < 2:
+  if gene.children.len == 0:
     return ANY_TYPE
   let op = gene.children[0]
   if op.kind != VkSymbol:
+    return ANY_TYPE
+
+  if op.str == "?":
+    # Postfix ? for error propagation: (expr ?)
+    if gene.children.len != 1:
+      return ANY_TYPE
+    let left_type = self.check_expr(gene.`type`)
+    let rt = self.resolve(left_type)
+    if rt.kind == TkApplied:
+      if rt.ctor == "Result" and rt.args.len >= 1:
+        return rt.args[0]
+      elif rt.ctor == "Option" and rt.args.len >= 1:
+        return rt.args[0]
+    return ANY_TYPE
+
+  if gene.children.len < 2:
     return ANY_TYPE
 
   if op.str == "=" and gene.`type`.kind in {VkArray, VkMap}:
@@ -2602,15 +2632,6 @@ proc check_infix(self: TypeChecker, gene: ptr Gene): TypeExpr =
   of "+=", "-=", "*=", "/=", "%=":
     # Compound assignment - type is same as left operand
     return left_type
-  of "?":
-    # Postfix ? for error propagation: (expr ?)
-    let rt = self.resolve(left_type)
-    if rt.kind == TkApplied:
-      if rt.ctor == "Result" and rt.args.len >= 1:
-        return rt.args[0]
-      elif rt.ctor == "Option" and rt.args.len >= 1:
-        return rt.args[0]
-    return ANY_TYPE
   of "is":
     # (x is Type) returns Bool
     return TypeExpr(kind: TkNamed, name: "Bool")

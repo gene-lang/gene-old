@@ -565,6 +565,52 @@ suite "Static type checking":
       (Item value: MissingType))
   """, "Unknown type: MissingType"
 
+  test_strict_type_ok """
+    (fn unwrap_result [r: (Result Int String)] -> Int
+      (var value (r ?))
+      value)
+    (unwrap_result (Ok 7))
+  """
+
+  test_strict_type_error_contains """
+    (fn unwrap_result_wrong [r: (Result Int String)] -> String
+      (r ?))
+  """, "expected String, got Int"
+
+  test_strict_type_ok """
+    (fn unwrap_option [o: (Option String)] -> String
+      (var value (o ?))
+      value)
+    (unwrap_option (Some "ready"))
+  """
+
+  test_strict_type_error_contains """
+    (fn unwrap_option_wrong [o: (Option String)] -> Int
+      (o ?))
+  """, "expected Int, got String"
+
+  test_strict_type_ok """
+    (fn unwrap_keyword_ok [] -> Int
+      ((Ok ^value 1) ?))
+    (unwrap_keyword_ok)
+  """
+
+  test_strict_type_error_contains """
+    (fn unwrap_keyword_ok_wrong [] -> String
+      ((Ok ^value 1) ?))
+  """, "expected String, got Int"
+
+  test_strict_type_ok """
+    (fn unwrap_keyword_some [] -> String
+      ((Some ^value "ready") ?))
+    (unwrap_keyword_some)
+  """
+
+  test_strict_type_error_contains """
+    (fn unwrap_keyword_some_wrong [] -> Int
+      ((Some ^value "ready") ?))
+  """, "expected Int, got String"
+
   test_vm """
     (enum Result:T:E
       (Ok value: T)
