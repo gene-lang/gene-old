@@ -1,4 +1,4 @@
-import unittest, strutils, tables, os
+import unittest, strutils, tables, os, algorithm
 
 import ../src/gene/types except Exception
 import ../src/gene/parser
@@ -33,6 +33,196 @@ proc new_gene_int*(val: int): Value =
 
 proc new_gene_symbol*(s: string): Value =
   s.to_symbol_value()
+
+proc sorted_summary_lines(values: seq[string]): seq[string] =
+  result = values
+  sort(result, system.cmp[string])
+
+proc type_id_summary(ids: seq[TypeId]): string =
+  var parts: seq[string] = @[]
+  for id in ids:
+    parts.add($id)
+  "[" & parts.join(",") & "]"
+
+proc is_zero_value_for_summary(value: Value): bool {.inline.} =
+  value.raw == 0'u64
+
+proc type_id_value_summary(value: Value): string =
+  if is_zero_value_for_summary(value):
+    return "<zero>"
+  if value.kind != VkInt:
+    return "<" & $value.kind & ">"
+  $value.to_int()
+
+proc type_id_array_value_summary(value: Value): string =
+  if is_zero_value_for_summary(value):
+    return "<zero>"
+  if value.kind == VkNil:
+    return "nil"
+  if value.kind != VkArray:
+    return "<" & $value.kind & ">"
+  var parts: seq[string] = @[]
+  for item in array_data(value):
+    parts.add(type_id_value_summary(item))
+  "[" & parts.join(",") & "]"
+
+proc add_scope_tracker_summary(lines: var seq[string], owner: string,
+                               tracker: ScopeTracker, depth = 0) =
+  if tracker == nil:
+    lines.add(owner & "=nil")
+    return
+  if depth > 32:
+    lines.add(owner & ".parent=<depth-limit>")
+    return
+
+  lines.add(owner &
+    " next_index=" & $tracker.next_index &
+    " parent_index_max=" & $tracker.parent_index_max &
+    " scope_started=" & $tracker.scope_started &
+    " expectations=" & type_id_summary(tracker.type_expectation_ids))
+  if tracker.parent == nil:
+    lines.add(owner & ".parent=nil")
+  else:
+    lines.add(owner & ".parent=present")
+    add_scope_tracker_summary(lines, owner & ".parent", tracker.parent, depth + 1)
+
+proc summarize_compilation_unit(cu: CompilationUnit, owner: string,
+                                lines: var seq[string], depth: int)
+
+proc add_compiled_body_summary(lines: var seq[string], owner: string,
+                               value: Value, depth: int) =
+  if is_zero_value_for_summary(value):
+    lines.add(owner & "=<zero>")
+    return
+  case value.kind
+  of VkNil:
+    lines.add(owner & "=nil")
+  of VkCompiledUnit:
+    lines.add(owner & "=present")
+    summarize_compilation_unit(value.ref.cu, owner, lines, depth + 1)
+  else:
+    lines.add(owner & "=<" & $value.kind & ">")
+
+proc add_function_def_summary(lines: var seq[string], owner: string,
+                              value: Value, depth: int) =
+  if is_zero_value_for_summary(value):
+    lines.add(owner & "=<zero>")
+    return
+  if value.kind != VkFunctionDef:
+    lines.add(owner & "=<" & $value.kind & ">")
+    return
+
+  let info = to_function_def_info(value)
+  if info == nil:
+    lines.add(owner & "=nil")
+    return
+  lines.add(owner & ".type_expectation_ids=" & type_id_summary(info.type_expectation_ids))
+  lines.add(owner & ".return_type_id=" & $info.return_type_id)
+  add_scope_tracker_summary(lines, owner & ".scope_tracker", info.scope_tracker)
+  add_compiled_body_summary(lines, owner & ".compiled_body", info.compiled_body, depth)
+
+proc add_scope_start_operand_summary(lines: var seq[string], owner: string,
+                                     value: Value) =
+  if is_zero_value_for_summary(value):
+    lines.add(owner & "=<zero>")
+    return
+  case value.kind
+  of VkNil:
+    lines.add(owner & "=nil")
+  of VkScopeTracker:
+    add_scope_tracker_summary(lines, owner, value.ref.scope_tracker)
+  else:
+    lines.add(owner & "=<" & $value.kind & ">")
+
+proc add_type_id_index_summary(lines: var seq[string], owner, name: string,
+                               index: OrderedTable[string, TypeId]) =
+  var entries: seq[string] = @[]
+  for key, type_id in index:
+    entries.add(owner & ".type_registry." & name & "[" & key & "]=" & $type_id)
+  for entry in sorted_summary_lines(entries):
+    lines.add(entry)
+
+proc add_registry_summary(lines: var seq[string], owner: string,
+                          registry: ModuleTypeRegistry,
+                          type_descriptors: seq[TypeDesc]) =
+  if registry == nil:
+    lines.add(owner & ".type_registry=nil")
+    return
+
+  lines.add(owner & ".type_registry.module_path=" & registry.module_path)
+  lines.add(owner & ".type_registry.descriptor_count=" & $registry.descriptors.len)
+
+  var descriptor_entries: seq[string] = @[]
+  for type_id, desc in registry.descriptors:
+    descriptor_entries.add(owner & ".type_registry.descriptors[" & $type_id & "]" &
+      " kind=" & $desc.kind &
+      " key=" & descriptor_registry_key(desc) &
+      " rendered=" & type_desc_to_string(type_id, type_descriptors))
+  for entry in sorted_summary_lines(descriptor_entries):
+    lines.add(entry)
+
+  add_type_id_index_summary(lines, owner, "builtin_types", registry.builtin_types)
+  add_type_id_index_summary(lines, owner, "named_types", registry.named_types)
+  add_type_id_index_summary(lines, owner, "applied_types", registry.applied_types)
+  add_type_id_index_summary(lines, owner, "union_types", registry.union_types)
+  add_type_id_index_summary(lines, owner, "function_types", registry.function_types)
+
+proc add_alias_summary(lines: var seq[string], owner: string,
+                       aliases: Table[string, TypeId]) =
+  var entries: seq[string] = @[]
+  for alias_name, type_id in aliases:
+    entries.add(owner & ".type_aliases[" & alias_name & "]=" & $type_id)
+  for entry in sorted_summary_lines(entries):
+    lines.add(entry)
+
+proc add_instruction_metadata_summary(lines: var seq[string], owner: string,
+                                      instructions: seq[Instruction], depth: int) =
+  for index, instr in instructions:
+    let instr_owner = owner & ".instructions[" & $index & "]." & $instr.kind
+    case instr.kind
+    of IkScopeStart:
+      add_scope_start_operand_summary(lines, instr_owner & ".arg0", instr.arg0)
+    of IkVar:
+      lines.add(instr_owner & ".arg1_type_id=" & $instr.arg1)
+    of IkDefineProp:
+      lines.add(instr_owner & ".arg1_type_id=" & $instr.arg1)
+    of IkEnumAddMember:
+      lines.add(instr_owner & ".arg0_type_ids=" & type_id_array_value_summary(instr.arg0))
+    of IkPushTypeValue:
+      lines.add(instr_owner & ".arg0_type_id=" & type_id_value_summary(instr.arg0))
+    of IkFunction, IkBlock:
+      add_function_def_summary(lines, instr_owner & ".arg0", instr.arg0, depth)
+    else:
+      discard
+
+proc summarize_compilation_unit(cu: CompilationUnit, owner: string,
+                                lines: var seq[string], depth: int) =
+  if cu == nil:
+    lines.add(owner & "=nil")
+    return
+  if depth > 16:
+    lines.add(owner & ".compiled_body=<depth-limit>")
+    return
+
+  lines.add(owner & ".kind=" & $cu.kind)
+  lines.add(owner & ".descriptor_count=" & $cu.type_descriptors.len)
+  for type_id, desc in cu.type_descriptors:
+    lines.add(owner & ".type_descriptors[" & $type_id & "]" &
+      " kind=" & $desc.kind &
+      " module=" & desc.module_path &
+      " key=" & descriptor_registry_key(desc) &
+      " rendered=" & type_desc_to_string(type_id.TypeId, cu.type_descriptors))
+
+  add_registry_summary(lines, owner, cu.type_registry, cu.type_descriptors)
+  add_alias_summary(lines, owner, cu.type_aliases)
+  add_instruction_metadata_summary(lines, owner, cu.instructions, depth)
+
+proc descriptor_metadata_summary*(cu: CompilationUnit): seq[string] =
+  ## Deterministic, metadata-focused summary for source/GIR parity tests.
+  ## Intentionally excludes volatile CompilationUnit.module_path values,
+  ## timestamps, raw bytecode dumps, traces, and generated/cache paths.
+  result = @[]
+  summarize_compilation_unit(cu, "cu", result, 0)
 
 proc gene_type*(v: Value): Value =
   if v.kind == VkGene:

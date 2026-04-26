@@ -139,6 +139,60 @@ proc find_module_type_node_for_test(nodes: seq[ModuleTypeNode], path: seq[string
     current_nodes = current.children
   current
 
+proc check_descriptor_metadata_summaries_equal(source_path: string,
+                                               source_summary: seq[string],
+                                               loaded_summary: seq[string]) =
+  checkpoint "descriptor metadata parity fixture=" & source_path
+  check source_summary.len > 0
+  check loaded_summary.len > 0
+
+  if source_summary.len != loaded_summary.len:
+    checkpoint "source summary length=" & $source_summary.len &
+      "; loaded summary length=" & $loaded_summary.len
+
+  let common_len = min(source_summary.len, loaded_summary.len)
+  var mismatch_index = -1
+  for index in 0..<common_len:
+    if source_summary[index] != loaded_summary[index]:
+      mismatch_index = index
+      break
+
+  if mismatch_index >= 0:
+    checkpoint "first descriptor metadata mismatch line=" & $mismatch_index
+    checkpoint "source: " & source_summary[mismatch_index]
+    checkpoint "loaded: " & loaded_summary[mismatch_index]
+  elif source_summary.len != loaded_summary.len:
+    if source_summary.len > common_len:
+      checkpoint "first extra source line: " & source_summary[common_len]
+    if loaded_summary.len > common_len:
+      checkpoint "first extra loaded line: " & loaded_summary[common_len]
+
+  check source_summary == loaded_summary
+
+proc summary_contains(summary: seq[string], needle: string): bool =
+  for line in summary:
+    if line.contains(needle):
+      return true
+  false
+
+proc check_source_gir_descriptor_metadata_parity(source_path, gir_path: string) =
+  let compiled = compiler.parse_and_compile(readFile(source_path), source_path)
+  verify_type_metadata(compiled, phase = "source descriptor parity", source_path = source_path)
+
+  createDir(parentDir(gir_path))
+  gir.save_gir(compiled, gir_path, source_path)
+  let loaded = gir.load_gir(gir_path)
+  verify_type_metadata(loaded, phase = "loaded descriptor parity", source_path = gir_path)
+
+  check compiled.type_descriptors.len > BUILTIN_TYPE_COUNT
+  check loaded.type_descriptors.len > BUILTIN_TYPE_COUNT
+
+  let source_summary = descriptor_metadata_summary(compiled)
+  let loaded_summary = descriptor_metadata_summary(loaded)
+  check summary_contains(source_summary, ".type_registry.module_path=")
+  check summary_contains(source_summary, ".IkFunction.arg0.return_type_id=")
+  check_descriptor_metadata_summaries_equal(source_path, source_summary, loaded_summary)
+
 suite "GIR CLI":
   test "gir show renders instructions":
     let source_path = "examples/hello_world.gene"
@@ -1141,6 +1195,23 @@ suite "GIR CLI":
     let after_param_type = loaded_fn.matcher.children[0].type_id
     check after_param_type != NO_TYPE_ID
     check loaded.type_descriptors[int(after_param_type)].kind == TdkVar
+
+  test "source and loaded GIR descriptor metadata summaries match for typed fixtures":
+    let fixtures = @[
+      (source: "testsuite/05-functions/functions/4_typed_functions.gene",
+       gir: "build/tests/descriptor_parity_typed_functions.gir"),
+      (source: "testsuite/02-types/types/10_generic_and_guards.gene",
+       gir: "build/tests/descriptor_parity_generic_and_guards.gir"),
+      (source: "testsuite/02-types/types/16_enum_declaration_contract.gene",
+       gir: "build/tests/descriptor_parity_enum_declaration_contract.gir"),
+    ]
+
+    for fixture in fixtures:
+      defer:
+        if fileExists(fixture.gir):
+          removeFile(fixture.gir)
+      check fileExists(fixture.source)
+      check_source_gir_descriptor_metadata_parity(fixture.source, fixture.gir)
 
   test "cached GIR preserves S05 imported enum identity fixture":
     let source_path = absolutePath("tests/fixtures/s05_gir_identity_main.gene")
