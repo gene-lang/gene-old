@@ -330,11 +330,13 @@ suite "filesystem tree serdes":
     check VM.exec(fmt"""
       (import Identity:LeftIdentity from "tests/fixtures/s05_identity_left")
       (import Identity:RightIdentity from "tests/fixtures/s05_identity_right")
-      (var values [(LeftIdentity/Box 9) (RightIdentity/Box 9)])
+      (var left_box (LeftIdentity/Box 9))
+      (var right_box (RightIdentity/Box 9))
+      (var values [left_box right_box])
       (gene/serdes/write_tree "{root_path}" values ^separate [/*])
       (var loaded (gene/serdes/read_tree "{root_path}"))
-      (assert ((loaded/0 == (LeftIdentity/Box 9)) == true))
-      (assert ((loaded/1 == (RightIdentity/Box 9)) == true))
+      (assert ((loaded/0 == left_box) == true))
+      (assert ((loaded/1 == right_box) == true))
       (assert ((loaded/0 == loaded/1) == false))
       true
     """, "tree_serdes_s05_enum_identity") == TRUE

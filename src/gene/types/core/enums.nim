@@ -63,6 +63,27 @@ proc new_enum_value*(variant: Value, data: seq[Value]): Value =
   r.ev_data = data
   return r.to_ref_value()
 
+proc qualified_enum_member_name*(member: EnumMember): string =
+  if member == nil:
+    return "<nil>"
+  let parent = member.parent
+  let enum_name =
+    if parent.kind == VkEnum and parent.ref.enum_def != nil and parent.ref.enum_def.name.len > 0:
+      parent.ref.enum_def.name
+    else:
+      "<enum>"
+  enum_name & "/" & member.name
+
+proc validate_enum_payload_arity*(member: EnumMember, actual: int, context = "EnumValue") =
+  if member == nil:
+    not_allowed(context & " requires an enum member")
+  let expected = member.fields.len
+  if actual != expected:
+    let field_names = if expected > 0: " (" & member.fields.join(", ") & ")" else: ""
+    not_allowed(context & " " & qualified_enum_member_name(member) &
+                " expects " & $expected & " payload value(s)" & field_names &
+                ", got " & $actual)
+
 proc `[]`*(self: Value, name: string): Value =
   if self.kind != VkEnum:
     not_allowed("enum member access can only be used on enums")

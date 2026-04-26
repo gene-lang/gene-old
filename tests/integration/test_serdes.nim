@@ -424,6 +424,13 @@ test "Serdes: malformed EnumValue records reject before constructing values":
   expect_deserialize_error_contains("""
 (gene/serialization
   (EnumValue
+    (EnumRef ^path "Identity/Missing" ^module "$MODULE")
+    [1]))
+""".replace("$MODULE", module_path), ["EnumValue", "Identity/Missing"])
+
+  expect_deserialize_error_contains("""
+(gene/serialization
+  (EnumValue
     (EnumRef ^path "Identity/Box" ^module "$MODULE")
     []))
 """.replace("$MODULE", module_path), ["EnumValue", "Identity/Box", "payload"])

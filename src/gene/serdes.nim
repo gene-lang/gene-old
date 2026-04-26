@@ -3,6 +3,7 @@ import std/json
 import std/uri
 
 import ./types
+from ./types/runtime_types import validate_or_coerce_type, emit_type_warning
 import ./parser
 
 type
@@ -152,6 +153,12 @@ proc new_serialized_instance(class_ref: Value, props: Value): Value =
   let gene = new_gene("Instance".to_symbol_value())
   gene.children.add(class_ref)
   gene.children.add(props)
+  gene.to_gene_value()
+
+proc new_serialized_enum_value(member_ref: Value, payloads: Value): Value =
+  let gene = new_gene("EnumValue".to_symbol_value())
+  gene.children.add(member_ref)
+  gene.children.add(payloads)
   gene.to_gene_value()
 
 proc new_legacy_gene_ref(path: string): Value =
@@ -426,6 +433,46 @@ proc typed_ref_for_value(value: Value): Value {.gcsafe.} =
   if not found or origin.internal_path.len == 0:
     not_serializable(value, "no canonical module/path origin")
   new_typed_ref(origin.kind, origin.internal_path, origin.module_path)
+
+proc serialized_gene_type_name(value: Value): string {.gcsafe.} =
+  if value.kind != VkGene:
+    return ""
+  let typ = value.gene.type
+  case typ.kind:
+  of VkSymbol:
+    typ.str
+  of VkComplexSymbol:
+    typ.ref.csymbol.join("/")
+  else:
+    ""
+
+proc require_enum_value_member(variant: Value, context: string): EnumMember {.gcsafe.} =
+  if variant.kind != VkEnumMember or variant.ref.enum_member == nil:
+    not_allowed(context & " requires a resolved VkEnumMember, got " & $variant.kind)
+  variant.ref.enum_member
+
+proc validate_enum_payload_types(member: EnumMember, payload: var seq[Value], context: string) {.gcsafe.} =
+  let qualified_name = qualified_enum_member_name(member)
+  if member.field_type_ids.len != member.fields.len:
+    not_allowed(context & " " & qualified_name & " has malformed field type metadata: expected " &
+                $member.fields.len & " field type id(s), got " & $member.field_type_ids.len)
+
+  for i, field_name in member.fields:
+    let type_id = member.field_type_ids[i]
+    if type_id == NO_TYPE_ID:
+      continue
+    if type_id < 0 or type_id.int >= member.field_type_descs.len:
+      not_allowed(context & " " & qualified_name &
+                  " has malformed field type descriptor metadata for field " &
+                  field_name & ": TypeId " & $type_id & " is unavailable")
+
+    var item = payload[i]
+    var warning = ""
+    {.cast(gcsafe).}:
+      warning = validate_or_coerce_type(item, type_id, member.field_type_descs,
+        "field " & qualified_name & "." & field_name)
+    payload[i] = item
+    emit_type_warning(warning)
 
 proc typed_ref_for_class(self: Class): Value {.gcsafe.} =
   let (found, origin) = lookup_class_origin(self)
@@ -713,6 +760,16 @@ proc serialize*(self: Serialization, value: Value): Value =
     return gene.to_gene_value()
   of VkNamespace, VkClass, VkFunction, VkNativeFn, VkNativeMacro, VkEnum, VkEnumMember:
     return typed_ref_for_value(value)
+  of VkEnumValue:
+    let variant = value.ref.ev_variant
+    let member = require_enum_value_member(variant, "EnumValue serialization")
+    validate_enum_payload_arity(member, value.ref.ev_data.len, "EnumValue")
+    var payload = value.ref.ev_data
+    validate_enum_payload_types(member, payload, "EnumValue")
+    let payloads = new_array_value(@[])
+    for item in payload:
+      array_data(payloads).add(self.serialize(item))
+    return new_serialized_enum_value(typed_ref_for_value(variant), payloads)
   of VkInstance:
     let (named, _) = lookup_value_origin(value)
     if named:
@@ -1025,6 +1082,15 @@ proc tree_serialized_hash(value: Value): Hash =
     let typed_ref = typed_ref_for_value(value)
     result_hash.mix_tree_hash(ref_kind_name(origin.kind))
     result_hash = result_hash !& hash(value_to_gene_str(typed_ref))
+  of VkEnumValue:
+    let variant = value.ref.ev_variant
+    let member = require_enum_value_member(variant, "EnumValue tree hash")
+    validate_enum_payload_arity(member, value.ref.ev_data.len, "EnumValue")
+    let typed_ref = typed_ref_for_value(variant)
+    result_hash.mix_tree_hash("EnumValue")
+    result_hash = result_hash !& hash(value_to_gene_str(typed_ref))
+    for item in value.ref.ev_data:
+      result_hash = result_hash !& tree_serialized_hash(item)
   of VkInstance:
     let (named, _) = lookup_value_origin(value)
     if named:
@@ -1493,6 +1559,43 @@ proc deserialize*(self: Serialization, value: Value): Value {.gcsafe.}
 proc deref*(self: Serialization, s: string): Value =
   path_to_value(s)
 
+proc deserialize_enum_value(self: Serialization, gene: ptr Gene): Value {.gcsafe.} =
+  if gene.children.len != 2:
+    not_allowed("EnumValue expects an EnumRef and payload array, got " & $gene.children.len & " child(ren)")
+
+  let ref_form = gene.children[0]
+  let ref_kind = serialized_gene_type_name(ref_form)
+  if ref_kind != "EnumRef":
+    let got = if ref_kind.len > 0: ref_kind else: $ref_form.kind
+    not_allowed("EnumValue expects first child to be EnumRef, got " & got)
+
+  var variant: Value
+  try:
+    variant = resolve_typed_ref(ref_form.gene)
+  except CatchableError as e:
+    not_allowed("EnumValue EnumRef resolution failed: " & e.msg)
+
+  let member = require_enum_value_member(variant, "EnumValue")
+
+  let payload_form = gene.children[1]
+  if payload_form.kind != VkArray:
+    not_allowed("EnumValue payload must be an array, got " & $payload_form.kind)
+
+  validate_enum_payload_arity(member, array_data(payload_form).len, "EnumValue")
+
+  var payload = newSeqOfCap[Value](array_data(payload_form).len)
+  for item in array_data(payload_form):
+    payload.add(self.deserialize(item))
+
+  try:
+    validate_enum_payload_types(member, payload, "EnumValue")
+  except CatchableError as e:
+    not_allowed("EnumValue payload validation failed: " & e.msg)
+
+  if member.fields.len == 0:
+    return variant
+  new_enum_value(variant, payload)
+
 proc deserialize*(s: string): Value =
   var ser = Serialization(
     references: initTable[string, Value](),
@@ -1523,6 +1626,8 @@ proc deserialize*(self: Serialization, value: Value): Value =
         return NIL
     of "NamespaceRef", "ClassRef", "FunctionRef", "EnumRef", "InstanceRef":
       return resolve_typed_ref(value.gene)
+    of "EnumValue":
+      return self.deserialize_enum_value(value.gene)
     of "gene/ref":
       if value.gene.children.len > 0:
         return self.deref(value.gene.children[0].str)
