@@ -49,13 +49,13 @@
 (var any_item (Bag/Item "free"))
 (assert ((any_item .value) == "free"))
 (println any_item)
-# Expected: (Bag/Item free)
+# Expected: (Bag/Item "free")
 
 (enum Box:T (Wrapped value: T))
 (var wrapped_any (Box/Wrapped "generic stays gradual"))
 (assert ((wrapped_any .value) == "generic stays gradual"))
 (println wrapped_any)
-# Expected: (Box/Wrapped generic stays gradual)
+# Expected: (Box/Wrapped "generic stays gradual")
 
 (try
   (Counter "bad")

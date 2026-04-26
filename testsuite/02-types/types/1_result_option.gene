@@ -12,6 +12,13 @@
 (println "r2 = " r2)
 # Expected: r2 = (Result/Err "bad")
 
+(assert ((r1 .value) == 5))
+(assert ((r2 .error) == "bad"))
+(println "r1.value =" (r1 .value))
+# Expected: r1.value = 5
+(println "r2.error =" (r2 .error))
+# Expected: r2.error = bad
+
 (println "o1 = " o1)
 # Expected: o1 = (Option/Some "hello")
 

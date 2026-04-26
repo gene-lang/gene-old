@@ -28,6 +28,17 @@ proc expect_var_payload_field(member: EnumMember, field_name: string, expected_v
         if desc.kind == TdkVar:
           check desc.var_id == expected_var_id
 
+proc expect_enum_value(r: Value, enum_name: string, member_name: string, data: seq[Value]) =
+  check r.kind == VkEnumValue
+  if r.kind == VkEnumValue:
+    let variant = r.ref.ev_variant
+    check variant.kind == VkEnumMember
+    if variant.kind == VkEnumMember:
+      let member = variant.ref.enum_member
+      check member.parent.ref.enum_def.name == enum_name
+      check member.name == member_name
+    check r.ref.ev_data == data
+
 # Tests for enum construct
 # Most enum functionality is not yet implemented in our VM
 # These tests are commented out until those features are available:
@@ -143,6 +154,62 @@ test "built-in Result and Option expose canonical generic enum metadata":
   check global_ns["Some".to_key()].ref.enum_member == option_def.members["Some"]
   check global_ns["None".to_key()].kind == VkEnumMember
   check global_ns["None".to_key()].ref.enum_member == option_def.members["None"]
+
+test_vm """
+  (Ok ^value 5)
+""", proc(r: Value) =
+  expect_enum_value(r, "Result", "Ok", @[5.to_value()])
+
+test_vm """
+  (Result/Err ^error "bad")
+""", proc(r: Value) =
+  expect_enum_value(r, "Result", "Err", @[
+    "bad".to_value()
+  ])
+
+test_vm """
+  (Option/Some ^value "hello")
+""", proc(r: Value) =
+  expect_enum_value(r, "Option", "Some", @[
+    "hello".to_value()
+  ])
+
+test_vm """
+  (Option/None)
+""", proc(r: Value) =
+  check r.kind == VkEnumMember
+  if r.kind == VkEnumMember:
+    check r.ref.enum_member.parent.ref.enum_def.name == "Option"
+    check r.ref.enum_member.name == "None"
+
+test "built-in Result/Option constructors use ordinary enum constructor diagnostics":
+  expect_enum_error("""
+    (Ok 1 2)
+  """, "Variant Result/Ok expects 1 arguments (value), got 2")
+
+  expect_enum_error("""
+    (Ok)
+  """, "Variant Result/Ok expects 1 arguments (value), got 0")
+
+  expect_enum_error("""
+    (Result/Ok ^error "bad")
+  """, "Variant Result/Ok got unknown keyword argument(s): error; expected fields: value")
+
+  expect_enum_error("""
+    (Err 1 ^error "bad")
+  """, "Variant Result/Err cannot mix positional and keyword arguments")
+
+  expect_enum_error("""
+    (Err ^value "bad")
+  """, "Variant Result/Err got unknown keyword argument(s): value; expected fields: error")
+
+  expect_enum_error("""
+    (None 1)
+  """, "Unit variant Option/None expects 0 arguments, got 1")
+
+  expect_enum_error("""
+    (Option/None ^value 1)
+  """, "Unit variant Option/None expects 0 keyword arguments, got: value")
 
 test_vm """
   (enum Shape Point)

@@ -1,0 +1,123 @@
+# Built-in Result/Option variants use ordinary enum payload constructors
+
+(var ok_pos (Ok 5))
+(var ok_kw (Ok ^value 5))
+(var ok_qualified (Result/Ok ^value 6))
+(assert ((ok_pos .value) == 5))
+(assert ((ok_kw .value) == 5))
+(assert ((ok_qualified .value) == 6))
+(assert (ok_pos == ok_kw))
+(println "ok_pos = " ok_pos)
+# Expected: ok_pos = (Result/Ok 5)
+(println "ok_kw = " ok_kw)
+# Expected: ok_kw = (Result/Ok 5)
+(println "qualified_ok = " ok_qualified)
+# Expected: qualified_ok = (Result/Ok 6)
+
+(var err_pos (Err "bad"))
+(var err_kw (Err ^error "bad"))
+(var err_qualified (Result/Err ^error "qualified bad"))
+(assert ((err_pos .error) == "bad"))
+(assert ((err_kw .error) == "bad"))
+(assert ((err_qualified .error) == "qualified bad"))
+(assert (err_pos == err_kw))
+(println "err_pos = " err_pos)
+# Expected: err_pos = (Result/Err "bad")
+(println "err_kw = " err_kw)
+# Expected: err_kw = (Result/Err "bad")
+(println "qualified_err = " err_qualified)
+# Expected: qualified_err = (Result/Err "qualified bad")
+(println "err_error = " (err_kw .error))
+# Expected: err_error = bad
+
+(var some_pos (Some "hello"))
+(var some_kw (Some ^value "hello"))
+(var some_qualified (Option/Some ^value "qualified"))
+(assert ((some_pos .value) == "hello"))
+(assert ((some_kw .value) == "hello"))
+(assert ((some_qualified .value) == "qualified"))
+(assert (some_pos == some_kw))
+(println "some_pos = " some_pos)
+# Expected: some_pos = (Option/Some "hello")
+(println "some_kw = " some_kw)
+# Expected: some_kw = (Option/Some "hello")
+(println "qualified_some = " some_qualified)
+# Expected: qualified_some = (Option/Some "qualified")
+(println "some_value = " (some_kw .value))
+# Expected: some_value = hello
+
+(var none_value None)
+(var none_call (None))
+(var none_qualified (Option/None))
+(assert (none_call == None))
+(assert (none_qualified == None))
+(assert (none_value == None))
+(println "none_value = " none_value)
+# Expected: none_value = Option/None
+(println "none_call = " none_call)
+# Expected: none_call = Option/None
+(println "qualified_none = " none_qualified)
+# Expected: qualified_none = Option/None
+
+(var ok_too_many_caught false)
+(try
+  (Ok 1 2)
+catch *
+  (ok_too_many_caught = true)
+)
+(assert (ok_too_many_caught == true))
+(println "ok too many rejected")
+# Expected: ok too many rejected
+
+(var ok_missing_caught false)
+(try
+  (Result/Ok)
+catch *
+  (ok_missing_caught = true)
+)
+(assert (ok_missing_caught == true))
+(println "ok missing rejected")
+# Expected: ok missing rejected
+
+(var err_unknown_kw_caught false)
+(try
+  (Err ^value "bad")
+catch *
+  (err_unknown_kw_caught = true)
+)
+(assert (err_unknown_kw_caught == true))
+(println "err unknown keyword rejected")
+# Expected: err unknown keyword rejected
+
+(var err_mixed_caught false)
+(try
+  (Err "bad" ^error "also bad")
+catch *
+  (err_mixed_caught = true)
+)
+(assert (err_mixed_caught == true))
+(println "err mixed payload rejected")
+# Expected: err mixed payload rejected
+
+(var none_arg_caught false)
+(try
+  (None 1)
+catch *
+  (none_arg_caught = true)
+)
+(assert (none_arg_caught == true))
+(println "none payload rejected")
+# Expected: none payload rejected
+
+(var none_kw_caught false)
+(try
+  (Option/None ^value 1)
+catch *
+  (none_kw_caught = true)
+)
+(assert (none_kw_caught == true))
+(println "none keyword rejected")
+# Expected: none keyword rejected
+
+(println "built-in Result/Option enum constructor tests completed")
+# Expected: built-in Result/Option enum constructor tests completed
