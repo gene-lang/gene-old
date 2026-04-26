@@ -1,41 +1,52 @@
-@user:
-we want to support efficient pattern matching
+# Future Pattern Matching Design Notes
 
-the value will be values stored in the vm stack as UncheckedArray<Value>
-when pattern matching, we know the length of the array and whether there is a properties map.
+## Historical prompt
 
-The reason we use UncheckedArray is to avoid allocation.
+The original design question explored efficient pattern matching over values that are
+already on the VM stack as `UncheckedArray[Value]`, with an optional properties
+map flag. The motivation remains valid for future optimizer work: argument
+matching should avoid constructing an aggregate argument object just to bind
+parameters.
 
-Stack: [f 1 2]
-The values to match will be [1 2] on the stack
+Example stack shapes from the original discussion:
 
-Stack: [f ^p 1 2 3]
-The value to match will be [{^p 1} 2 3], with properties flag set to true
+- `Stack: [f 1 2]` exposes positional values `[1 2]`.
+- `Stack: [f ^p 1 2 3]` exposes properties `{^p 1}` plus positional values `[2 3]`.
+- `Stack: [f ^p 1]` exposes properties `{^p 1}` and no positional children.
 
-Stack: [f ^p 1]
-The value to match will be [{^p 1}], with properties flag set to true
+## Current boundary
 
-The pattern matching should be useful for destructuring values inside a function body.
-(match [a b] arr) # arr = [1 2]
-in this case, arr is a single value on the stack. how can we unify the design?
+The current public Beta subset is not a general pattern-language implementation.
+It consists of tested `var` destructuring, argument binding, simple `case/when`,
+and enum ADT `case` patterns. The standalone `(match ...)` expression is a
+removed surface in the current compiler; users should use `(var pattern value)`
+for binding and `(case ...)` for branching. The compiler diagnostic intentionally
+says `match has been removed` to steer users away from stale examples.
 
-We need to make sure the values are garbage collected correctly and the staci pointer is correctly updated.
+## Future plan
 
-@Codex:
-## Current plan
+- Keep the pointer-based idea (`ptr UncheckedArray[Value]` into
+  `process_args_direct`) as a future optimization. It would need dedicated
+  matcher infrastructure, clear pointer-lifetime rules, and GC/scope safety
+  proof before becoming implementation work.
+- Preserve the no-aggregate-object constraint for function argument binding.
+- Reintroduce a standalone match expression only through a fresh proposal that
+  specifies semantics, diagnostics, tests, and migration from the removed form.
 
-- Keep the pointer-based idea (`ptr UncheckedArray[Value]` into `process_args_direct`) as a future optimization; it needs new matcher infrastructure, an `IkMatch` instruction, and safety around pointer lifetime.
-- Ship a working compile-time expansion first (destructuring lowered to bytecode), then profile before investing in the pointer path.
+## Explicit non-goals for the current Beta cleanup
 
-## Known gaps (code as of 2025-11-21)
+- Do not reintroduce `(match ...)` while reconciling the Beta contract.
+- Do not promote guards, or-patterns, as-patterns, map destructuring, nested
+  patterns, or a full pattern language without implementation and focused tests.
+- Do not add a new VM matcher instruction until profiling and safety work prove
+  it is needed.
 
-- `compile_match` lowers array patterns via `IkGetMember` with integer payloads; the VM only supports named members there, so `(match [a b] arr)` crashes. Use `IkGetChild`/`IkGetChildDynamic` or a dedicated destructuring helper instead.
-- No arity/shape validation: short/long inputs bind out-of-bounds indices; decide the contract (error vs. NIL padding) and match function-arg behavior.
-- Scope handling is unsafe: array patterns assume an active scope; add the guard/ScopeStart/ScopeEnd pairing seen in the symbol path.
+## Follow-up questions for any future proposal
 
-## Immediate actions
-
-1) Fix `compile_match` to use child access with explicit scope setup and length checks.  
-2) Add map/nested/rest pattern coverage for the compile-time path.  
-3) Create tests for mismatched arity, top-level `match`, and map patterns.  
-4) Revisit the pointer-based matcher only after profiling shows a bottleneck and after adding the required VM/compiler support.
+- Which inputs are matchable: arrays only, Gene children/properties, maps, enums,
+  or arbitrary sequence-like values?
+- What is the exact arity contract for each supported input shape?
+- Which scope owns new bindings, and how does shadowing interact with existing
+  locals?
+- What diagnostics are required for type mismatch, arity mismatch, unsupported
+  forms, and removed legacy syntax?

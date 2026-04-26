@@ -1,19 +1,22 @@
 ## ADDED Requirements
 ### Requirement: Argument Matching Baseline
-Argument pattern binding SHALL reuse the current scope, allow shadowing of existing bindings, and SHALL NOT construct an aggregate object of all arguments (bindings use direct stack/child access).
+Argument pattern binding SHALL reuse the current binding context, allow shadowing where the existing binder permits it, and SHALL NOT construct an aggregate object of all arguments just to bind parameters.
 
-#### Scenario: Bind two args without aggregate or new scope
-- **GIVEN** a function `(fn f [a b] ...)` defined in a scope where `a` is already bound
+#### Scenario: Bind two args without aggregate argument object
+- **GIVEN** a function `(fn f [a b] ...)`
 - **WHEN** `f` is invoked with two positional arguments
-- **THEN** `a` and `b` are bound in the current scope (existing `a` is shadowed)
+- **THEN** `a` and `b` are bound through the argument matcher
 - **AND** no aggregate argument object is constructed during binding
 
-### Requirement: Match Expression Baseline
-The `(match [pattern] value)` expression SHALL destructure the single `value` operand using compile-time child access into the current scope, allowing shadowing of existing bindings, and SHALL evaluate to `nil`.
+### Requirement: Existing Destructuring Baseline
+The public Beta pattern-matching baseline SHALL use existing `var` destructuring for binding and `case/when` for branching. The standalone `(match ...)` expression SHALL remain outside the Beta subset and MUST be rejected with a diagnostic that points users to `(var pattern value)` or `(case ...)`.
 
-#### Scenario: Destructure array into current scope
-- **GIVEN** a scope with `a` already bound to `0`
-- **WHEN** `(match [a b] [1 2])` executes
-- **THEN** `a` is rebound to `1` and `b` is bound to `2` in the same scope (shadowing allowed)
-- **AND** the expression evaluates to `nil`
-- **AND** destructuring uses child-index access to the array (no matcher object or aggregate is created)
+#### Scenario: Destructure array with var
+- **WHEN** `(var [a b] [1 2])` executes
+- **THEN** `a` is bound to `1`
+- **AND** `b` is bound to `2`
+
+#### Scenario: Removed match expression guides users to supported forms
+- **WHEN** `(match [a b] [1 2])` is compiled
+- **THEN** compilation fails with a diagnostic explaining that `match has been removed`
+- **AND** the diagnostic points users to `(var pattern value)` for binding or `(case ...)` for branching

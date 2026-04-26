@@ -1,12 +1,13 @@
 ## Why
-Pattern matching semantics are currently implicit; we need a baseline design for argument matching and the `(match [pattern] value)` expression that preserves performance (no aggregate argument object) and documents scope/shadowing behavior.
+Pattern matching semantics were historically implicit, and stale planning still described a standalone `(match [pattern] value)` expression. The current compiler removes that surface, so this change should define the already-implemented argument/destructuring baseline without reopening the removed form.
 
 ## What Changes
-- Define the minimal scope of pattern matching (argument binding and single-value `match` expression only).
-- Document the performance constraint (no aggregate object for argument matching) and scope rules (reuse scope, allow shadowing).
-- Specify compile-time lowering for `match` destructuring and defer pointer-based matcher optimization.
-- Capture open questions to resolve before implementation (arity rules, type handling, supported pattern forms).
+- Define the minimal scope of pattern matching around argument binding, existing `var` destructuring, simple `case/when`, and enum ADT `case` patterns.
+- Document the performance constraint for argument binding: no aggregate object is constructed just to bind parameters.
+- Document scope/shadowing and arity/type error expectations for the Beta subset.
+- Explicitly mark `(match ...)` as Removed/Future; use `(var pattern value)` for binding and `(case ...)` for branching.
+- Keep map destructuring, nested patterns, guards, or-patterns, as-patterns, and full pattern-language work out of this baseline.
 
 ## Impact
 - Affected specs: pattern-matching
-- Affected code: compiler.nim (`compile_match` lowering), VM child access, argument binder helpers, documentation/tests
+- Affected code: matcher parsing/runtime binding, argument binder helpers, diagnostics, documentation/tests
