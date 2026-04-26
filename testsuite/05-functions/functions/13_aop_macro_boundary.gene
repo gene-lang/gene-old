@@ -1,0 +1,29 @@
+# Expected: direct macro target x
+# Expected: direct macro result x
+# Expected: macro boundary before 41
+# Expected: direct macro target 41
+# Expected: wrapped evaluated result 41
+# Expected: wrapped undefined caught
+
+(fn quote_arg! [expr]
+  (println "direct macro target" expr)
+  expr
+)
+
+(var x 41)
+(println "direct macro result" (quote_arg! x))
+
+(aspect MacroBoundaryA [f]
+  (before f [expr]
+    (println "macro boundary before" expr)
+  )
+)
+
+(var wrapped (MacroBoundaryA .apply-fn quote_arg! "f"))
+(println "wrapped evaluated result" (wrapped x))
+
+(try
+  (wrapped missing_macro_arg)
+catch *
+  (println "wrapped undefined caught")
+)
