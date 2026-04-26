@@ -987,63 +987,43 @@ proc is_union_gene(gene: ptr Gene): bool =
       return true
   return false
 
-proc union_members(v: Value): seq[Value] =
-  if v.kind == VkGene and v.gene != nil and is_union_gene(v.gene):
-    let gene = v.gene
-    if gene.`type`.kind == VkSymbol and gene.`type`.str == "|":
-      return gene.children
-    result.add(gene.`type`)
-    var i = 0
-    while i < gene.children.len:
-      let child = gene.children[i]
-      if child.kind == VkSymbol and child.str == "|":
-        if i + 1 < gene.children.len:
-          result.add(gene.children[i + 1])
-        i += 2
-      else:
-        i += 1
-    return result
-  result = @[v]
-
-proc try_register_adt(self: TypeChecker, gene: ptr Gene): bool =
-  if gene.children.len < 2:
-    return false
-  let sig = gene.children[0]
-  if sig.kind != VkGene or sig.gene == nil:
-    return false
-  let sig_gene = sig.gene
-  if sig_gene.`type`.kind != VkSymbol:
-    return false
-  let name = sig_gene.`type`.str
+proc legacy_adt_declaration_message*(sig: Value): string =
+  ## Public helper for the compiler/type-checker boundary.  The enum-backed
+  ## ADT bridge remains internal metadata; user-facing `(type (Result T E) ...)`
+  ## declarations now receive a migration diagnostic instead of registering a
+  ## legacy Gene-expression ADT.
+  var name = ""
   var params: seq[string] = @[]
-  for child in sig_gene.children:
-    if child.kind != VkSymbol:
-      return false
-    params.add(child.str)
+  var malformed_head = true
 
-  let body = gene.children[1]
-  let members = union_members(body)
-  var variants: seq[AdtVariant] = @[]
-  for member in members:
-    if member.kind == VkSymbol:
-      variants.add(AdtVariant(name: member.str, field_count: 0, param_index: -1))
-      continue
-    if member.kind == VkGene and member.gene != nil and member.gene.`type`.kind == VkSymbol:
-      let var_name = member.gene.`type`.str
-      let field_count = member.gene.children.len
-      var param_index = -1
-      if field_count == 1 and member.gene.children[0].kind == VkSymbol:
-        let param_name = member.gene.children[0].str
-        for i, param in params:
-          if param == param_name:
-            param_index = i
-            break
-      variants.add(AdtVariant(name: var_name, field_count: field_count, param_index: param_index))
+  if sig.kind == VkGene and sig.gene != nil:
+    let sig_gene = sig.gene
+    if sig_gene.`type`.kind == VkSymbol and sig_gene.`type`.str.len > 0:
+      name = sig_gene.`type`.str
+      malformed_head = false
+      for child in sig_gene.children:
+        if child.kind == VkSymbol and child.str.len > 0:
+          params.add(child.str)
+        else:
+          malformed_head = true
 
-  if variants.len == 0:
-    return false
-  self.add_adt(name, params, variants)
-  return true
+  let suggestion_name = if name.len > 0: name else: "Name"
+  var suggestion = "(enum " & suggestion_name
+  if params.len > 0:
+    suggestion &= ":" & params.join(":")
+  elif name.len == 0 or malformed_head:
+    suggestion &= ":T"
+  suggestion &= " ...)"
+
+  var prefix = "legacy ADT declaration"
+  if name.len > 0:
+    prefix &= " for " & name
+  if malformed_head:
+    return prefix & " has an invalid generic head; use enum declarations such as " & suggestion
+  prefix & " is no longer supported; use enum declarations such as " & suggestion
+
+proc reject_legacy_adt_declaration(self: TypeChecker, sig: Value) =
+  self.warn(legacy_adt_declaration_message(sig))
 
 proc parse_enum_declaration_name(raw_name: string): tuple[base_name: string, type_params: seq[string]] =
   let parsed = split_generic_definition_name(raw_name)
@@ -3566,8 +3546,10 @@ proc check_expr(self: TypeChecker, v: Value): TypeExpr =
           ensure_user_type_name(alias_name, "type alias")
           let alias_type = self.parse_type_expr(gene.children[1])
           self.types[alias_name] = alias_type
-        elif gene.children.len >= 2 and gene.children[0].kind == VkGene:
-          discard self.try_register_adt(gene)
+        elif gene.children.len >= 1 and gene.children[0].kind == VkGene:
+          self.reject_legacy_adt_declaration(gene.children[0])
+        elif gene.children.len >= 1 and gene.children[0].kind != VkSymbol:
+          self.warn("type alias name must be a symbol; legacy ADT declaration heads are no longer supported; use (type Name Expr) or enum declarations such as (enum Name:T ...)")
         return ANY_TYPE
       of "enum":
         return self.check_enum(gene)

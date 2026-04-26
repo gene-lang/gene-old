@@ -4780,28 +4780,23 @@ proc exec*(self: ptr VirtualMachine): Value =
         self.frame.push(elapsed.to_value())
 
       of IkMatchGeneType:
-        # Pattern matching: check if value matches a variant name
-        # Supports both old Gene-based ADTs and new enum-based ADTs
+        # Pattern matching: check if value matches an enum variant name.
+        # Legacy Gene-expression ADT fallback was removed in S05; stale GIR using
+        # this opcode is invalidated by the GIR_VERSION bump.
         {.push checks: off.}
         let val = self.frame.pop()
         let expected_type = inst.arg0.str  # Symbol string
 
         var matched = false
-        # New enum-based matching
         if val.kind == VkEnumValue:
           matched = val.ref.ev_variant.ref.enum_member.name == expected_type
         elif val.kind == VkEnumMember:
           matched = val.ref.enum_member.name == expected_type
-        # Legacy Gene-based matching (for backward compat during migration)
-        elif expected_type == "None":
-          if val.kind == VkSymbol and val.str == "None":
-            matched = true
-          elif val.kind == VkGene and val.gene != nil:
-            if val.gene.`type`.kind == VkSymbol and val.gene.`type`.str == "None":
-              matched = true
+        elif val.kind == VkSymbol and val.str == "None" and expected_type == "None":
+          not_allowed("legacy Gene-expression ADT value pattern matching is no longer supported; use enum-backed Option/None instead")
         elif val.kind == VkGene and val.gene != nil:
           if val.gene.`type`.kind == VkSymbol and val.gene.`type`.str == expected_type:
-            matched = true
+            not_allowed("legacy Gene-expression ADT value pattern matching is no longer supported; use enum-backed variant patterns instead")
 
         self.frame.push(val)  # Keep the value on stack for later use
         self.frame.push(if matched: TRUE else: FALSE)

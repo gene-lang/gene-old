@@ -502,6 +502,11 @@ test "quoted legacy Result/Option-shaped values fail typed boundaries with migra
     (accept_option `(Some 1))
   """, ["legacy Gene-expression ADT value", "Option", "enum"])
 
+  expect_enum_error_parts("""
+    (fn accept_option [o: (Option Int)] -> Int 1)
+    (accept_option `None)
+  """, ["legacy Gene-expression ADT value", "Option", "enum"])
+
 test_vm """
   (fn accept_result [r: (Result Int String)] -> Int
     (case r

@@ -764,22 +764,39 @@ suite "Static type checking":
       ((Some T) | None))
   """, ["legacy ADT declaration", "Option", "(enum Option:T"]
 
+  test_strict_type_error_contains_all """
+    (type (Result 1)
+      ((Ok Int) | (Err String)))
+  """, ["legacy ADT declaration", "Result", "invalid generic head"]
+
+  test_strict_type_error_contains_all """
+    (type (123 T)
+      ((Item T)))
+  """, ["legacy ADT declaration", "invalid generic head", "(enum Name:T"]
+
   test "Runtime compilation rejects legacy ADT declarations with migration diagnostics":
-    init_all()
-    var raised = false
-    var message = ""
-    try:
-      discard VM.exec(cleanup("""
-        (type (Result T E)
-          ((Ok T) | (Err E)))
-      """), "legacy_adt_runtime_rejection.gene")
-    except CatchableError as e:
-      raised = true
-      message = e.msg
-    check raised
-    check message.contains("legacy ADT declaration")
-    check message.contains("Result")
-    check message.contains("(enum Result:T:E")
+    proc expect_runtime_legacy_rejection(code: string, expected_parts: openArray[string]) =
+      init_all()
+      var raised = false
+      var message = ""
+      try:
+        discard VM.exec(cleanup(code), "legacy_adt_runtime_rejection.gene")
+      except CatchableError as e:
+        raised = true
+        message = e.msg
+      check raised
+      for part in expected_parts:
+        check message.contains(part)
+
+    expect_runtime_legacy_rejection("""
+      (type (Result T E)
+        ((Ok T) | (Err E)))
+    """, ["legacy ADT declaration", "Result", "(enum Result:T:E"])
+
+    expect_runtime_legacy_rejection("""
+      (type (123 T)
+        ((Item T)))
+    """, ["legacy ADT declaration", "invalid generic head", "(enum Name:T"])
 
   test_strict_type_ok """
     (fn accept_enum_result [r: (Result Int String)] -> Int

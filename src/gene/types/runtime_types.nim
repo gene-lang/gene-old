@@ -309,7 +309,9 @@ proc enum_parent_type_name(value: Value): string {.gcsafe.} =
     discard
   return ""
 
-proc adt_type_name(value: Value): string =
+proc legacy_gene_adt_name(value: Value): string =
+  if value.kind == VkSymbol and value.str == "None":
+    return "Option"
   if value.kind != VkGene or value.gene == nil:
     return ""
   let gt = value.gene.`type`
@@ -333,9 +335,6 @@ proc is_named_compatible(value: Value, expected_type: string): bool =
     return true
   let enum_name = enum_parent_type_name(value)
   if enum_name.len > 0 and enum_name == expected_type:
-    return true
-  let adt = adt_type_name(value)
-  if adt.len > 0 and adt == expected_type:
     return true
   case expected_type
   of "Numeric":
@@ -650,6 +649,33 @@ proc format_type_mismatch(expected: string, actual: string, context: string, loc
   if location.len > 0:
     result &= " @ " & location
 
+proc expected_type_mentions_name(expected: RtType, name: string): bool =
+  if expected == nil or name.len == 0:
+    return false
+  case expected.kind
+  of RtNamed:
+    expected.name == name
+  of RtApplied:
+    expected.ctor == name
+  of RtUnion:
+    for member in expected.members:
+      if expected_type_mentions_name(member, name):
+        return true
+    false
+  else:
+    false
+
+proc legacy_gene_adt_value_mismatch(value: Value, expected: RtType,
+                                   param_name: string, location: string): string =
+  let legacy_name = legacy_gene_adt_name(value)
+  if legacy_name.len == 0 or not expected_type_mentions_name(expected, legacy_name):
+    return ""
+  result = "Type error [" & TYPE_DIAG_MISMATCH_CODE & "]: legacy Gene-expression ADT value for " &
+    legacy_name & " is no longer accepted in " & param_name &
+    "; use enum-backed " & legacy_name & " constructors instead"
+  if location.len > 0:
+    result &= " @ " & location
+
 proc format_type_warning(warning: string, location: string): string =
   if warning.len == 0:
     return ""
@@ -672,6 +698,11 @@ proc validate_or_coerce_type*(value: var Value, expected_type_id: TypeId,
     return format_type_warning(warning, location)
   let actual = runtime_type_name(value)
   let expected = type_desc_to_string(expected_type_id, type_descs)
+  if expected_type_id != NO_TYPE_ID and type_descs.len > 0:
+    let parsed_expected = type_desc_to_rt(type_descs, expected_type_id)
+    let migration = legacy_gene_adt_value_mismatch(value, parsed_expected, param_name, location)
+    if migration.len > 0:
+      raise new_exception(type_defs.Exception, migration)
   raise new_exception(type_defs.Exception, format_type_mismatch(expected, actual, param_name, location))
 
 proc validate_type*(value: Value, expected_type_id: TypeId, type_descs: seq[TypeDesc],
@@ -679,4 +710,9 @@ proc validate_type*(value: Value, expected_type_id: TypeId, type_descs: seq[Type
   if not is_compatible(value, expected_type_id, type_descs):
     let actual = runtime_type_name(value)
     let expected = type_desc_to_string(expected_type_id, type_descs)
+    if expected_type_id != NO_TYPE_ID and type_descs.len > 0:
+      let parsed_expected = type_desc_to_rt(type_descs, expected_type_id)
+      let migration = legacy_gene_adt_value_mismatch(value, parsed_expected, param_name, location)
+      if migration.len > 0:
+        raise new_exception(type_defs.Exception, migration)
     raise new_exception(type_defs.Exception, format_type_mismatch(expected, actual, param_name, location))

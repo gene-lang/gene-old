@@ -506,9 +506,13 @@ proc compile_runtime_type_expr(self: Compiler, input: Value): bool =
   true
 
 proc compile_type_alias(self: Compiler, gene: ptr Gene) =
-  if gene.children.len < 2 or gene.children[0].kind != VkSymbol:
+  if gene.children.len < 2:
     self.emit(Instruction(kind: IkPushNil))
     return
+  if gene.children[0].kind != VkSymbol:
+    if gene.children[0].kind == VkGene:
+      not_allowed(legacy_adt_declaration_message(gene.children[0]))
+    not_allowed("type alias name must be a symbol; legacy ADT declaration heads are no longer supported; use (type Name Expr) or enum declarations such as (enum Name:T ...)")
 
   let alias_name = gene.children[0].str
   let type_id = resolve_type_value_to_id(gene.children[1], self.output.type_descriptors,
