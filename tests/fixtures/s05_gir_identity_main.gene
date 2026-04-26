@@ -3,8 +3,18 @@
 
 (var left (LeftIdentity/Box 7))
 (var right (RightIdentity/Box 7))
+(var left_again (LeftIdentity/Box 7))
+(var right_again (RightIdentity/Box 7))
+(var left_unit_value (left_unit))
+(var right_unit_value (right_unit))
 
+(assert ((left == left_again) == true))
+(assert ((right == right_again) == true))
 (assert ((left == right) == false))
+(assert ((left_unit_value == LeftIdentity/Unit) == true))
+(assert ((right_unit_value == RightIdentity/Unit) == true))
+(assert ((left_unit_value == right_unit_value) == false))
+
 (assert ((case left
   when (LeftIdentity/Box value) value
   when (RightIdentity/Box value) -100
@@ -13,13 +23,29 @@
   when (LeftIdentity/Box value) -100
   when (RightIdentity/Box value) value
   else -1) == 7))
-(assert ((case (left_unit)
+(assert ((case left_unit_value
   when LeftIdentity/Unit "left"
   when RightIdentity/Unit "right"
   else "miss") == "left"))
-(assert ((case (right_unit)
+(assert ((case right_unit_value
   when LeftIdentity/Unit "left"
   when RightIdentity/Unit "right"
   else "miss") == "right"))
 
-"ok"
+(var left_serialized (gene/serdes/serialize left))
+(var right_serialized (gene/serdes/serialize right))
+(assert ((left_serialized == right_serialized) == false))
+(var left_roundtrip (gene/serdes/deserialize left_serialized))
+(var right_roundtrip (gene/serdes/deserialize right_serialized))
+(assert ((left_roundtrip == left) == true))
+(assert ((right_roundtrip == right) == true))
+(assert ((left_roundtrip == right_roundtrip) == false))
+
+(var tree_root "/tmp/gene_s05_gir_identity_tree")
+(gene/serdes/write_tree tree_root [left right] ^separate [/*])
+(var loaded (gene/serdes/read_tree tree_root))
+(assert ((loaded/0 == left) == true))
+(assert ((loaded/1 == right) == true))
+(assert ((loaded/0 == loaded/1) == false))
+
+(println "s05 gir identity ok")
