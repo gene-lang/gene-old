@@ -134,33 +134,83 @@ fast path. That lets the runtime treat it as a native macro that receives the
 unevaluated advice definitions and registers the resulting `VkAspect` in the
 caller namespace.
 
-At call time, VM call paths recognize `VkInterception` as callable. Dispatch
-then:
+## Dispatch flow and execution order
 
-1. calls the stored original directly when `active` is false;
-2. reads the referenced `Aspect` and the mapped `param_name`;
-3. pushes an `AopContext` for around/caller-state handling;
-4. runs enabled filters and advice around the original callable; and
-5. pops the context before returning.
+VM call paths recognize `VkInterception` as callable for both standalone wrapper
+values and class method callables. Standalone function wrappers enter dispatch
+with no receiver. Class method wrappers enter dispatch with the method receiver,
+and bound-method dispatch re-enters the same interception path if the bound
+callable is a `VkInterception`.
 
-A nested aspect chain is just nested `VkInterception` values: an interception's
-`original` may itself be another interception.
+`run_intercepted_method` is the central execution path:
+
+1. If the interception is inactive, it immediately calls `call_interception_original`
+   on the stored original callable and skips the disabled wrapper's advice. In a
+   nested chain, any outer active wrapper still runs.
+2. It validates that the wrapper points at a `VkAspect`, reads the mapped aspect
+   parameter name, and prepares a wrapped callable. Method interceptions receive
+   a bound method wrapper so around advice can call the original method with the
+   same receiver.
+3. It pushes an `AopContext` with the original callable, receiver, positional
+   arguments, keyword pairs, caller frame, current exception-handler depth, and
+   an `exception_escaped` flag.
+4. If the aspect is enabled, each `before_filter` for the parameter runs first.
+   A falsey filter result returns `nil` and prevents normal `before`, invariant,
+   around/original, and after execution for that call.
+5. Remaining pre-call advice runs in table order: FIFO `before` advice, then FIFO
+   pre-call invariants.
+6. If an `around` advice exists, the VM marks the context as in-around and calls
+   the single stored around advice with the original positional arguments plus the
+   wrapped callable as the final argument. Otherwise it calls
+   `call_interception_original` directly. Registration stores only one around
+   advice per aspect parameter; duplicate-around rejection still needs a negative
+   S02 fixture before it should be called verified.
+7. `call_interception_original` dispatches through the original kind. It executes
+   standalone `VkFunction` values directly, executes methods with the receiver
+   when one exists, calls `VkNativeFn` values with receiver/keyword shims as
+   needed, and recursively invokes `run_intercepted_method` when the original is
+   another `VkInterception`. That recursion is the chaining model: nested wrapper
+   values, not one flattened global advice list.
+8. Exception dispatch marks the active `AopContext` when a thrown value escapes
+   past the handler depth captured at interception entry. When that escape flag
+   is set, post-call invariants and after advice are skipped.
+9. If no escape was marked, FIFO invariants run again after the original/around
+   call, followed by FIFO after advice.
+10. After-advice result handling is intentionally conservative. Inline advice
+    with a declared argument count less than or equal to the intercepted
+    positional argument count receives only the original positional arguments;
+    symbol/callable advice with unknown arity, or inline advice declaring more
+    arguments than the intercepted call supplied, also receives the current
+    result appended. Only after advice marked `^^replace_result` replaces the
+    wrapped call result with the advice return value.
+
+Macro-like wrapped method calls have a special `call_bound_method` path: when an
+around advice calls the wrapped bound method for the same receiver and original
+callable, the VM can preserve the caller frame captured in `AopContext`. This is
+code-present behavior; the S01 fixture set does not yet prove the macro-like
+caller-context boundary.
 
 ## Verification map
 
-The following fixtures are the current tracked proof set for behavior that can
-be marked verified after the focused testsuite command passes:
+The following claims may be treated as verified only after the focused AOP
+fixtures pass. Each verified claim names the tracked fixture that proves it.
+Runtime behavior outside this table is implemented or code-present evidence, not
+S01-verified behavior yet.
 
-| Fixture | Behavior covered |
-| --- | --- |
-| `testsuite/07-oop/oop/2_aop_aspects.gene` | Class method application, multiple `before` advice entries, `after` result handling, `before_filter` skip, `around` wrapped method call, and self binding. |
-| `testsuite/07-oop/oop/4_aop_invariants.gene` | Invariant ordering, before-filter short circuit, around advice, after advice, and escaped-call behavior for a throwing method. |
-| `testsuite/07-oop/oop/6_aop_chaining.gene` | Nested class-method wrappers and per-interception disable behavior. |
-| `testsuite/05-functions/functions/6_aop_functions.gene` | `.apply-fn` wrapper behavior for standalone functions with before/around/after advice. |
-| `testsuite/07-oop/oop/5_aop_callable_advices.gene` | Advice entries that resolve to existing Gene or native callables. |
+| Verified behavior claim | Tracked fixture proof | What the fixture demonstrates |
+| --- | --- | --- |
+| Class method interception runs FIFO `before` advice, preserves `self`, executes the original method, runs FIFO `after` advice, and lets `^^replace_result` replace the final result. | `testsuite/07-oop/oop/2_aop_aspects.gene` | Two `before` entries print before the method, `/tag` resolves through the receiver, one after advice sees the current result and replaces it, and a later after advice runs without replacing it. |
+| `before_filter` falsey results short-circuit an intercepted method and return `nil` without running later advice or the original method. | `testsuite/07-oop/oop/2_aop_aspects.gene`; `testsuite/07-oop/oop/4_aop_invariants.gene` | Negative `m2` calls print/filter to `result nil`; the invariant fixture shows no later before/invariant/around/after output for the filtered call. |
+| Around advice receives a wrapped callable and can delegate to the original method or function. | `testsuite/07-oop/oop/2_aop_aspects.gene`; `testsuite/07-oop/oop/4_aop_invariants.gene`; `testsuite/05-functions/functions/6_aop_functions.gene` | Method and function fixtures print around output before the original callable output, proving delegation through the wrapped callable. |
+| Invariants run before and after a non-escaped call, in declaration order. | `testsuite/07-oop/oop/4_aop_invariants.gene` | `inv1` then `inv2` print before around/original execution and again afterward for `m1`. |
+| If the original call escapes with an error to the caller, post-call invariants and after advice are skipped. | `testsuite/07-oop/oop/4_aop_invariants.gene` | The throwing `m3` call prints before/invariant/around/original output and then `caught`, with no post-call invariant or after output. |
+| Applying multiple aspects to the same method creates nested wrappers rather than one global advice list. | `testsuite/07-oop/oop/6_aop_chaining.gene` | The second-applied aspect runs its `before`, then the first wrapper runs, then the first `after`, then the second `after`; disabling the inner wrapper leaves the outer wrapper active. |
+| Per-interception disable bypasses that wrapper and calls its stored original directly. | `testsuite/07-oop/oop/6_aop_chaining.gene` | Disabling the first aspect's captured interception removes A1 output from the second call while A2 output and the original method still run. |
+| `.apply-fn` returns an explicit standalone function wrapper with before, around, and after advice. | `testsuite/05-functions/functions/6_aop_functions.gene` | The returned `wrapped` value prints before/around/original/after output around `inc`; the original binding is not mutated by this fixture. |
+| Callable advice symbols resolve to existing Gene or native callables and receive receiver/argument/result values according to advice kind. | `testsuite/07-oop/oop/5_aop_callable_advices.gene` | `before_fn`, `after_fn`, and native `println` advice all run; native after advice receives receiver, original argument, and result. |
 
-This page should only label behavior as verified when one of those fixtures, or
-a later tracked fixture, proves it.
+This page should only label additional behavior as verified when a later tracked
+fixture proves it.
 
 ## Unsupported and stale design-era surfaces
 
