@@ -193,6 +193,48 @@ proc check_source_gir_descriptor_metadata_parity(source_path, gir_path: string) 
   check summary_contains(source_summary, ".IkFunction.arg0.return_type_id=")
   check_descriptor_metadata_summaries_equal(source_path, source_summary, loaded_summary)
 
+const CorruptTypeIdForTest: TypeId = 999'i32
+
+proc descriptor_owner_path_for_test(type_id: TypeId, desc: TypeDesc,
+                                    fallback_module_path: string): string =
+  let owner = canonical_type_owner_path(desc, fallback_module_path)
+  let module_part = if owner.len == 0: "<local>" else: owner
+  module_part & "/type_descriptors[" & $type_id & "]"
+
+proc compile_valid_typed_unit_for_corruption(source_path, code: string): CompilationUnit =
+  createDir(parentDir(source_path))
+  writeFile(source_path, code)
+  result = compiler.parse_and_compile(readFile(source_path), source_path)
+  verify_type_metadata(result, phase = "source metadata corruption baseline", source_path = source_path)
+
+proc corrupt_first_union_member_for_test(cu: CompilationUnit,
+                                         invalid_type_id: TypeId): tuple[union_id: TypeId, owner_path: string] =
+  result.union_id = NO_TYPE_ID
+  for i, desc in cu.type_descriptors:
+    if desc.kind == TdkUnion and desc.members.len > 0:
+      result.union_id = i.TypeId
+      var corrupted = desc
+      corrupted.members[0] = invalid_type_id
+      cu.type_descriptors[i] = corrupted
+      result.owner_path = descriptor_owner_path_for_test(result.union_id, corrupted, cu.module_path) & ".members[0]"
+      break
+  check result.union_id != NO_TYPE_ID
+
+proc append_invalid_push_type_value_for_test(cu: CompilationUnit,
+                                             invalid_type_id: TypeId): int =
+  result = cu.instructions.len
+  cu.instructions.add(Instruction(kind: IkPushTypeValue, arg0: invalid_type_id.to_value()))
+
+proc ensure_gene_bin_for_test(): string =
+  result = absolutePath("bin/gene")
+  if fileExists(result):
+    return
+
+  let build = execCmdEx("nimble build")
+  checkpoint build.output
+  check build.exitCode == 0
+  check fileExists(result)
+
 suite "GIR CLI":
   test "gir show renders instructions":
     let source_path = "examples/hello_world.gene"
@@ -1212,6 +1254,113 @@ suite "GIR CLI":
           removeFile(fixture.gir)
       check fileExists(fixture.source)
       check_source_gir_descriptor_metadata_parity(fixture.source, fixture.gir)
+
+  test "load_gir rejects corrupted type alias metadata":
+    let source_path = absolutePath("tmp/corrupted_alias_metadata.gene")
+    let gir_path = "build/tests/corrupted_alias_metadata.gir"
+
+    defer:
+      for path in [source_path, gir_path]:
+        if fileExists(path):
+          removeFile(path)
+
+    let compiled = compile_valid_typed_unit_for_corruption(source_path, """
+      (type Broken Int)
+      (var x: Broken 1)
+      x
+    """)
+    check compiled.type_aliases.hasKey("Broken")
+    compiled.type_aliases["Broken"] = CorruptTypeIdForTest
+
+    gir.save_gir(compiled, gir_path, source_path)
+    expect_load_gir_metadata_error(gir_path, "type_aliases[Broken]",
+      CorruptTypeIdForTest, compiled.type_descriptors.len,
+      ["detail=TypeId is outside the descriptor table"])
+
+  test "load_gir rejects corrupted descriptor graph TypeId metadata":
+    let source_path = absolutePath("tmp/corrupted_descriptor_graph_metadata.gene")
+    let gir_path = "build/tests/corrupted_descriptor_graph_metadata.gir"
+
+    defer:
+      for path in [source_path, gir_path]:
+        if fileExists(path):
+          removeFile(path)
+
+    let compiled = compile_valid_typed_unit_for_corruption(source_path, """
+      (var x: (Int | String) 1)
+      x
+    """)
+    let corrupted = corrupt_first_union_member_for_test(compiled, CorruptTypeIdForTest)
+
+    gir.save_gir(compiled, gir_path, source_path)
+    expect_load_gir_metadata_error(gir_path, corrupted.owner_path,
+      CorruptTypeIdForTest, compiled.type_descriptors.len,
+      ["detail=TypeId is outside the descriptor table"])
+
+  test "load_gir and direct CLI reject corrupted instruction TypeId metadata":
+    let source_path = absolutePath("tmp/corrupted_instruction_metadata.gene")
+    let gir_path = "build/tests/corrupted_instruction_metadata.gir"
+
+    defer:
+      for path in [source_path, gir_path]:
+        if fileExists(path):
+          removeFile(path)
+
+    let compiled = compile_valid_typed_unit_for_corruption(source_path, """
+      (var x: Int 1)
+      x
+    """)
+    let instruction_index = append_invalid_push_type_value_for_test(compiled, CorruptTypeIdForTest)
+    let owner_path = "instructions[" & $instruction_index & "].IkPushTypeValue.arg0"
+
+    gir.save_gir(compiled, gir_path, source_path)
+    expect_load_gir_metadata_error(gir_path, owner_path,
+      CorruptTypeIdForTest, compiled.type_descriptors.len,
+      ["detail=TypeId is outside the descriptor table"])
+
+    let gene_bin = ensure_gene_bin_for_test()
+    let cli = execCmdEx(gene_bin & " run " & gir_path)
+    checkpoint cli.output
+    check cli.exitCode != 0
+    for part in [
+      "Loading GIR file:",
+      TypeMetadataInvalidMarker,
+      "phase=GIR load",
+      "owner/path=" & owner_path,
+      "invalid TypeId=" & $CorruptTypeIdForTest,
+      "descriptor count=" & $compiled.type_descriptors.len,
+      "descriptor-table length=" & $compiled.type_descriptors.len,
+      "source path=" & gir_path,
+    ]:
+      check cli.output.contains(part)
+
+  test "cached source run recompiles after corrupted cached GIR metadata":
+    let source_path = absolutePath("tmp/corrupted_cached_gir_fallback.gene")
+    let gir_path = gir.get_gir_path(source_path, "build")
+
+    defer:
+      for path in [source_path, gir_path]:
+        if fileExists(path):
+          removeFile(path)
+
+    let compiled = compile_valid_typed_unit_for_corruption(source_path, """
+      (type Broken Int)
+      (var x: Broken 1)
+      (assert (x == 1))
+    """)
+    check compiled.type_aliases.hasKey("Broken")
+    compiled.type_aliases["Broken"] = CorruptTypeIdForTest
+
+    gir.save_gir(compiled, gir_path, source_path)
+    expect_load_gir_metadata_error(gir_path, "type_aliases[Broken]",
+      CorruptTypeIdForTest, compiled.type_descriptors.len,
+      ["detail=TypeId is outside the descriptor table"])
+
+    let gene_bin = ensure_gene_bin_for_test()
+    let source_run = execCmdEx(gene_bin & " run " & source_path)
+    checkpoint source_run.output
+    check source_run.exitCode == 0
+    check not source_run.output.contains(TypeMetadataInvalidMarker)
 
   test "cached GIR preserves S05 imported enum identity fixture":
     let source_path = absolutePath("tests/fixtures/s05_gir_identity_main.gene")
