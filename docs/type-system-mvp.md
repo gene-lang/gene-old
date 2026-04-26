@@ -4,6 +4,8 @@
 **Status:** Active, partially delivered  
 **Language mode:** Gradual-first by default
 
+For the target coherence contract, see [Gradual Typing Foundation](gradual-typing.md). That document defines the M006 foundation goal for descriptor metadata verification, source/GIR parity, diagnostics, and opt-in strict nil; this page remains the current-state delivered/missing split.
+
 ## What Is True Now
 
 Gene already ships a real gradual typing pipeline:
@@ -13,6 +15,7 @@ Gene already ships a real gradual typing pipeline:
 - Runtime validation uses descriptor metadata (`TypeId` / `TypeDesc`)
 - GIR persists typing metadata, including descriptor tables and type aliases
 - Returns, locals, arguments, and typed properties are enforced at runtime when type checking is enabled
+- Default nil compatibility is permissive today; strict nil is a future opt-in foundation target, not current default behavior
 
 ## Delivered
 

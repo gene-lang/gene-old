@@ -9,6 +9,10 @@ for implemented subsystems now live under [`docs/proposals/`](proposals/README.m
 Start with [feature-status.md](feature-status.md) for the public feature-status
 matrix and stable-core boundary.
 
+## Active Foundation Contracts
+
+- [Gradual Typing Foundation](gradual-typing.md) — target M006 coherence contract for descriptor metadata verification, source/GIR parity, diagnostics, default nil compatibility, and opt-in strict nil. This is implementation guidance for later slices, not a stable-current behavior claim.
+
 ## Spec Companion Docs
 
 - [generator_functions.md](generator_functions.md) — shipped generator semantics
