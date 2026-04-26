@@ -272,6 +272,16 @@ proc apply_aspect_to_class(label: string, self: Value, class_arg: Value, method_
 
   return applied
 
+proc validate_function_interceptor_target(label: string, fn_arg: Value) =
+  case fn_arg.kind
+  of VkFunction:
+    if fn_arg.ref.fn.is_macro_like:
+      not_allowed(label & " does not accept macro-like function targets")
+  of VkNativeFn, VkInterception:
+    discard
+  else:
+    not_allowed(label & " requires a function, native function, or interception")
+
 proc apply_aspect_to_function(label: string, self: Value, fn_arg: Value): Value =
   if self.kind != VkAspect:
     not_allowed(label & " must be called on an aspect")
@@ -280,8 +290,7 @@ proc apply_aspect_to_function(label: string, self: Value, fn_arg: Value): Value 
   if aspect.param_names.len != 1:
     not_allowed(label & " requires exactly one function parameter")
 
-  if fn_arg.kind notin {VkFunction, VkNativeFn, VkInterception}:
-    not_allowed(label & " requires a function, native function, or interception")
+  validate_function_interceptor_target(label, fn_arg)
 
   create_interception_value(fn_arg, self, aspect.param_names[0])
 

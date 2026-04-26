@@ -1,0 +1,62 @@
+# Expected: direct zero caught
+# Expected: direct extra caught
+# Expected: direct keyword caught
+# Expected: direct class target caught
+# Expected: direct scalar target caught
+# Expected: direct macro target caught
+
+(fn-interceptor BoundaryTrace [f]
+  (before f [x]
+    (println "boundary trace before" x)
+  )
+)
+
+(fn boundary_inc [x]
+  (x + 1)
+)
+
+(class BoundaryTargetC
+  (method run [x]
+    x
+  )
+)
+
+(fn boundary_quote! [expr]
+  expr
+)
+
+(try
+  (BoundaryTrace)
+catch *
+  (println "direct zero caught")
+)
+
+(try
+  (BoundaryTrace boundary_inc "extra")
+catch *
+  (println "direct extra caught")
+)
+
+(try
+  (BoundaryTrace boundary_inc ^unexpected true)
+catch *
+  (println "direct keyword caught")
+)
+
+(try
+  (BoundaryTrace BoundaryTargetC)
+catch *
+  (println "direct class target caught")
+)
+
+(try
+  (BoundaryTrace "not callable")
+catch *
+  (println "direct scalar target caught")
+)
+
+(try
+  (BoundaryTrace boundary_quote!)
+catch *
+  (println "direct macro target caught")
+)
