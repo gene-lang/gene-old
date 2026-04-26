@@ -13,6 +13,7 @@ examples=(
   examples/async.gene
   examples/io.gene
   examples/oop.gene
+  examples/interception.gene
   examples/sample_typed.gene
   examples/process_management.gene
 )

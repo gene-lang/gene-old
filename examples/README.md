@@ -28,6 +28,10 @@ The goal is to keep examples small, current, and runnable against the codebase a
 - `async.gene` - Futures, callbacks, and `await`
 - `http_actor_server.gene` - Actor-backed background work behind an HTTP front door
 
+## Experimental
+
+- `interception.gene` - Explicit runtime interception for selected class methods and standalone callables using `(interceptor ...)`, `(fn-interceptor ...)`, direct callable application, and slash toggles. Historical broad AOP material remains compatibility/migration context; start here for current experiments.
+
 ## Extensions and Web
 
 - `html.gene` - HTML generation with `genex/html/tags`

@@ -1,0 +1,78 @@
+#!/usr/bin/env gene run
+
+# Explicit runtime interception is Experimental.
+# Run: ./bin/gene run examples/interception.gene
+
+(println "=== Class interception ===")
+
+(interceptor AccountAudit [deposit withdraw]
+  (before deposit [amount]
+    (println "class audit before deposit" amount)
+  )
+  (after deposit [amount result]
+    (println "class audit after deposit" result)
+  )
+  (around withdraw [amount wrapped]
+    (println "class audit around withdraw" amount)
+    (wrapped amount)
+  )
+)
+
+(class Account
+  ^fields {^name Any}
+
+  (ctor [name]
+    (/name = name)
+  )
+
+  (method deposit [amount]
+    (println "deposit body" /name amount)
+    (amount + 10)
+  )
+
+  (method withdraw [amount]
+    (println "withdraw body" /name amount)
+    (100 - amount)
+  )
+)
+
+(var account_apps (AccountAudit Account "deposit" "withdraw"))
+(var deposit_audit account_apps/0)
+(var account (new Account "primary"))
+
+(println "class deposit active result" (account .deposit 5))
+
+deposit_audit/.disable
+(println "class deposit disabled result" (account .deposit 6))
+
+deposit_audit/.enable
+(println "class deposit reenabled result" (account .deposit 7))
+(println "class withdraw result" (account .withdraw 8))
+
+(println "")
+(println "=== Function interception ===")
+
+(fn-interceptor TraceCall [f]
+  (before f [x]
+    (println "function trace before" x)
+  )
+  (after f [x result]
+    (println "function trace after" x result)
+  )
+)
+
+(fn add_one [x]
+  (println "add-one body" x)
+  (x + 1)
+)
+
+(var traced_add_one (TraceCall add_one))
+
+(println "function original result" (add_one 1))
+(println "function wrapped result" (traced_add_one 2))
+
+traced_add_one/.disable
+(println "function wrapper disabled result" (traced_add_one 3))
+
+traced_add_one/.enable
+(println "function wrapper reenabled result" (traced_add_one 4))
