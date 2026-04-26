@@ -20,6 +20,19 @@
 (println rect)
 # Expected: (Shape/Rect 10 20)
 
+(var rect_kw (Rect ^height 20 ^width 10))
+(assert ((rect_kw .width) == 10))
+(assert ((rect_kw .height) == 20))
+(assert (rect_kw == rect))
+(println rect_kw)
+# Expected: (Shape/Rect 10 20)
+
+(var direct_rect_kw (Shape/Rect ^height 40 ^width 30))
+(assert ((direct_rect_kw .width) == 30))
+(assert ((direct_rect_kw .height) == 40))
+(println direct_rect_kw)
+# Expected: (Shape/Rect 30 40)
+
 (var point_call (Point))
 (assert (point_call == Shape/Point))
 (var direct_point_call (Shape/Point))
@@ -44,3 +57,27 @@ catch *
 catch *
   (println "unit payload rejected"))
 # Expected: unit payload rejected
+
+(try
+  (Rect ^width 10)
+catch *
+  (println "missing keyword rejected"))
+# Expected: missing keyword rejected
+
+(try
+  (Rect ^width 10 ^height 20 ^depth 30)
+catch *
+  (println "unknown keyword rejected"))
+# Expected: unknown keyword rejected
+
+(try
+  (Rect 10 ^height 20)
+catch *
+  (println "mixed payload rejected"))
+# Expected: mixed payload rejected
+
+(try
+  (Point ^x 1)
+catch *
+  (println "unit keyword rejected"))
+# Expected: unit keyword rejected

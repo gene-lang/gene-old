@@ -108,26 +108,102 @@ proc require_enum_constructor_member(variant: Value): EnumMember {.inline.} =
 proc qualified_enum_variant_name(member: EnumMember): string {.inline.} =
   member.parent.ref.enum_def.name & "/" & member.name
 
+proc enum_keyword_name(key: Key): string {.inline.} =
+  get_symbol(symbol_index(key))
+
+proc deterministic_enum_keyword_pairs(member: EnumMember, props: Table[Key, Value]): seq[(Key, Value)] {.inline.} =
+  ## Gene.props is a Table, so materialize a deterministic keyword stream:
+  ## declared fields first, then unknown keys sorted by name for stable diagnostics.
+  if props.len == 0:
+    return @[]
+
+  var emitted = initTable[Key, bool]()
+  for field_name in member.fields:
+    let field_key = field_name.to_key()
+    if props.hasKey(field_key):
+      result.add((field_key, props[field_key]))
+      emitted[field_key] = true
+
+  var unknown_keys: seq[Key] = @[]
+  for key in props.keys:
+    if not emitted.hasKey(key):
+      unknown_keys.add(key)
+  unknown_keys.sort(proc(a, b: Key): int = cmp(enum_keyword_name(a), enum_keyword_name(b)))
+  for key in unknown_keys:
+    result.add((key, props[key]))
+
 proc construct_enum_variant(self: ptr VirtualMachine, variant: Value, positional: seq[Value],
                             keywords: seq[(Key, Value)] = @[]): Value {.inline.} =
   discard self
   let member = require_enum_constructor_member(variant)
   let qualified_name = qualified_enum_variant_name(member)
+  let expected = member.fields.len
+  let expected_fields = member.fields.join(", ")
 
+  if positional.len > 0 and keywords.len > 0:
+    not_allowed("Variant " & qualified_name & " cannot mix positional and keyword arguments")
+
+  var duplicate_names: seq[string] = @[]
   if keywords.len > 0:
-    not_allowed("Variant " & qualified_name & " does not accept keyword arguments in this call path")
+    var seen = initTable[Key, bool]()
+    var duplicate_seen = initTable[Key, bool]()
+    for (key, _) in keywords:
+      if seen.hasKey(key):
+        if not duplicate_seen.hasKey(key):
+          duplicate_names.add(enum_keyword_name(key))
+          duplicate_seen[key] = true
+      else:
+        seen[key] = true
+    if duplicate_names.len > 0:
+      duplicate_names.sort(system.cmp[string])
+      not_allowed("Variant " & qualified_name & " got duplicate keyword argument(s): " & duplicate_names.join(", "))
 
-  if member.fields.len == 0:
-    if positional.len == 0:
+  if expected == 0:
+    if positional.len == 0 and keywords.len == 0:
       return variant
+    if keywords.len > 0:
+      var names: seq[string] = @[]
+      for (key, _) in keywords:
+        names.add(enum_keyword_name(key))
+      names.sort(system.cmp[string])
+      not_allowed("Unit variant " & qualified_name & " expects 0 keyword arguments, got: " & names.join(", "))
     not_allowed("Unit variant " & qualified_name & " expects 0 arguments, got " & $positional.len)
 
-  let expected = member.fields.len
-  if positional.len != expected:
-    not_allowed("Variant " & qualified_name & " expects " & $expected &
-                " arguments (" & member.fields.join(", ") & "), got " & $positional.len)
+  if keywords.len == 0:
+    if positional.len != expected:
+      not_allowed("Variant " & qualified_name & " expects " & $expected &
+                  " arguments (" & expected_fields & "), got " & $positional.len)
+    return new_enum_value(variant, positional)
 
-  new_enum_value(variant, positional)
+  var field_indices = initTable[Key, int]()
+  for i, field_name in member.fields:
+    field_indices[field_name.to_key()] = i
+
+  var data = newSeq[Value](expected)
+  var bound = newSeq[bool](expected)
+  var unknown_names: seq[string] = @[]
+  for (key, value) in keywords:
+    if field_indices.hasKey(key):
+      let index = field_indices[key]
+      data[index] = value
+      bound[index] = true
+    else:
+      unknown_names.add(enum_keyword_name(key))
+
+  if unknown_names.len > 0:
+    unknown_names.sort(system.cmp[string])
+    not_allowed("Variant " & qualified_name & " got unknown keyword argument(s): " &
+                unknown_names.join(", ") & "; expected fields: " & expected_fields)
+
+  var missing_names: seq[string] = @[]
+  for i, field_name in member.fields:
+    if not bound[i]:
+      missing_names.add(field_name)
+  if missing_names.len > 0:
+    not_allowed("Variant " & qualified_name & " missing keyword argument(s): " &
+                missing_names.join(", ") & "; expected fields: " & expected_fields)
+
+  new_enum_value(variant, data)
 
 proc require_dynamic_method_name(value: Value): string {.inline.} =
   case value.kind
@@ -2435,7 +2511,9 @@ proc exec*(self: ptr VirtualMachine): Value =
             # Check if this is a gene with an enum variant as its type
             let value = self.frame.current()
             if value.kind == VkGene and value.gene.type.kind == VkEnumMember:
-              self.frame.replace(self.construct_enum_variant(value.gene.type, value.gene.children))
+              let member = require_enum_constructor_member(value.gene.type)
+              let kw_pairs = deterministic_enum_keyword_pairs(member, value.gene.props)
+              self.frame.replace(self.construct_enum_variant(value.gene.type, value.gene.children, kw_pairs))
             elif value.kind == VkGene and (inst.arg1 and 2'i32) != 0:
               value.gene.frozen = true
             if value.kind == VkGene and (inst.arg1 and 1'i32) != 0:
@@ -5609,6 +5687,9 @@ proc exec*(self: ptr VirtualMachine): Value =
         of VkInterception:
           let result = self.run_intercepted_method(target.ref.interception, NIL, args, kw_pairs)
           self.frame.push(result)
+
+        of VkEnumMember:
+          self.frame.push(self.construct_enum_variant(target, args, kw_pairs))
 
         of VkInterface:
           if args.len < 1:

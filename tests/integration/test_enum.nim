@@ -104,6 +104,54 @@ test_vm """
   check r.ref.ev_variant.ref.enum_member.name == "Rect"
   check r.ref.ev_data == @[10.to_value(), 20.to_value()]
 
+test_vm """
+  (enum Shape (Rect width height))
+  (var Rect Shape/Rect)
+  (Rect ^height 20 ^width 10)
+""", proc(r: Value) =
+  check r.kind == VkEnumValue
+  check r.ref.ev_variant.ref.enum_member.name == "Rect"
+  check r.ref.ev_data == @[10.to_value(), 20.to_value()]
+
+test_vm """
+  (enum Shape (Rect width height))
+  (Shape/Rect ^height 20 ^width 10)
+""", proc(r: Value) =
+  check r.kind == VkEnumValue
+  check r.ref.ev_variant.ref.enum_member.name == "Rect"
+  check r.ref.ev_data == @[10.to_value(), 20.to_value()]
+
+test "enum keyword payload constructor diagnostics name fields and call shape":
+  expect_enum_error("""
+    (enum Shape (Rect width height))
+    (var Rect Shape/Rect)
+    (Rect ^width 10)
+  """, "Variant Shape/Rect missing keyword argument(s): height; expected fields: width, height")
+
+  expect_enum_error("""
+    (enum Shape (Rect width height))
+    (var Rect Shape/Rect)
+    (Rect ^width 10 ^height 20 ^depth 30)
+  """, "Variant Shape/Rect got unknown keyword argument(s): depth; expected fields: width, height")
+
+  expect_enum_error("""
+    (enum Shape (Rect width height))
+    (var Rect Shape/Rect)
+    (Rect 10 ^height 20)
+  """, "Variant Shape/Rect cannot mix positional and keyword arguments")
+
+  expect_enum_error("""
+    (enum Shape Point)
+    (var Point Shape/Point)
+    (Point ^x 1)
+  """, "Unit variant Shape/Point expects 0 keyword arguments, got: x")
+
+  expect_enum_error("""
+    (enum Shape (Rect width height))
+    (var Rect Shape/Rect)
+    (Rect ^width 10 ^width 11 ^height 20)
+  """, "conflict with property shortcut found earlier")
+
 test "enum payload constructor diagnostics use qualified variant names":
   expect_enum_error("""
     (enum Shape (Circle radius) (Rect width height) Point)
