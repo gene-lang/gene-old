@@ -1,0 +1,115 @@
+# Expected: plain function target Interception
+# Expected: native function target Interception
+# Expected: interception target Interception
+# Expected: zero args [GENE.INTERCEPT.FN_ARITY]
+# Expected: extra args [GENE.INTERCEPT.FN_ARITY]
+# Expected: direct keyword [GENE.INTERCEPT.KEYWORD_UNSUPPORTED]
+# Expected: class target [GENE.INTERCEPT.FN_TARGET]
+# Expected: scalar target [GENE.INTERCEPT.FN_TARGET]
+# Expected: native macro target [GENE.INTERCEPT.MACRO_UNSUPPORTED]
+# Expected: fn bang target [GENE.INTERCEPT.MACRO_UNSUPPORTED]
+# Expected: keyword target [GENE.INTERCEPT.KEYWORD_UNSUPPORTED]
+# Expected: async target [GENE.INTERCEPT.ASYNC_UNSUPPORTED]
+
+(var FN_ARITY_MARKER "[GENE.INTERCEPT.FN_ARITY]")
+(var KEYWORD_MARKER "[GENE.INTERCEPT.KEYWORD_UNSUPPORTED]")
+(var FN_TARGET_MARKER "[GENE.INTERCEPT.FN_TARGET]")
+(var MACRO_MARKER "[GENE.INTERCEPT.MACRO_UNSUPPORTED]")
+(var ASYNC_MARKER "[GENE.INTERCEPT.ASYNC_UNSUPPORTED]")
+
+(fn expect_marker [label marker e]
+  (assert ((e .message) .contains marker))
+  (println label marker)
+)
+
+(fn-interceptor DiagnosticTrace [f]
+  (before f [x]
+    (println "diagnostic trace before" x)
+  )
+)
+
+(fn diagnostic_plain [x]
+  x
+)
+
+(class DiagnosticTargetC
+  (method run [x]
+    x
+  )
+)
+
+(fn diagnostic_quote! [expr]
+  expr
+)
+
+(fn diagnostic_keyword [^x]
+  x
+)
+
+(fn diagnostic_async ^^async [x]
+  x
+)
+
+(var plain_app (DiagnosticTrace diagnostic_plain))
+(println "plain function target" plain_app/.class/.name)
+
+(fn-interceptor NativeDiagnostic [f])
+(var native_app (NativeDiagnostic println))
+(println "native function target" native_app/.class/.name)
+
+(var chained_app (DiagnosticTrace plain_app))
+(println "interception target" chained_app/.class/.name)
+
+(try
+  (DiagnosticTrace)
+catch e
+  (expect_marker "zero args" FN_ARITY_MARKER e)
+)
+
+(try
+  (DiagnosticTrace diagnostic_plain "extra")
+catch e
+  (expect_marker "extra args" FN_ARITY_MARKER e)
+)
+
+(try
+  (DiagnosticTrace diagnostic_plain ^unexpected true)
+catch e
+  (expect_marker "direct keyword" KEYWORD_MARKER e)
+)
+
+(try
+  (DiagnosticTrace DiagnosticTargetC)
+catch e
+  (expect_marker "class target" FN_TARGET_MARKER e)
+)
+
+(try
+  (DiagnosticTrace "not callable")
+catch e
+  (expect_marker "scalar target" FN_TARGET_MARKER e)
+)
+
+(try
+  (DiagnosticTrace fn-interceptor)
+catch e
+  (expect_marker "native macro target" MACRO_MARKER e)
+)
+
+(try
+  (DiagnosticTrace diagnostic_quote!)
+catch e
+  (expect_marker "fn bang target" MACRO_MARKER e)
+)
+
+(try
+  (DiagnosticTrace diagnostic_keyword)
+catch e
+  (expect_marker "keyword target" KEYWORD_MARKER e)
+)
+
+(try
+  (DiagnosticTrace diagnostic_async)
+catch e
+  (expect_marker "async target" ASYNC_MARKER e)
+)

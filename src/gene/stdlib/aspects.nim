@@ -2,6 +2,60 @@ import tables
 
 import ../types
 
+const
+  InterceptFnArityMarker = "[GENE.INTERCEPT.FN_ARITY]"
+  InterceptKeywordUnsupportedMarker = "[GENE.INTERCEPT.KEYWORD_UNSUPPORTED]"
+  InterceptFnTargetMarker = "[GENE.INTERCEPT.FN_TARGET]"
+  InterceptMacroUnsupportedMarker = "[GENE.INTERCEPT.MACRO_UNSUPPORTED]"
+  InterceptAsyncUnsupportedMarker = "[GENE.INTERCEPT.ASYNC_UNSUPPORTED]"
+
+proc interception_application_label(label: string, aspect_name: string): string =
+  if aspect_name.len > 0:
+    label & " '" & aspect_name & "'"
+  else:
+    label
+
+proc raise_interception_diagnostic(marker: string, label: string, aspect_name: string, detail: string) =
+  not_allowed(marker & " " & interception_application_label(label, aspect_name) & ": " & detail)
+
+proc matcher_name(matcher: Matcher): string =
+  if matcher != nil and matcher.name_key != Key(0):
+    try:
+      return cast[Value](matcher.name_key).str
+    except CatchableError:
+      discard
+  "<keyword>"
+
+proc function_keyword_param_name(fn: Function): string =
+  if fn != nil and fn.matcher != nil:
+    for matcher in fn.matcher.children:
+      if matcher.kind == MatchProp or matcher.is_prop:
+        return matcher_name(matcher)
+  ""
+
+proc function_target_kind(fn_arg: Value): string =
+  case fn_arg.kind
+  of VkFunction:
+    let fn = fn_arg.ref.fn
+    if fn.is_macro_like:
+      "macro-like function"
+    elif fn.async:
+      "async function"
+    elif function_keyword_param_name(fn).len > 0:
+      "function with keyword parameters"
+    else:
+      "function"
+  of VkNativeFn:
+    "native function"
+  of VkNativeMacro:
+    "native macro"
+  of VkInterception:
+    "interception"
+  of VkClass:
+    "class"
+  else:
+    $fn_arg.kind
+
 proc normalize_advice_args(args_val: Value): Value =
   var normalized = new_array_value()
   case args_val.kind
@@ -272,15 +326,50 @@ proc apply_aspect_to_class(label: string, self: Value, class_arg: Value, method_
 
   return applied
 
-proc validate_function_interceptor_target(label: string, fn_arg: Value) =
+proc validate_function_interceptor_target(label: string, aspect_name: string, fn_arg: Value) =
   case fn_arg.kind
   of VkFunction:
-    if fn_arg.ref.fn.is_macro_like:
-      not_allowed(label & " does not accept macro-like function targets")
+    let fn = fn_arg.ref.fn
+    if fn.is_macro_like:
+      raise_interception_diagnostic(
+        InterceptMacroUnsupportedMarker,
+        label,
+        aspect_name,
+        "expected non-macro callable target; actual " & function_target_kind(fn_arg) &
+          " '" & fn.name & "'"
+      )
+    if fn.async:
+      raise_interception_diagnostic(
+        InterceptAsyncUnsupportedMarker,
+        label,
+        aspect_name,
+        "expected synchronous callable target; actual async function '" & fn.name & "'"
+      )
+    let keyword_name = function_keyword_param_name(fn)
+    if keyword_name.len > 0:
+      raise_interception_diagnostic(
+        InterceptKeywordUnsupportedMarker,
+        label,
+        aspect_name,
+        "target function '" & fn.name & "' declares keyword parameter '" & keyword_name &
+          "', but keyword forwarding is deferred"
+      )
   of VkNativeFn, VkInterception:
     discard
+  of VkNativeMacro:
+    raise_interception_diagnostic(
+      InterceptMacroUnsupportedMarker,
+      label,
+      aspect_name,
+      "expected non-macro callable target; actual " & function_target_kind(fn_arg)
+    )
   else:
-    not_allowed(label & " requires a function, native function, or interception")
+    raise_interception_diagnostic(
+      InterceptFnTargetMarker,
+      label,
+      aspect_name,
+      "expected function, native function, or interception target; actual " & function_target_kind(fn_arg)
+    )
 
 proc apply_aspect_to_function(label: string, self: Value, fn_arg: Value): Value =
   if self.kind != VkAspect:
@@ -288,9 +377,14 @@ proc apply_aspect_to_function(label: string, self: Value, fn_arg: Value): Value 
 
   let aspect = self.ref.aspect
   if aspect.param_names.len != 1:
-    not_allowed(label & " requires exactly one function parameter")
+    raise_interception_diagnostic(
+      InterceptFnArityMarker,
+      label,
+      aspect.name,
+      "expected exactly one function parameter in interceptor definition; actual " & $aspect.param_names.len
+    )
 
-  validate_function_interceptor_target(label, fn_arg)
+  validate_function_interceptor_target(label, aspect.name, fn_arg)
 
   create_interception_value(fn_arg, self, aspect.param_names[0])
 
@@ -321,10 +415,20 @@ proc aspect_call(vm: ptr VirtualMachine, args: ptr UncheckedArray[Value], arg_co
   case aspect.definition_kind
   of AkFunctionInterceptor:
     if has_keyword_args:
-      not_allowed("fn-interceptor application does not accept keyword arguments")
+      raise_interception_diagnostic(
+        InterceptKeywordUnsupportedMarker,
+        "fn-interceptor application",
+        aspect.name,
+        "direct application does not accept keyword arguments"
+      )
     let positional = get_positional_count(arg_count, has_keyword_args)
     if positional != 2:
-      not_allowed("fn-interceptor application requires exactly one callable argument")
+      raise_interception_diagnostic(
+        InterceptFnArityMarker,
+        "fn-interceptor application",
+        aspect.name,
+        "expected exactly one callable argument; actual " & $(positional - 1)
+      )
     let fn_arg = get_positional_arg(args, 1, has_keyword_args)
     apply_aspect_to_function("fn-interceptor application", self, fn_arg)
   of AkLegacyAspect, AkClassInterceptor:
