@@ -330,7 +330,7 @@ proc type_expr_to_string*(v: Value): string =
   else:
     return "Any"
 
-proc resolve_type_value_to_id_with_index(v: Value, type_descs: var seq[TypeDesc],
+proc resolve_type_value_to_id_with_index*(v: Value, type_descs: var seq[TypeDesc],
                                         type_desc_index: var Table[string, TypeId],
                                         type_aliases: Table[string, TypeId],
                                         type_vars: Table[string, TypeId],

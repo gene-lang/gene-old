@@ -1,0 +1,23 @@
+# Canonical enum declaration contract
+
+(enum Result:T:E
+  (Ok value: T)
+  (Err error: E)
+  Empty)
+
+(var ok (Result/Ok 42))
+(assert ((ok .value) == 42))
+(println ok)
+# Expected: (Result/Ok 42)
+
+(var err (Result/Err "boom"))
+(assert ((err .error) == "boom"))
+(println err)
+# Expected: (Result/Err "boom")
+
+(println Result/Empty)
+# Expected: Result/Empty
+
+(enum Status ^values [ready done])
+(println Status/ready)
+# Expected: Status/ready

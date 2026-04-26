@@ -22,7 +22,9 @@ type
 
   EnumDef* = ref object
     name*: string
+    type_params*: seq[string]
     members*: Table[string, EnumMember]
+    field_type_descs*: seq[TypeDesc]
     module_path*: string
     internal_path*: string
 
@@ -31,6 +33,8 @@ type
     name*: string
     value*: int
     fields*: seq[string]       # field names for data variants, empty for unit variants
+    field_type_ids*: seq[TypeId]  # parallel to fields; NO_TYPE_ID means untyped
+    field_type_descs*: seq[TypeDesc]
     module_path*: string
     internal_path*: string
 

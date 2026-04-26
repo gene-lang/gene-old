@@ -3215,7 +3215,18 @@ proc exec*(self: ptr VirtualMachine): Value =
         let name = self.frame.pop()
         if name.kind != VkString:
           not_allowed("enum name must be a string")
-        let enum_def = new_enum(name.str)
+        var type_params: seq[string] = @[]
+        let raw_type_params = cast[uint64](inst.arg0)
+        if raw_type_params != 0:
+          if inst.arg0.kind != VkArray:
+            not_allowed("enum " & name.str & " type parameter metadata must be an array")
+          for param in array_data(inst.arg0):
+            case param.kind
+            of VkString, VkSymbol:
+              type_params.add(param.str)
+            else:
+              not_allowed("enum " & name.str & " type parameter metadata must contain strings")
+        let enum_def = new_enum(name.str, type_params, self.cu.type_descriptors)
         self.frame.push(enum_def.to_value())
 
       of IkEnumAddMember:
@@ -3226,14 +3237,40 @@ proc exec*(self: ptr VirtualMachine): Value =
         if name.kind != VkString:
           not_allowed("enum member name must be a string")
         if value.kind != VkInt:
-          not_allowed("enum member value must be an integer")
+          not_allowed("enum member " & name.str & " value must be an integer")
         if enum_val.kind != VkEnum:
           not_allowed("can only add members to enums")
+        if fields_arr.kind != VkArray:
+          not_allowed("enum member " & name.str & " field metadata must be an array")
         var fields: seq[string] = @[]
-        if fields_arr.kind == VkArray:
-          for f in array_data(fields_arr):
+        for f in array_data(fields_arr):
+          case f.kind
+          of VkString, VkSymbol:
             fields.add(f.str)
-        enum_val.add_member(name.str, value.int64.int, fields)
+          else:
+            not_allowed("enum member " & name.str & " field metadata must contain strings")
+
+        var field_type_ids: seq[TypeId] = @[]
+        let raw_field_type_ids = cast[uint64](inst.arg0)
+        if raw_field_type_ids != 0:
+          if inst.arg0.kind != VkArray:
+            not_allowed("enum member " & name.str & " field type metadata must be an array")
+          for t in array_data(inst.arg0):
+            if t.kind != VkInt:
+              not_allowed("enum member " & name.str & " field type metadata must contain integers")
+            let type_id = t.int64.TypeId
+            if type_id != NO_TYPE_ID and (type_id < 0 or type_id.int >= self.cu.type_descriptors.len):
+              not_allowed("enum member " & name.str & " field type metadata references invalid TypeId " & $type_id)
+            field_type_ids.add(type_id)
+        else:
+          field_type_ids = newSeq[TypeId](fields.len)
+          for i in 0..<field_type_ids.len:
+            field_type_ids[i] = NO_TYPE_ID
+
+        if field_type_ids.len != fields.len:
+          not_allowed("enum member " & name.str & " field type metadata count " & $field_type_ids.len &
+                      " does not match field count " & $fields.len)
+        enum_val.add_member(name.str, value.int64.int, fields, field_type_ids, self.cu.type_descriptors)
 
       of IkCompileInit:
         let input = self.frame.pop()

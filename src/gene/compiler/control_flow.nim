@@ -1194,9 +1194,94 @@ proc compile_for(self: Compiler, gene: ptr Gene) =
   # Pop loop from stack
   discard self.loop_stack.pop()
 
+type EnumVariantCompileMetadata = object
+  name: string
+  value: int
+  fields: seq[string]
+  field_type_ids: seq[TypeId]
+
+proc string_array_value(items: seq[string]): Value =
+  var values: seq[Value] = @[]
+  for item in items:
+    values.add(item.to_value())
+  new_array_value(values)
+
+proc type_id_array_value(items: seq[TypeId]): Value =
+  var values: seq[Value] = @[]
+  for item in items:
+    values.add(item.int.to_value())
+  new_array_value(values)
+
+proc parse_enum_declaration_name(raw_name: string): tuple[base_name: string, type_params: seq[string]] =
+  let parsed = split_generic_definition_name(raw_name)
+  if raw_name.contains(":") and (parsed.base_name == raw_name or parsed.type_params.len == 0):
+    not_allowed("enum generic declaration '" & raw_name & "' has invalid generic parameter syntax")
+  result.base_name = parsed.base_name
+  result.type_params = parsed.type_params
+  if result.base_name.len == 0:
+    not_allowed("enum name must not be empty")
+
+  var seen_params = initTable[string, bool]()
+  for param in result.type_params:
+    if seen_params.hasKey(param):
+      not_allowed("enum " & result.base_name & " has duplicate generic parameter " & param)
+    seen_params[param] = true
+
+proc enum_type_annotation_valid(v: Value): bool =
+  case v.kind
+  of VkSymbol, VkString:
+    return v.str.len > 0 and not v.str.endsWith(":")
+  of VkGene:
+    return v.gene != nil and (v.gene.type.kind == VkSymbol or v.gene.type.kind == VkString)
+  else:
+    return false
+
+proc parse_enum_variant_fields(self: Compiler, enum_name: string, variant_gene: ptr Gene,
+                               type_desc_index: var Table[string, TypeId],
+                               generic_type_ids: Table[string, TypeId]): tuple[fields: seq[string], field_type_ids: seq[TypeId]] =
+  let variant_name = variant_gene.type.str
+  if variant_gene.props.len > 0:
+    not_allowed("enum variant " & enum_name & "/" & variant_name & " field declarations must be positional, not properties")
+
+  var seen_fields = initTable[string, bool]()
+  var i = 0
+  while i < variant_gene.children.len:
+    let child = variant_gene.children[i]
+    if child.kind != VkSymbol:
+      not_allowed("enum variant " & enum_name & "/" & variant_name & " field must be a symbol")
+
+    let token = child.str
+    var field_name = token
+    var field_type_id = NO_TYPE_ID
+
+    if token.endsWith(":"):
+      field_name = token[0..^2]
+      if field_name.len == 0:
+        not_allowed("enum variant " & enum_name & "/" & variant_name & " has an empty field name")
+      if i + 1 >= variant_gene.children.len:
+        not_allowed("enum variant " & enum_name & "/" & variant_name & " field " & field_name & " is missing a type after ':'")
+      let type_node = variant_gene.children[i + 1]
+      if type_node.kind == VkSymbol and type_node.str.endsWith(":"):
+        not_allowed("enum variant " & enum_name & "/" & variant_name & " field " & field_name & " is missing a type after ':'")
+      if not enum_type_annotation_valid(type_node):
+        not_allowed("enum variant " & enum_name & "/" & variant_name & " field " & field_name & " has an invalid type annotation")
+      field_type_id = resolve_type_value_to_id_with_index(
+        type_node, self.output.type_descriptors, type_desc_index, self.output.type_aliases,
+        generic_type_ids, self.output.module_path)
+      i += 2
+    else:
+      i.inc()
+
+    if seen_fields.hasKey(field_name):
+      not_allowed("enum variant " & enum_name & "/" & variant_name & " has duplicate field " & field_name)
+    seen_fields[field_name] = true
+    result.fields.add(field_name)
+    result.field_type_ids.add(field_type_id)
+
 proc compile_enum(self: Compiler, gene: ptr Gene) =
   # (enum Color red green blue)
   # (enum Status ^values [ok error pending])
+  # (enum Result:T:E (Ok value: T) (Err error: E))
   if gene.children.len < 1:
     not_allowed("enum expects at least a name")
   
@@ -1204,14 +1289,28 @@ proc compile_enum(self: Compiler, gene: ptr Gene) =
   if name_node.kind != VkSymbol:
     not_allowed("enum name must be a symbol")
   
-  let enum_name = name_node.str
+  let parsed_name = parse_enum_declaration_name(name_node.str)
+  let enum_name = parsed_name.base_name
+  let type_params = parsed_name.type_params
+
+  var type_desc_index = initTable[string, TypeId]()
+  ensure_type_desc_index(self.output.type_descriptors, type_desc_index)
+  var generic_type_ids = initTable[string, TypeId]()
+  for i, param in type_params:
+    let type_id = intern_type_desc(self.output.type_descriptors,
+      TypeDesc(module_path: self.output.module_path, kind: TdkVar, var_id: i.int32),
+      type_desc_index)
+    generic_type_ids[param] = type_id
+
+  var variants: seq[EnumVariantCompileMetadata] = @[]
+  var seen_variants = initTable[string, bool]()
+
+  proc add_variant(variant: EnumVariantCompileMetadata) =
+    if seen_variants.hasKey(variant.name):
+      not_allowed("enum " & enum_name & " has duplicate variant " & variant.name)
+    seen_variants[variant.name] = true
+    variants.add(variant)
   
-  # Create the enum
-  self.emit(Instruction(kind: IkPushValue, arg0: enum_name.to_value()))
-  self.emit(Instruction(kind: IkCreateEnum))
-  
-  # Check if ^values prop is used
-  var start_idx = 1
   if gene.props.has_key("values".to_key()):
     # Values are provided in the ^values property
     let values_array = gene.props["values".to_key()]
@@ -1221,20 +1320,21 @@ proc compile_enum(self: Compiler, gene: ptr Gene) =
     var value = 0
     for member in array_data(values_array):
       if member.kind != VkSymbol:
-        not_allowed("enum member must be a symbol")
-      # Push member name, value, and empty fields array
-      self.emit(Instruction(kind: IkPushValue, arg0: member.str.to_value()))
-      self.emit(Instruction(kind: IkPushValue, arg0: value.to_value()))
-      self.emit(Instruction(kind: IkPushValue, arg0: new_array_value(@[])))
-      self.emit(Instruction(kind: IkEnumAddMember))
+        not_allowed("enum ^values member must be a symbol")
+      add_variant(EnumVariantCompileMetadata(
+        name: member.str,
+        value: value,
+        fields: @[],
+        field_type_ids: @[]))
       value.inc()
   else:
     # Members are provided as children
     var value = 0
-    var i = start_idx
+    var i = 1
     while i < gene.children.len:
       let member = gene.children[i]
       if member.kind == VkSymbol:
+        let variant_name = member.str
         # Unit variant: (enum Color red green blue)
         # Check if next child is '=' for custom value
         if i + 2 < gene.children.len and
@@ -1243,49 +1343,50 @@ proc compile_enum(self: Compiler, gene: ptr Gene) =
           # Custom value provided
           i += 2
           if gene.children[i].kind != VkInt:
-            not_allowed("enum member value must be an integer")
+            not_allowed("enum member " & variant_name & " value must be an integer")
           value = gene.children[i].int64.int
 
-        # Push member name, value, and empty fields array
-        self.emit(Instruction(kind: IkPushValue, arg0: member.str.to_value()))
-        self.emit(Instruction(kind: IkPushValue, arg0: value.to_value()))
-        self.emit(Instruction(kind: IkPushValue, arg0: new_array_value(@[])))
-        self.emit(Instruction(kind: IkEnumAddMember))
+        add_variant(EnumVariantCompileMetadata(
+          name: variant_name,
+          value: value,
+          fields: @[],
+          field_type_ids: @[]))
       elif member.kind == VkGene:
         # Data variant: (Circle radius) or (Rect width: Int height: Int)
         let variant_gene = member.gene
         if variant_gene.type.kind != VkSymbol:
           not_allowed("enum data variant name must be a symbol")
         let variant_name = variant_gene.type.str
-
-        # Extract field names from children (ignore type annotations for now)
-        var fields: seq[Value] = @[]
-        for child in variant_gene.children:
-          if child.kind == VkSymbol:
-            let s = child.str
-            # Skip type annotations (symbols that follow "name: Type" pattern)
-            # The parser produces "name:" as a keyword and Type as next child
-            if not s.endsWith(":"):
-              fields.add(s.to_value())
-          # Also handle "name: Type" where name has the colon
-
-        # Also check props for keyword-style field declarations (name: Type)
-        for k, v in variant_gene.props:
-          let field_name = cast[Value](k).str
-          fields.add(field_name.to_value())
-
-        let fields_arr = new_array_value(fields)
-        self.emit(Instruction(kind: IkPushValue, arg0: variant_name.to_value()))
-        self.emit(Instruction(kind: IkPushValue, arg0: value.to_value()))
-        self.emit(Instruction(kind: IkPushValue, arg0: fields_arr))
-        self.emit(Instruction(kind: IkEnumAddMember))
+        let parsed_fields = self.parse_enum_variant_fields(enum_name, variant_gene, type_desc_index, generic_type_ids)
+        add_variant(EnumVariantCompileMetadata(
+          name: variant_name,
+          value: value,
+          fields: parsed_fields.fields,
+          field_type_ids: parsed_fields.field_type_ids))
       else:
         not_allowed("enum member must be a symbol or data variant (Name field1 field2)")
 
       value.inc()
       i.inc()
   
-  # Store the enum in the namespace  
+  # Create the enum after validation so malformed declarations fail before bytecode emission.
+  self.emit(Instruction(
+    kind: IkPushValue,
+    arg0: enum_name.to_value()))
+  self.emit(Instruction(
+    kind: IkCreateEnum,
+    arg0: string_array_value(type_params)))
+
+  for variant in variants:
+    var field_values: seq[Value] = @[]
+    for field in variant.fields:
+      field_values.add(field.to_value())
+    self.emit(Instruction(kind: IkPushValue, arg0: variant.name.to_value()))
+    self.emit(Instruction(kind: IkPushValue, arg0: variant.value.to_value()))
+    self.emit(Instruction(kind: IkPushValue, arg0: new_array_value(field_values)))
+    self.emit(Instruction(kind: IkEnumAddMember, arg0: type_id_array_value(variant.field_type_ids)))
+  
+  # Store the enum in the namespace under its canonical base name.
   let index = self.scope_tracker.next_index
   self.scope_tracker.mappings[enum_name.to_key()] = index
   self.add_scope_start()
