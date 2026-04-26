@@ -18,7 +18,7 @@ This directory contains the canonical language specification for Gene, a homoico
 9. [Error Handling & Contracts](09-errors.md) — try/catch, throw, pre/postconditions
 10. [Async & Concurrency](10-async.md) — Futures, async/await, actors, and the public concurrency surface
 11. [Generators](11-generators.md) — Generator functions, yield, iteration protocol
-12. [Pattern Matching](12-patterns.md) — Destructuring, case/when, ADTs
+12. [Pattern Matching](12-patterns.md) — Destructuring, case/when, enum ADTs
 13. [Regular Expressions](13-regex.md) — Regex literals, matching, replacement
 14. [Standard Library](14-stdlib.md) — Built-in functions, I/O, string methods, collections
 15. [Serialization](15-serialization.md) — JSON, GIR, type serialization

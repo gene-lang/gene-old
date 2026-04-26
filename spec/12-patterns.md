@@ -1,8 +1,6 @@
 # 12. Pattern Matching & Destructuring
 
-Gene currently has a tested destructuring subset plus several experimental
-pattern-matching ideas. Treat the stable subset below as the contract; anything
-outside it remains subject to redesign.
+Gene specifies a tested destructuring subset plus `case` matching for simple values and enum ADTs. Treat the stable subset below as the public contract; pattern forms listed under known gaps remain subject to redesign.
 
 ## Tested stable subset
 
@@ -72,33 +70,65 @@ Remaining Gene properties can be captured into a map:
 ```
 
 `case/when` is an expression; each selected branch returns its last value.
-no-match `case` without `else` returns `nil`.
+A no-match `case` without `else` returns `nil`.
 
-## Experimental and downstream subset
+### Enum ADT `case` patterns
 
-Enum ADT variant matching is part of the unified enum work, but it is not part of the stable pattern contract yet. The downstream goal is to match enum variants through enum metadata, bind payload fields in declaration order, and eventually provide exhaustiveness diagnostics.
-
-The future enum shape is expected to resemble:
+Enum ADTs match through the canonical `enum` model. A `when` pattern can name a qualified variant (`Shape/Circle`) or a bare variant (`Circle`) when the bare name resolves unambiguously for the scrutinee. Use qualified names when variants share names across enums or when a custom enum uses built-in names such as `Ok`, `Err`, `Some`, or `None`.
 
 ```gene
-(case result
-  (when (Ok value) value)
-  (when (Err error) error)
-  (when Empty nil))
+(enum Shape
+  (Circle radius)
+  (Rect width height)
+  Point)
+
+(fn describe [shape: Shape] -> String
+  (case shape
+    when (Shape/Circle r)
+      "circle"
+    when (Shape/Rect w h)
+      "rect"
+    when Shape/Point
+      "point"))
 ```
 
-This is an enum-variant pattern direction, not a revival of legacy Gene-expression ADT matching. The matcher must not depend on hardcoded `Ok`, `Err`, `Some`, or `None` expression names as a second ADT model.
+Payload binders are positional and follow the field declaration order. A binder must be a symbol. The special binder `_` consumes that payload position without creating a binding.
 
-The `?` operator remains tied to the Result/Option migration and is not promoted to stable pattern semantics by this section.
+```gene
+(var rect (Shape/Rect 10 20))
+(println
+  (case rect
+    when (Shape/Rect _ height)
+      height
+    else
+      0))
+# => 20
+```
+
+Unit variants match as symbols, either qualified (`Shape/Point`) or bare (`Point`) when resolution is unambiguous. Payload variants must provide exactly one binder per declared payload field; missing or extra binders produce an arity diagnostic. Unknown enum or variant names produce diagnostics, and ambiguous bare variant names require qualification.
+
+Built-in `Result` and `Option` variants are enum variants too. Bare `Ok`, `Err`, `Some`, and `None` patterns match the built-in enum identities; qualify user-defined same-named variants to match custom enums.
+
+```gene
+(case (Ok 42)
+  when (Ok value)
+    value
+  when (Err error)
+    error)
+# => 42
+```
+
+A `case` over a statically known enum value is checked for exhaustiveness when it has no explicit `else` and no wildcard `_` branch. The exhaustiveness rule is strict about the enum declaration: every declared variant must be covered, and missing variants are reported in declaration order. At runtime, a `case` expression with no matching `when` and no `else` returns `nil`.
+
+Legacy Gene-expression ADT matching is not a supported public model. Quoted or stale legacy Result/Option-shaped Gene values should be migrated to enum-backed values and matched with enum variant patterns.
 
 ## Known gaps
 
-- Enum variant patterns, enum field destructuring, and enum exhaustiveness diagnostics are not stable yet.
 - Nested patterns beyond currently covered destructuring are not stable.
 - Guard clauses such as `when pattern if condition` are not supported.
 - Map destructuring syntax such as `(var {^x a ^y b} value)` is not stable.
 - Function-parameter patterns beyond the existing argument matcher surface are
   not specified as a general pattern system.
 - `match`, or-patterns, and as-patterns are not implemented.
-- Broad arity diagnostics are incomplete; some destructuring failures still
+- Broad arity diagnostics are incomplete for non-enum destructuring; some destructuring failures still
   report low-level matcher errors.

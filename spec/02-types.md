@@ -211,11 +211,11 @@ Enum type annotations accept values whose parent enum matches the annotated enum
 (fn accept_result [r: (Result Int String)] -> String "ok")
 ```
 
-Field type annotations inside enum declarations are recorded for downstream constructor and type-enforcement work. S01 does not claim complete runtime enforcement of payload field annotations.
+Enum payload field annotations are part of the construction and type-checking contract. Constructors validate concrete annotated fields when values are built, and annotated boundaries use the parent enum name plus generic arguments to check enum values.
 
 ## 2.5 Enum ADTs
 
-`enum` is the canonical public sum-type model. A declaration may contain unit variants and payload variants:
+`enum` is the only public ADT declaration model. The same declaration form covers simple symbolic enumerations, unit variants, and payload variants:
 
 ```gene
 (enum Shape
@@ -224,16 +224,54 @@ Field type annotations inside enum declarations are recorded for downstream cons
   Point)
 
 (var circle (Shape/Circle 5.0))
+(var rect (Shape/Rect ^height 20 ^width 10))
 (var point Shape/Point)
+
+(assert ((circle .radius) == 5.0))
+(assert ((rect .width) == 10))
+(assert ((typeof circle) == "Shape"))
 ```
 
-A unit variant has no payload fields. A payload variant declares ordered field names, each with an optional type annotation. Implementations preserve that order and any resolved field type descriptors so constructors, field access, type checking, and pattern matching can share one metadata source.
+A unit variant has no payload fields and can be used directly (`Shape/Point`) or called with no arguments (`(Shape/Point)`). A payload variant declares fields in order; those names define positional construction order, keyword construction names, field access names, and pattern binding order. Positional and keyword construction are both supported, but a single constructor call cannot mix the two forms.
 
-The current declaration contract includes targeted diagnostics for malformed enum declarations, duplicate variants, duplicate fields, invalid generic parameters, and invalid field annotations.
+```gene
+(var by_position (Shape/Rect 10 20))
+(var by_keyword (Shape/Rect ^height 20 ^width 10))
+(assert (by_position == by_keyword))
+```
 
-Result and Option are part of the enum ADT migration. The canonical model treats them as enums with variants such as `Result/Ok`, `Result/Err`, `Option/Some`, and `Option/None`. Compatibility shortcuts may exist while migration proceeds, but they are not a separate public ADT model.
+Field annotations are checked when constructing payload variants. A concrete mismatch raises a type error; an omitted field annotation remains gradual and accepts any value.
 
-Constructor enforcement, complete Result/Option cleanup, enum pattern matching, import identity, and persistence guarantees are staged downstream from the declaration contract.
+```gene
+(enum Metric
+  (Counter value: Int))
+
+(var counter (Metric/Counter 7))
+(try
+  (Metric/Counter "bad")
+catch *
+  (println "typed payload rejected"))
+```
+
+Generic enum heads use `Name:T:U` syntax. The canonical enum name is the base name before the first `:`, and concrete type positions apply the generic arguments with ordinary type-expression syntax.
+
+```gene
+(enum Result:T:E
+  (Ok value: T)
+  (Err error: E)
+  Empty)
+
+(fn accept_result [r: (Result Int String)] -> String
+  "accepted")
+```
+
+Enum value equality is nominal by enum variant and structural by payload: two values are equal when they come from the same enum variant and their payload values are equal. Unit variants from the same enum member compare equal. `typeof` returns the parent enum name, not the individual variant name. Display strings such as `Shape/Point` and `(Shape/Circle 5.0)` are for presentation; they are not the canonical identity. Enum identity is nominal and is preserved through imports, GIR cache artifacts, runtime serialization, and tree serialization.
+
+`Result` and `Option` are enum-backed built-ins. `Ok`, `Err`, `Some`, and `None` are ordinary enum variant constructors/values for the built-in `Result` and `Option` identities, and their qualified forms are `Result/Ok`, `Result/Err`, `Option/Some`, and `Option/None`. The `?` operator unwraps `Ok` and `Some`, returns early with built-in `Err` and `None`, and treats same-named variants from user-defined enums as ordinary values.
+
+Legacy Gene-expression ADT declarations such as `(type (Result T E) ...)` are migration errors, not an alternate supported model. New code should use `enum Result:T:E ...` and `enum Option:T ...`; legacy quoted Result/Option-shaped Gene values do not satisfy enum ADT type boundaries.
+
+The declaration contract includes diagnostics for malformed enum declarations, duplicate variants, duplicate fields, invalid generic parameters, invalid field annotations, constructor arity errors, missing or unknown keyword arguments, mixed positional/keyword calls, and typed payload mismatches.
 
 ## 2.6 Enumerations
 
@@ -261,6 +299,6 @@ Status/ready
 - **Type bounds/constraints**: No way to express `T: Comparable` or similar constraints on generic type parameters.
 - **Inference completeness**: Type inference still falls back to `Any` in some complex binding positions, notably destructuring parameters and other non-trivial patterns.
 - **Union type narrowing**: Flow-sensitive narrowing works in `if` branches and some ADT-aware control-flow positions, but not in every control-flow form or arbitrary predicate.
-- **Enum ADT enforcement**: Declaration metadata exists for payload fields and generic enum parameters; full constructor/type enforcement, pattern exhaustiveness, import identity, and persistence semantics are still being completed.
+- **Enum ADT refinements**: The core enum ADT contract is implemented through `enum`; future refinements may add enum-specific methods, optimizer specialization, richer constructor ergonomics, and additional pattern forms such as guards, or-patterns, and as-patterns.
 - **Nil safety**: `nil` and `void` are distinct observable outcomes. Future work should build ergonomic optional-flow helpers and type narrowing on top of that contract.
 - **Structural typing**: All typing is nominal. Structural typing or interfaces/protocols would enable more flexible polymorphism.
