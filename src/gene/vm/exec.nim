@@ -132,9 +132,31 @@ proc deterministic_enum_keyword_pairs(member: EnumMember, props: Table[Key, Valu
   for key in unknown_keys:
     result.add((key, props[key]))
 
+proc validate_enum_payload_fields(self: ptr VirtualMachine, member: EnumMember,
+                                  qualified_name: string, payload: var seq[Value]) {.inline.} =
+  if self == nil or not self.type_check:
+    return
+
+  if member.field_type_ids.len != member.fields.len:
+    not_allowed("Variant " & qualified_name & " has malformed field type metadata: expected " &
+                $member.fields.len & " field type id(s), got " & $member.field_type_ids.len)
+
+  for i, field_name in member.fields:
+    let type_id = member.field_type_ids[i]
+    if type_id == NO_TYPE_ID:
+      continue
+    if type_id < 0 or type_id.int >= member.field_type_descs.len:
+      not_allowed("Variant " & qualified_name & " has malformed field type descriptor metadata for field " &
+                  field_name & ": TypeId " & $type_id & " is unavailable")
+
+    var value = payload[i]
+    let warning = validate_or_coerce_type(value, type_id, member.field_type_descs,
+      "field " & qualified_name & "." & field_name, self.runtime_type_error_location())
+    payload[i] = value
+    emit_type_warning(warning)
+
 proc construct_enum_variant(self: ptr VirtualMachine, variant: Value, positional: seq[Value],
                             keywords: seq[(Key, Value)] = @[]): Value {.inline.} =
-  discard self
   let member = require_enum_constructor_member(variant)
   let qualified_name = qualified_enum_variant_name(member)
   let expected = member.fields.len
@@ -173,7 +195,9 @@ proc construct_enum_variant(self: ptr VirtualMachine, variant: Value, positional
     if positional.len != expected:
       not_allowed("Variant " & qualified_name & " expects " & $expected &
                   " arguments (" & expected_fields & "), got " & $positional.len)
-    return new_enum_value(variant, positional)
+    var data = positional
+    self.validate_enum_payload_fields(member, qualified_name, data)
+    return new_enum_value(variant, data)
 
   var field_indices = initTable[Key, int]()
   for i, field_name in member.fields:
@@ -203,6 +227,7 @@ proc construct_enum_variant(self: ptr VirtualMachine, variant: Value, positional
     not_allowed("Variant " & qualified_name & " missing keyword argument(s): " &
                 missing_names.join(", ") & "; expected fields: " & expected_fields)
 
+  self.validate_enum_payload_fields(member, qualified_name, data)
   new_enum_value(variant, data)
 
 proc require_dynamic_method_name(value: Value): string {.inline.} =

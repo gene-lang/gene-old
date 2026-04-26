@@ -121,6 +121,44 @@ test_vm """
   check r.ref.ev_variant.ref.enum_member.name == "Rect"
   check r.ref.ev_data == @[10.to_value(), 20.to_value()]
 
+proc expect_enum_error_parts(code: string, expected_message_parts: openArray[string]) =
+  init_all()
+  try:
+    discard VM.exec(cleanup(code), "test_code")
+    fail()
+  except CatchableError as err:
+    for expected_message_part in expected_message_parts:
+      check err.msg.contains(expected_message_part)
+
+test "enum typed payload constructors validate concrete field annotations":
+  expect_enum_error_parts("""
+    (enum Metric (Counter value: Int))
+    (var Counter Metric/Counter)
+    (Counter "bad")
+  """, ["Type error [GENE_TYPE_MISMATCH]", "field Metric/Counter.value"])
+
+  expect_enum_error_parts("""
+    (enum Metric (Counter value: Int))
+    (var Counter Metric/Counter)
+    (Counter ^value "bad")
+  """, ["Type error [GENE_TYPE_MISMATCH]", "field Metric/Counter.value"])
+
+test_vm """
+  (enum Bag (Item value))
+  (Bag/Item "free")
+""", proc(r: Value) =
+  check r.kind == VkEnumValue
+  check r.ref.ev_variant.ref.enum_member.name == "Item"
+  check r.ref.ev_data == @["free".to_value()]
+
+test_vm """
+  (enum Box:T (Item value: T))
+  (Box/Item "free")
+""", proc(r: Value) =
+  check r.kind == VkEnumValue
+  check r.ref.ev_variant.ref.enum_member.name == "Item"
+  check r.ref.ev_data == @["free".to_value()]
+
 test "enum keyword payload constructor diagnostics name fields and call shape":
   expect_enum_error("""
     (enum Shape (Rect width height))

@@ -33,6 +33,42 @@
 (println direct_rect_kw)
 # Expected: (Shape/Rect 30 40)
 
+(enum Metric (Counter value: Int))
+(var Counter Metric/Counter)
+(var counter (Counter 7))
+(assert ((counter .value) == 7))
+(println counter)
+# Expected: (Metric/Counter 7)
+
+(var counter_kw (Counter ^value 8))
+(assert ((counter_kw .value) == 8))
+(println counter_kw)
+# Expected: (Metric/Counter 8)
+
+(enum Bag (Item value))
+(var any_item (Bag/Item "free"))
+(assert ((any_item .value) == "free"))
+(println any_item)
+# Expected: (Bag/Item free)
+
+(enum Box:T (Wrapped value: T))
+(var wrapped_any (Box/Wrapped "generic stays gradual"))
+(assert ((wrapped_any .value) == "generic stays gradual"))
+(println wrapped_any)
+# Expected: (Box/Wrapped generic stays gradual)
+
+(try
+  (Counter "bad")
+catch *
+  (println "typed payload rejected"))
+# Expected: typed payload rejected
+
+(try
+  (Counter ^value "bad")
+catch *
+  (println "typed keyword rejected"))
+# Expected: typed keyword rejected
+
 (var point_call (Point))
 (assert (point_call == Shape/Point))
 (var direct_point_call (Shape/Point))
