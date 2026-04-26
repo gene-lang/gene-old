@@ -34,7 +34,7 @@ Gene uses a NaN-boxed 64-bit representation. Every value is one of the following
 | `Date`      | Calendar date                         |
 | `DateTime`  | Date + time snapshot                  |
 | `Bytes`     | Byte sequence                         |
-| `Enum`      | Enumeration type                      |
+| `Enum`      | Enumeration and enum ADT definitions, members, and values |
 
 ### Nil and Void
 
@@ -166,11 +166,21 @@ Types can be composed:
 # Generic functions
 (fn identity:T [x: T] -> T
   x)
-
-# ADT (Algebraic Data Types)
-(type (Result T E) ((Ok T) | (Err E)))
-(type (Option T) ((Some T) | None))
 ```
+
+Enum ADTs use `enum` declarations, not a separate ADT declaration syntax:
+
+```gene
+(enum Result:T:E
+  (Ok value: T)
+  (Err error: E)
+  Empty)
+
+(fn accept_result [r: (Result Int String)] -> String
+  "accepted")
+```
+
+The declaration head `Result:T:E` declares generic parameters. The canonical enum name is `Result`, and concrete type positions use `(Result Int String)`.
 
 ## 2.4 Type Checking
 
@@ -188,46 +198,69 @@ Types can be composed:
 (types_equivalent DisplayLabel `(Nil | String))  # => true
 ```
 
-## 2.5 Built-in ADTs
-
-Gene provides `Result` and `Option` types:
+Enum type annotations accept values whose parent enum matches the annotated enum name, including generic enum applications:
 
 ```gene
-# Result
-(var ok (Ok 42))
-(var err (Err "bad"))
+(enum Status ready done)
+(fn accept_status [s: Status] -> String "ok")
 
-# Option
-(var some (Some "hello"))
-(var none None)
-
-# Unwrap with ? operator (early return on Err/None)
-(fn safe_div [a b]
-  (if (b == 0) then (return (Err "div by zero")))
-  (Ok (a / b)))
-
-(fn compute []
-  (var v ((safe_div 10 2) ?))   # Unwraps Ok, or returns Err
-  (v * 3))
+(enum Result:T:E
+  (Ok value: T)
+  (Err error: E)
+  Empty)
+(fn accept_result [r: (Result Int String)] -> String "ok")
 ```
 
+Field type annotations inside enum declarations are recorded for downstream constructor and type-enforcement work. S01 does not claim complete runtime enforcement of payload field annotations.
+
+## 2.5 Enum ADTs
+
+`enum` is the canonical public sum-type model. A declaration may contain unit variants and payload variants:
+
+```gene
+(enum Shape
+  (Circle radius: Float)
+  (Rect width: Int height: Int)
+  Point)
+
+(var circle (Shape/Circle 5.0))
+(var point Shape/Point)
+```
+
+A unit variant has no payload fields. A payload variant declares ordered field names, each with an optional type annotation. Implementations preserve that order and any resolved field type descriptors so constructors, field access, type checking, and pattern matching can share one metadata source.
+
+The current declaration contract includes targeted diagnostics for malformed enum declarations, duplicate variants, duplicate fields, invalid generic parameters, and invalid field annotations.
+
+Result and Option are part of the enum ADT migration. The canonical model treats them as enums with variants such as `Result/Ok`, `Result/Err`, `Option/Some`, and `Option/None`. Compatibility shortcuts may exist while migration proceeds, but they are not a separate public ADT model.
+
+Constructor enforcement, complete Result/Option cleanup, enum pattern matching, import identity, and persistence guarantees are staged downstream from the declaration contract.
+
 ## 2.6 Enumerations
+
+Simple symbolic enumerations are the unit-variant subset of enum ADTs:
 
 ```gene
 (enum Color red green blue)
 Color/red     # Access member
 ```
 
+The `^values` spelling is accepted as simple-enum sugar and canonicalizes to ordered unit variants:
+
+```gene
+(enum Status ^values [ready done])
+Status/ready
+```
+
 ---
 
 ## Potential Improvements
 
-- **Generic classes**: Only generic functions are supported. Generic classes (`class Stack:T`) are not yet implemented.
+- **Generic classes**: Only generic functions and generic enum declarations are supported. Generic classes (`class Stack:T`) are not yet implemented.
 - **Duration/Period arithmetic**: Date/time literals and comparisons are implemented, but arithmetic (adding durations, computing date differences) is not yet supported.
 - **Bytes operations**: Byte literals and basic accessors (`.size`, `.get`, `.to_array`) are implemented. Bitwise operations, `.slice`, `.concat`, and bytes-to-string conversion are not yet available.
 - **Type bounds/constraints**: No way to express `T: Comparable` or similar constraints on generic type parameters.
 - **Inference completeness**: Type inference still falls back to `Any` in some complex binding positions, notably destructuring parameters and other non-trivial patterns.
-- **Union type narrowing**: Flow-sensitive narrowing works in `if` branches and ADT-aware `case/when` arms, but not in every control-flow form or arbitrary predicate.
-- **Enum values**: Enums are simple symbolic constants with no associated data. Rust-style enums with payloads would unify with ADTs.
+- **Union type narrowing**: Flow-sensitive narrowing works in `if` branches and some ADT-aware control-flow positions, but not in every control-flow form or arbitrary predicate.
+- **Enum ADT enforcement**: Declaration metadata exists for payload fields and generic enum parameters; full constructor/type enforcement, pattern exhaustiveness, import identity, and persistence semantics are still being completed.
 - **Nil safety**: `nil` and `void` are distinct observable outcomes. Future work should build ergonomic optional-flow helpers and type narrowing on top of that contract.
 - **Structural typing**: All typing is nominal. Structural typing or interfaces/protocols would enable more flexible polymorphism.

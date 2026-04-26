@@ -74,18 +74,28 @@ Remaining Gene properties can be captured into a map:
 `case/when` is an expression; each selected branch returns its last value.
 no-match `case` without `else` returns `nil`.
 
-## Experimental subset
+## Experimental and downstream subset
 
-ADT/Option matching and `?` remain experimental. Current experiments include
-matching values such as `(Ok v)`, `(Err e)`, `(Some x)`, `None`, and early-return
-unwrapping with `?`, but their syntax and type-checker integration are not yet
-part of the stable-core contract.
+Enum ADT variant matching is part of the unified enum work, but it is not part of the stable pattern contract yet. The downstream goal is to match enum variants through enum metadata, bind payload fields in declaration order, and eventually provide exhaustiveness diagnostics.
+
+The future enum shape is expected to resemble:
+
+```gene
+(case result
+  (when (Ok value) value)
+  (when (Err error) error)
+  (when Empty nil))
+```
+
+This is an enum-variant pattern direction, not a revival of legacy Gene-expression ADT matching. The matcher must not depend on hardcoded `Ok`, `Err`, `Some`, or `None` expression names as a second ADT model.
+
+The `?` operator remains tied to the Result/Option migration and is not promoted to stable pattern semantics by this section.
 
 ## Known gaps
 
+- Enum variant patterns, enum field destructuring, and enum exhaustiveness diagnostics are not stable yet.
 - Nested patterns beyond currently covered destructuring are not stable.
-- Guard clauses such as `when (Ok v) if (v > 0)` are not supported.
-- Exhaustiveness checking is not implemented.
+- Guard clauses such as `when pattern if condition` are not supported.
 - Map destructuring syntax such as `(var {^x a ^y b} value)` is not stable.
 - Function-parameter patterns beyond the existing argument matcher surface are
   not specified as a general pattern system.
