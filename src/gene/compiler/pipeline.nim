@@ -56,6 +56,7 @@ proc compile_init*(input: Value, local_defs = false, module_path = "",
   self.output.peephole_optimize()  # Apply peephole optimizations
   self.output.update_jumps()
   self.output.inline_caches.setLen(self.output.instructions.len)
+  self.finalize_type_metadata("init compile", if module_path.len > 0: module_path else: "<compile_init>")
   result = self.output
 
 proc remap_checker_type_id(checker_type_id: TypeId,
@@ -594,7 +595,7 @@ proc parse_and_compile*(input: string, filename = "<input>", eager_functions = f
   if module_mode:
     self.output.kind = CkModule
   
-  self.output.type_registry = populate_registry(self.output.type_descriptors, self.output.module_path)
+  self.finalize_type_metadata("source compile", filename)
   return self.output
 
 proc parse_and_compile_repl*(input: string, filename = "<repl>", scope_tracker: ScopeTracker, eager_functions = false, type_check = true): CompilationUnit =
@@ -685,7 +686,7 @@ proc parse_and_compile_repl*(input: string, filename = "<repl>", scope_tracker: 
   if checker != nil:
     merge_checker_type_descriptors(self.output.type_descriptors, checker.type_descriptors())
 
-  self.output.type_registry = populate_registry(self.output.type_descriptors, self.output.module_path)
+  self.finalize_type_metadata("repl compile", filename)
   return self.output
 
 proc parse_and_compile*(stream: Stream, filename = "<input>", eager_functions = false, type_check = true, module_mode = false, run_init = false): CompilationUnit =
@@ -841,7 +842,7 @@ proc parse_and_compile*(stream: Stream, filename = "<input>", eager_functions = 
     merge_checker_type_descriptors(self.output.type_descriptors, checker.type_descriptors())
   if module_mode:
     self.output.kind = CkModule
-  self.output.type_registry = populate_registry(self.output.type_descriptors, self.output.module_path)
+  self.finalize_type_metadata("source compile", filename)
 
   return self.output
 

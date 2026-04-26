@@ -1,6 +1,8 @@
-import unittest, strutils, tables
+import unittest, strutils, streams, tables
 
-import ../src/gene/types except Exception
+import gene/compiler
+import gene/parser
+import gene/types except Exception
 
 type
   MetadataFixture = object
@@ -54,6 +56,38 @@ proc expect_metadata_error(cu: CompilationUnit, expected_parts: openArray[string
     for part in expected_parts:
       check e.msg.contains(part)
   check raised
+
+proc expect_compile_metadata_error(action: proc() {.closure.}, expected_parts: openArray[string]) =
+  var raised = false
+  try:
+    action()
+  except CatchableError as e:
+    raised = true
+    checkpoint e.msg
+    check e.msg.contains(TypeMetadataInvalidMarker)
+    check e.msg.contains("owner/path=")
+    check e.msg.contains("invalid TypeId=")
+    check e.msg.contains("descriptor count=")
+    check e.msg.contains("descriptor-table length=")
+    check e.msg.contains("source path=" & TestSourcePath)
+    for part in expected_parts:
+      check e.msg.contains(part)
+  check raised
+
+proc typed_source_fixture(): string =
+  """
+  (type UserId Int)
+  (fn typed_add [a: Int b: Int] -> Int
+    (+ a b))
+  (fn make_id [n: Int] -> UserId
+    n)
+  (typed_add 1 2)
+  """
+
+proc read_one_with_test_source(code: string): Value =
+  var p = new_parser()
+  var stream = new_string_stream(code)
+  p.read(stream, TestSourcePath)
 
 proc type_id_array_value_for_test(items: openArray[TypeId]): Value =
   var values: seq[Value] = @[]
@@ -339,3 +373,87 @@ suite "Type metadata verifier":
     fixture.cu.instructions.add(Instruction(kind: IkFunction, arg0: info.to_value()))
 
     verify_type_metadata(fixture.cu, phase = "unit-test", source_path = TestSourcePath)
+
+  test "source parse finalizers accept representative typed source":
+    let cu = compiler.parse_and_compile(typed_source_fixture(), TestSourcePath)
+    check cu.type_registry != nil
+    check cu.type_registry.descriptors.len == cu.type_descriptors.len
+
+  test "stream parse finalizer accepts representative typed source":
+    var stream = new_string_stream(typed_source_fixture())
+    let cu = compiler.parse_and_compile(stream, TestSourcePath)
+    check cu.type_registry != nil
+    check cu.type_registry.descriptors.len == cu.type_descriptors.len
+
+  test "repl parse finalizer accepts representative typed source":
+    let tracker = new_scope_tracker()
+    let cu = compiler.parse_and_compile_repl("""
+      (fn repl_inc [x: Int] -> Int
+        (+ x 1))
+      (repl_inc 1)
+    """, TestSourcePath, tracker)
+    check cu.type_registry != nil
+    check cu.type_registry.descriptors.len == cu.type_descriptors.len
+
+  test "low-level eager compile finalizer accepts representative typed source":
+    let nodes = parser.read_all(typed_source_fixture())
+    let cu = compiler.compile(nodes, eager_functions = true)
+    check cu.type_registry != nil
+    check cu.type_registry.descriptors.len == cu.type_descriptors.len
+
+  test "compile_init finalization rejects invalid inherited descriptor metadata":
+    let fixture = new_metadata_fixture()
+    var applied_desc = fixture.cu.type_descriptors[fixture.applied_id.int]
+    applied_desc.args[0] = 4321'i32
+    fixture.cu.type_descriptors[fixture.applied_id.int] = applied_desc
+
+    proc action() =
+      discard compiler.compile_init(1.to_value(), module_path = TestSourcePath,
+        inherited_type_descriptors = fixture.cu.type_descriptors)
+
+    expect_compile_metadata_error(action, [
+      "phase=init compile",
+      "owner/path=" & fixture.module_path & "/type_descriptors[" & $fixture.applied_id & "].args[0]",
+      "invalid TypeId=4321",
+      "descriptor count=" & $fixture.cu.type_descriptors.len
+    ])
+
+  test "function body finalization rejects invalid matcher descriptor metadata":
+    let fixture = new_metadata_fixture()
+    var descs = fixture.cu.type_descriptors
+    var applied_desc = descs[fixture.applied_id.int]
+    applied_desc.args[0] = 765'i32
+    descs[fixture.applied_id.int] = applied_desc
+    let fn_obj = to_function(read_one_with_test_source("(fn broken [] 1)"), descs,
+      module_path = TestSourcePath)
+    fn_obj.scope_tracker = new_scope_tracker()
+
+    proc action() =
+      compiler.compile(fn_obj, eager_functions = false)
+
+    expect_compile_metadata_error(action, [
+      "phase=function body compile",
+      "owner/path=" & fixture.module_path & "/type_descriptors[" & $fixture.applied_id & "].args[0]",
+      "invalid TypeId=765",
+      "descriptor count=" & $descs.len
+    ])
+
+  test "block body finalization rejects invalid matcher descriptor metadata":
+    let fixture = new_metadata_fixture()
+    var descs = fixture.cu.type_descriptors
+    var applied_desc = descs[fixture.applied_id.int]
+    applied_desc.args[0] = 876'i32
+    descs[fixture.applied_id.int] = applied_desc
+    let block_obj = to_block(read_one_with_test_source("(block [] 1)"))
+    block_obj.scope_tracker = new_scope_tracker()
+    block_obj.matcher.type_descriptors = descs
+
+    proc action() =
+      compiler.compile(block_obj, eager_functions = false)
+
+    expect_compile_metadata_error(action, [
+      "phase=block body compile",
+      "owner/path=" & fixture.module_path & "/type_descriptors[" & $fixture.applied_id & "].args[0]",
+      "invalid TypeId=876",
+      "descriptor count=" & $descs.len
+    ])

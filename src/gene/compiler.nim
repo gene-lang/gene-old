@@ -197,6 +197,28 @@ proc infer_nested_module_path(matcher: RootMatcher, body: seq[Value]): string =
       if desc.module_path.len > 0 and desc.module_path != BUILTIN_TYPE_MODULE_PATH:
         return desc.module_path
 
+proc infer_nested_source_path(matcher: RootMatcher, body: seq[Value]): string =
+  for node in body:
+    if node.kind == VkGene and node.gene != nil and node.gene.trace != nil:
+      if node.gene.trace.filename.len > 0:
+        return node.gene.trace.filename
+
+  if matcher != nil:
+    for desc in matcher.type_descriptors:
+      if desc.module_path.len > 0 and desc.module_path != BUILTIN_TYPE_MODULE_PATH:
+        return desc.module_path
+
+proc metadata_source_path(self: Compiler, fallback: string): string =
+  if fallback.len > 0:
+    return fallback
+  if self.output.module_path.len > 0:
+    return self.output.module_path
+  "<unknown>"
+
+proc finalize_type_metadata(self: Compiler, phase: string, source_path: string) =
+  self.output.type_registry = populate_registry(self.output.type_descriptors, self.output.module_path)
+  verify_type_metadata(self.output, phase = phase, source_path = self.metadata_source_path(source_path))
+
 proc seed_nested_type_context(self: Compiler, matcher: RootMatcher, body: seq[Value]) =
   if matcher != nil and matcher.type_descriptors.len > 0:
     self.output.type_descriptors = copy_type_descs(matcher.type_descriptors)
@@ -208,11 +230,12 @@ proc seed_nested_type_context(self: Compiler, matcher: RootMatcher, body: seq[Va
 
   self.output.type_registry = populate_registry(self.output.type_descriptors, self.output.module_path)
 
-proc finalize_nested_type_context(self: Compiler, matcher: RootMatcher) =
-  self.output.type_registry = populate_registry(self.output.type_descriptors, self.output.module_path)
+proc finalize_nested_type_context(self: Compiler, matcher: RootMatcher, phase: string, source_path: string) =
   if matcher != nil:
+    self.output.matcher = matcher
     matcher.type_descriptors = self.output.type_descriptors
     matcher.type_aliases = self.output.type_aliases
+  self.finalize_type_metadata(phase, source_path)
 
 #################### Forward Declarations #################
 proc compile*(self: Compiler, input: Value)
@@ -621,6 +644,7 @@ proc compile*(input: seq[Value], eager_functions: bool): CompilationUnit =
   self.output.update_jumps()
   # Pre-allocate inline caches so method dispatch never resizes at runtime
   self.output.inline_caches.setLen(self.output.instructions.len)
+  self.finalize_type_metadata("seq compile", "<seq>")
   result = self.output
 
 proc compile*(input: seq[Value]): CompilationUnit =
@@ -708,7 +732,7 @@ proc compile*(f: Function, eager_functions: bool) =
   self.output.update_jumps()
   self.output.inline_caches.setLen(self.output.instructions.len)
   self.output.kind = CkFunction
-  self.finalize_nested_type_context(f.matcher)
+  self.finalize_nested_type_context(f.matcher, "function body compile", infer_nested_source_path(f.matcher, f.body))
   f.body_compiled = self.output
   f.body_compiled.matcher = f.matcher
 
@@ -766,7 +790,7 @@ proc compile*(b: Block, eager_functions: bool) =
   self.output.peephole_optimize()  # Apply peephole optimizations
   self.output.update_jumps()
   self.output.inline_caches.setLen(self.output.instructions.len)
-  self.finalize_nested_type_context(b.matcher)
+  self.finalize_nested_type_context(b.matcher, "block body compile", infer_nested_source_path(b.matcher, b.body))
   b.body_compiled = self.output
   b.body_compiled.matcher = b.matcher
 
