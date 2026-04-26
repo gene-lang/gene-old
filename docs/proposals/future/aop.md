@@ -1,18 +1,35 @@
 # AOP implementation audit
 
-This page is a current-state audit of Gene's aspect-oriented programming
-(AOP) implementation. It is written for the maintainer who will make the S03
-keep/remove/defer recommendation after the S02 proof pass.
+This page is a current-state audit and final M004 recommendation for Gene's
+aspect-oriented programming (AOP) implementation. It is written for the internal
+maintainer who must decide what posture to carry forward after reading the S02
+proof.
 
-The post-read action is narrow: decide which AOP behaviors are executable facts,
-which behaviors are current unsupported boundaries, and which inputs remain for
-S03. This page does not choose keep, remove, or defer.
+The post-read action is narrow: treat the current audited AOP runtime surface as
+Experimental, keep it available in M004, reject removal for this milestone, and
+defer Beta/stable-core promotion, redesign, keyword wrapper support,
+macro-transparent wrappers, and broader hardening to future explicit milestones.
+This page is not a stable reference spec or release promise.
+
+## Recommendation
+
+**Keep/defer.** Keep the current AOP implementation available only as an
+**Experimental** runtime surface. Do not remove it in M004. Do not promote it to
+Beta or the stable core, and do not broaden the supported boundary, in this
+milestone.
+
+Maintainers should use this page to preserve the current evidence-backed
+boundary: class method wrappers, explicit standalone `.apply-fn` wrappers,
+per-interception toggles, chaining, callable advice, inline lexical capture, and
+named error boundaries have executable proof; standalone keyword wrapper calls,
+macro-transparent wrapper behavior, stale design-era APIs, and broader join
+points remain unsupported or future work.
 
 ## Status and source of truth
 
-**Status:** AOP is an implemented runtime surface under audit. This document does
-not promote AOP to a core language guarantee. The strategic recommendation is
-pending S03: keep/remove/defer remains open after S02.
+**Status:** Experimental. AOP is implemented and tested enough to keep available
+for exploration and maintainer-level experiments, but it remains outside the
+stable core and outside Beta-level public guarantees.
 
 **Source of truth:** runtime behavior and tracked testsuite fixtures outrank old
 proposal text. When this document conflicts with executable behavior, update the
@@ -198,17 +215,43 @@ it into examples.
 - Any core-guarantee claim is unsupported until a later decision explicitly
   changes the feature-status boundary.
 
-## S03 recommendation inputs
+## Option analysis and follow-up work
 
-S03 should make the keep/remove/defer recommendation from these facts:
+### Why not remove now
 
 - AOP has real executable coverage for class method wrappers, standalone
   function wrappers, interception toggles, chaining, callable advice, inline
   lexical capture, and controlled error boundaries.
-- The S02 code patch was narrow and targeted inline advice lexical capture only.
-- The current surface still has sharp boundaries: standalone keyword calls are
-  rejected, macro-style wrapper calls do not preserve quoted arguments, and old
-  proposal APIs remain stale.
-- The feature is not yet framed as a guaranteed public boundary. Promotion,
-  removal, or deferral should be an explicit S03 decision rather than an implied
-  result of this audit.
+- The S02 code patch was narrow and targeted inline advice lexical capture only;
+  the audit did not expose a reason to delete the whole surface during M004.
+- Removal would erase a working implementation before Gene has a replacement
+  design, while the current risk can be managed by the Experimental label and by
+  keeping unsupported boundaries explicit.
+
+### Why not promote or harden now
+
+- The current surface still has sharp boundaries: standalone `.apply-fn` keyword
+  calls are rejected, macro-style wrapper calls do not preserve quoted arguments,
+  and old proposal APIs such as `fn_aspect` and `.apply_in_place` remain stale.
+- Macro-transparent wrapper behavior is explicitly not preserved today, so any
+  broader macro/AOP contract needs separate design and proof.
+- Beta or stable-core promotion would require wider semantic decisions about
+  wrapper keyword handling, join-point scope, ordering guarantees, diagnostics,
+  async behavior, and reset/unapply controls.
+- M004/S03 is documentation and governance closure. It should not smuggle in a
+  runtime redesign or expanded public contract under the cover of a decision
+  record.
+
+### Follow-up work if Gene later promotes AOP
+
+- Open an explicit future milestone that chooses the target support level,
+  desired join points, and compatibility rules before changing runtime behavior.
+- Decide whether standalone `.apply-fn` wrappers should support keyword calls or
+  continue rejecting them as a documented boundary.
+- Decide whether macro-style functions can be wrapped while preserving quoted
+  arguments; if so, design a macro-transparent wrapper path and add executable
+  fixtures before documenting it as supported.
+- Replace stale design-era terms with current names, or implement deliberately
+  named replacements, before copying proposal snippets into user examples.
+- Add broader negative tests, diagnostics, and migration guidance before any
+  future release notes encourage durable AOP usage.
