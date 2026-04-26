@@ -1,0 +1,152 @@
+# Expected: class run body 1
+# Expected: class pre-install result 11
+# Expected: class untouched body 2
+# Expected: class untouched pre result 102
+# Expected: class app class Interception
+# Expected: class gate before 3
+# Expected: class run body 3
+# Expected: class gate after 3 13
+# Expected: class active result 13
+# Expected: class untouched body 4
+# Expected: class untouched post result 104
+# Expected: class run body 5
+# Expected: class def disabled result 15
+# Expected: class gate before 6
+# Expected: class run body 6
+# Expected: class gate after 6 16
+# Expected: class def reenabled result 16
+# Expected: class run body 7
+# Expected: class app disabled result 17
+# Expected: class gate before 8
+# Expected: class run body 8
+# Expected: class gate after 8 18
+# Expected: class app reenabled result 18
+# Expected: class run body 9
+# Expected: class def reenabled app still disabled result 19
+# Expected: class run body 10
+# Expected: class app reenabled def still disabled result 20
+# Expected: class run body 11
+# Expected: class repeated disabled result 21
+# Expected: class gate before 12
+# Expected: class run body 12
+# Expected: class gate after 12 22
+# Expected: class repeated enabled result 22
+# Expected: class outer before 1
+# Expected: class inner before 1
+# Expected: class chain body 1
+# Expected: class inner after 1 1001
+# Expected: class outer after 1 1001
+# Expected: class chain active result 1001
+# Expected: class inner before 2
+# Expected: class chain body 2
+# Expected: class inner after 2 1002
+# Expected: class chain outer disabled result 1002
+# Expected: class outer before 3
+# Expected: class chain body 3
+# Expected: class outer after 3 1003
+# Expected: class chain inner disabled result 1003
+
+(interceptor ClassGate [run]
+  (before run [x]
+    (println "class gate before" x)
+  )
+  (after run [x result]
+    (println "class gate after" x result)
+  )
+)
+
+(class ToggleTarget
+  ^fields {}
+  (method run [x]
+    (println "class run body" x)
+    (x + 10)
+  )
+  (method untouched [x]
+    (println "class untouched body" x)
+    (x + 100)
+  )
+)
+
+(var target (new ToggleTarget))
+(println "class pre-install result" (target .run 1))
+(println "class untouched pre result" (target .untouched 2))
+
+(var class_apps (ClassGate ToggleTarget "run"))
+(var class_app class_apps/0)
+(println "class app class" class_app/.class/.name)
+
+(println "class active result" (target .run 3))
+(println "class untouched post result" (target .untouched 4))
+
+ClassGate/.disable
+(println "class def disabled result" (target .run 5))
+
+ClassGate/.enable
+(println "class def reenabled result" (target .run 6))
+
+class_app/.disable
+(println "class app disabled result" (target .run 7))
+
+class_app/.enable
+(println "class app reenabled result" (target .run 8))
+
+class_app/.disable
+ClassGate/.disable
+ClassGate/.enable
+(println "class def reenabled app still disabled result" (target .run 9))
+
+ClassGate/.disable
+class_app/.enable
+(println "class app reenabled def still disabled result" (target .run 10))
+
+ClassGate/.enable
+class_app/.disable
+class_app/.disable
+(println "class repeated disabled result" (target .run 11))
+
+class_app/.enable
+class_app/.enable
+ClassGate/.enable
+ClassGate/.enable
+(println "class repeated enabled result" (target .run 12))
+
+(interceptor ClassInner [run]
+  (before run [x]
+    (println "class inner before" x)
+  )
+  (after run [x result]
+    (println "class inner after" x result)
+  )
+)
+
+(interceptor ClassOuter [run]
+  (before run [x]
+    (println "class outer before" x)
+  )
+  (after run [x result]
+    (println "class outer after" x result)
+  )
+)
+
+(class ChainTarget
+  ^fields {}
+  (method run [x]
+    (println "class chain body" x)
+    (x + 1000)
+  )
+)
+
+(var class_inner_apps (ClassInner ChainTarget "run"))
+(var class_inner_app class_inner_apps/0)
+(var class_outer_apps (ClassOuter ChainTarget "run"))
+(var class_outer_app class_outer_apps/0)
+(var chain_target (new ChainTarget))
+
+(println "class chain active result" (chain_target .run 1))
+
+class_outer_app/.disable
+(println "class chain outer disabled result" (chain_target .run 2))
+
+class_outer_app/.enable
+class_inner_app/.disable
+(println "class chain inner disabled result" (chain_target .run 3))

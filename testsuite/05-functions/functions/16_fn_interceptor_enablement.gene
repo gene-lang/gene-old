@@ -1,0 +1,141 @@
+# Expected: fn body 1
+# Expected: fn original pre result 21
+# Expected: fn wrapper class Interception
+# Expected: fn gate before 2
+# Expected: fn body 2
+# Expected: fn gate after 2 22
+# Expected: fn wrapped active result 22
+# Expected: fn body 3
+# Expected: fn original post result 23
+# Expected: fn body 4
+# Expected: fn def disabled result 24
+# Expected: fn gate before 5
+# Expected: fn body 5
+# Expected: fn gate after 5 25
+# Expected: fn def reenabled result 25
+# Expected: fn body 6
+# Expected: fn app disabled result 26
+# Expected: fn gate before 7
+# Expected: fn body 7
+# Expected: fn gate after 7 27
+# Expected: fn app reenabled result 27
+# Expected: fn body 8
+# Expected: fn def reenabled app still disabled result 28
+# Expected: fn body 9
+# Expected: fn app reenabled def still disabled result 29
+# Expected: fn body 10
+# Expected: fn repeated disabled result 30
+# Expected: fn gate before 11
+# Expected: fn body 11
+# Expected: fn gate after 11 31
+# Expected: fn repeated enabled result 31
+# Expected: fn body 12
+# Expected: fn original final result 32
+# Expected: fn outer before 1
+# Expected: fn inner before 1
+# Expected: fn chain body 1
+# Expected: fn inner after 1 201
+# Expected: fn outer after 1 201
+# Expected: fn chain active result 201
+# Expected: fn inner before 2
+# Expected: fn chain body 2
+# Expected: fn inner after 2 202
+# Expected: fn chain outer disabled result 202
+# Expected: fn outer before 3
+# Expected: fn chain body 3
+# Expected: fn outer after 3 203
+# Expected: fn chain inner disabled result 203
+# Expected: fn chain body 4
+# Expected: fn chain original result 204
+
+(fn-interceptor FnGate [f]
+  (before f [x]
+    (println "fn gate before" x)
+  )
+  (after f [x result]
+    (println "fn gate after" x result)
+  )
+)
+
+(fn fn_target [x]
+  (println "fn body" x)
+  (x + 20)
+)
+
+(println "fn original pre result" (fn_target 1))
+
+(var fn_wrap (FnGate fn_target))
+(println "fn wrapper class" fn_wrap/.class/.name)
+
+(println "fn wrapped active result" (fn_wrap 2))
+(println "fn original post result" (fn_target 3))
+
+FnGate/.disable
+(println "fn def disabled result" (fn_wrap 4))
+
+FnGate/.enable
+(println "fn def reenabled result" (fn_wrap 5))
+
+fn_wrap/.disable
+(println "fn app disabled result" (fn_wrap 6))
+
+fn_wrap/.enable
+(println "fn app reenabled result" (fn_wrap 7))
+
+fn_wrap/.disable
+FnGate/.disable
+FnGate/.enable
+(println "fn def reenabled app still disabled result" (fn_wrap 8))
+
+FnGate/.disable
+fn_wrap/.enable
+(println "fn app reenabled def still disabled result" (fn_wrap 9))
+
+FnGate/.enable
+fn_wrap/.disable
+fn_wrap/.disable
+(println "fn repeated disabled result" (fn_wrap 10))
+
+fn_wrap/.enable
+fn_wrap/.enable
+FnGate/.enable
+FnGate/.enable
+(println "fn repeated enabled result" (fn_wrap 11))
+(println "fn original final result" (fn_target 12))
+
+(fn-interceptor FnInner [f]
+  (before f [x]
+    (println "fn inner before" x)
+  )
+  (after f [x result]
+    (println "fn inner after" x result)
+  )
+)
+
+(fn-interceptor FnOuter [f]
+  (before f [x]
+    (println "fn outer before" x)
+  )
+  (after f [x result]
+    (println "fn outer after" x result)
+  )
+)
+
+(fn fn_chain_target [x]
+  (println "fn chain body" x)
+  (x + 200)
+)
+
+(var fn_inner_app (FnInner fn_chain_target))
+(var fn_outer_app (FnOuter fn_inner_app))
+
+(println "fn chain active result" (fn_outer_app 1))
+
+fn_outer_app/.disable
+(println "fn chain outer disabled result" (fn_outer_app 2))
+
+fn_outer_app/.enable
+fn_inner_app/.disable
+(println "fn chain inner disabled result" (fn_outer_app 3))
+
+(println "fn chain original result" (fn_chain_target 4))
