@@ -6,24 +6,31 @@ maintainer who must decide what posture to carry forward after reading the S02
 proof.
 
 The post-read action is narrow: treat the current audited AOP runtime surface as
-Experimental, keep it available in M004, reject removal for this milestone, and
-defer Beta/stable-core promotion, redesign, keyword wrapper support,
-macro-transparent wrappers, and broader hardening to future explicit milestones.
-This page is not a stable reference spec or release promise.
+Experimental, use explicit class interception with `(interceptor ...)` plus direct
+callable application as the preferred class path for new class experiments, keep
+legacy class `(aspect ...)` / `.apply` as temporary compatibility, keep
+standalone `.apply-fn` only as function compatibility until S02 introduces
+`fn-interceptor`, and defer Beta/stable-core promotion, hard migration
+diagnostics, keyword wrapper support, macro-transparent wrappers, and broader
+hardening to future explicit milestones. This page is not a stable reference
+spec or release promise.
 
 ## Recommendation
 
-**Keep/defer.** Keep the current AOP implementation available only as an
-**Experimental** runtime surface. Do not remove it in M004. Do not promote it to
-Beta or the stable core, and do not broaden the supported boundary, in this
-milestone.
+**Keep/defer while migrating.** Keep the current AOP implementation available
+only as an **Experimental** runtime surface. Do not remove it in M004. Do not
+promote it to Beta or the stable core, and do not broaden the supported boundary,
+in this milestone. For new class interception, prefer `(interceptor ...)` and
+direct callable application; treat legacy class `(aspect ...)` / `.apply` as
+temporary compatibility.
 
 Maintainers should use this page to preserve the current evidence-backed
-boundary: class method wrappers, explicit standalone `.apply-fn` wrappers,
+boundary: explicit class interceptor calls, compatibility class method wrappers,
+explicit standalone `.apply-fn` wrappers pending `fn-interceptor`,
 per-interception toggles, chaining, callable advice, inline lexical capture, and
 named error boundaries have executable proof; standalone keyword wrapper calls,
-macro-transparent wrapper behavior, stale design-era APIs, and broader join
-points remain unsupported or future work.
+macro-transparent wrapper behavior, stale design-era APIs, hard migration
+diagnostics, and broader join points remain unsupported or future work.
 
 ## Status and source of truth
 
@@ -35,23 +42,34 @@ stable core and outside Beta-level public guarantees.
 proposal text. When this document conflicts with executable behavior, update the
 document or add a fixture before treating the behavior as a public claim.
 
+**M005 class migration note:** S01 starts the public class-surface migration by
+making `(interceptor Name [targets] ...)` plus `(Name Class "method")` the current
+Experimental class API. Old class `(aspect ...)` definitions and `(A .apply
+Class "method")` application remain temporary compatibility so existing tests and
+programs keep running while later slices add function migration and diagnostics.
+Standalone `.apply-fn` remains the current function wrapper compatibility path
+until S02 introduces `fn-interceptor`; hard legacy-form diagnostics are deferred
+to S04/S05 and are not specified here. The broad AOP framing and old proposal
+language on this page are historical audit context, not the preferred name for
+new class code.
+
 | Evidence source | What it establishes |
 | --- | --- |
-| Aspect stdlib registration | Live public registration for `(aspect ...)`, `Aspect.apply`, `Aspect.apply-fn`, `Aspect.enable-interception`, and `Aspect.disable-interception`. |
-| Runtime type model | `Aspect`, `Interception`, `AopAfterAdvice`, `AopContext`, `VkAspect`, and `VkInterception` are the value and context objects used by dispatch. |
-| Compiler dispatch rules | `(aspect ...)` stays out of the regular fast-call path so the native macro receives unevaluated advice definitions. |
-| VM dispatch | `VkInterception` is callable for standalone wrappers and class method wrappers, with around advice, disabled wrappers, chaining, and escape handling. |
+| Aspect/interceptor stdlib registration | Live public registration for `(interceptor ...)`, compatibility `(aspect ...)`, `Aspect.apply`, `Aspect.apply-fn`, `Aspect.enable-interception`, and `Aspect.disable-interception`. |
+| Runtime type model | `Aspect`, `Interceptor`, `Interception`, `AopAfterAdvice`, `AopContext`, `VkAspect`, and `VkInterception` are the value and context objects used by dispatch. |
+| Compiler dispatch rules | `(aspect ...)` and `(interceptor ...)` stay out of the regular fast-call path so the native macros receive unevaluated advice definitions. |
+| VM dispatch | `VkAspect` can be called directly for class application, and `VkInterception` is callable for standalone wrappers and class method wrappers, with around advice, disabled wrappers, chaining, and escape handling. |
 | Tracked S02 fixtures | Executable proof for each behavior named in the verification map below. |
 | Feature-status documentation | AOP is outside the documented guaranteed feature boundary unless a later decision changes that status. |
 
 ## Current public surface
 
-### Aspect definitions
+### Class interceptor definitions
 
-AOP definitions use the native macro form:
+New class interception code should use the native macro form:
 
 ```gene
-(aspect Audit [method_name]
+(interceptor Audit [method_name]
   (before method_name [x]
     (println "before" x)
   )
@@ -64,8 +82,10 @@ AOP definitions use the native macro form:
 )
 ```
 
-The second argument is an array of aspect parameter names. Advice targets must
-name one of those parameters. Application maps each parameter to a concrete
+The legacy `(aspect ...)` spelling parses into the same advice data for
+compatibility, but it is not the preferred class-facing spelling for new code.
+The second argument is an array of interceptor parameter names. Advice targets
+must name one of those parameters. Application maps each parameter to a concrete
 method or function name.
 
 Supported advice forms are:
@@ -83,9 +103,17 @@ to existing Gene or native callables in the caller/runtime namespaces.
 
 ### Class method application
 
-`(A .apply C "m1" "m2")` applies an aspect to class methods. The receiver must
-be an aspect, the second argument must be a class, and the remaining string or
-symbol arguments must match the aspect parameter count.
+For new class interception, call the interceptor value directly:
+
+```gene
+(Audit C "m1" "m2")
+```
+
+The receiver must be an interceptor/aspect runtime value, the second argument
+must be a class, and the remaining string or symbol arguments must match the
+interceptor parameter count. Legacy `(A .apply C "m1" "m2")` still applies the
+same wrapper installation behavior, but it is temporary compatibility rather
+than the preferred class API.
 
 Current semantics:
 
@@ -98,11 +126,12 @@ Current semantics:
 
 ### Standalone function application
 
-`(A .apply-fn inc "f")` returns an interception wrapper around a standalone
-function, native function, or existing interception. The receiver must be an
-aspect; the function argument must be a function, native function, or existing
-interception; and the parameter name must be one of the aspect's declared
-parameters.
+Function-level migration is not complete in S01. `(A .apply-fn inc "f")` remains
+the current compatibility wrapper around a standalone function, native function,
+or existing interception until S02 introduces `fn-interceptor`. The receiver must
+be an aspect/interceptor runtime value; the function argument must be a function,
+native function, or existing interception; and the parameter name must be one of
+the declared parameters.
 
 Function-level AOP is therefore explicit wrapper behavior:
 
@@ -147,13 +176,14 @@ callables.
 7. Otherwise, FIFO post-call invariants run, then FIFO `after` advice runs.
    `^^replace_result` after advice can replace the final result.
 
-## Verified S02 proof map
+## Verified proof map
 
-Each row below is backed by a tracked testsuite fixture in the focused S02 proof
+Each row below is backed by a tracked testsuite fixture in the focused proof
 command.
 
 | Verified behavior claim | Tracked fixture proof | What the fixture demonstrates |
 | --- | --- | --- |
+| Explicit class interceptor definitions and direct callable application install method wrappers without generic `VkAspect` call errors. | `11_interceptor_callable_class.gene` | `(interceptor ...)`, `(Audit Class "method")`, returned wrapper arrays, advice around explicit class methods, unlisted methods remaining unwrapped, and catchable malformed direct applications. |
 | Class method interception runs FIFO `before` advice, preserves `self`, executes the original method, runs FIFO `after` advice, and lets `^^replace_result` replace the final result. | `2_aop_aspects.gene` | Two `before` entries print before the method, receiver state is available, an after advice sees the current result and replaces it, and a later after advice runs without replacing it. |
 | `before_filter` falsey results short-circuit an intercepted method and return `nil` without running later advice or the original method. | `2_aop_aspects.gene`; `4_aop_invariants.gene` | Filtered calls return `nil`; the invariant fixture shows no later before/invariant/around/after output for the filtered call. |
 | Around advice receives a wrapped callable and can delegate to the original method or function. | `2_aop_aspects.gene`; `4_aop_invariants.gene`; `6_aop_functions.gene` | Method and function fixtures print around output before original callable output, proving delegation through the wrapped callable. |
@@ -188,10 +218,13 @@ The following items are not current supported public AOP behavior. They are kept
 here only so maintainers can recognize stale proposal language and avoid copying
 it into examples.
 
-- `fn_aspect` is stale; current definitions use `(aspect ...)`.
-- `.apply_in_place` is stale; class method application mutates method callables
-  in place, while `.apply-fn` returns an explicit wrapper for standalone
-  functions.
+- `fn_aspect` is stale; current class definitions should use `(interceptor ...)`.
+  Old `(aspect ...)` definitions remain compatibility for legacy AOP code and
+  fixtures.
+- `.apply_in_place` is stale; new class application should call the interceptor
+  value directly, while old `.apply` remains temporary class compatibility and
+  `.apply-fn` returns an explicit wrapper for standalone functions until
+  `fn-interceptor` lands.
 - Constructor/destructor/exception join-point wording from the old proposal is
   unsupported. Design-era names such as `before_init`, `after_init`,
   `destruction`, and `after exception` are not registered advice forms.
@@ -202,7 +235,8 @@ it into examples.
 - Async advice isolation, unapply/reset, priority controls, and broad ordering
   policy beyond the current advice tables and wrapper nesting remain unproven.
 - The old note saying "No function-level AOP" or "only instance methods" is
-  stale; `.apply-fn` implements explicit standalone function wrappers.
+  stale; `.apply-fn` implements explicit standalone function wrappers as the
+  current compatibility path pending `fn-interceptor`.
 - Standalone `.apply-fn` keyword calls are unsupported even though intercepted
   class methods can receive keyword arguments.
 - `.apply-fn` wrapping of `fn!` macro-style functions is a current boundary, not
