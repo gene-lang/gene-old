@@ -1,0 +1,46 @@
+# Enum payload constructor behavior
+
+(enum Shape
+  (Circle radius)
+  (Rect width height)
+  Point)
+
+(var Circle Shape/Circle)
+(var Rect Shape/Rect)
+(var Point Shape/Point)
+
+(var circle (Circle 5))
+(assert ((circle .radius) == 5))
+(println circle)
+# Expected: (Shape/Circle 5)
+
+(var rect (Rect 10 20))
+(assert ((rect .width) == 10))
+(assert ((rect .height) == 20))
+(println rect)
+# Expected: (Shape/Rect 10 20)
+
+(var point_call (Point))
+(assert (point_call == Shape/Point))
+(var direct_point_call (Shape/Point))
+(assert (direct_point_call == Shape/Point))
+(println "unit zero-arg calls ok")
+# Expected: unit zero-arg calls ok
+
+(try
+  (Circle)
+catch *
+  (println "missing payload rejected"))
+# Expected: missing payload rejected
+
+(try
+  (Circle 1 2)
+catch *
+  (println "too many payloads rejected"))
+# Expected: too many payloads rejected
+
+(try
+  (Point 1)
+catch *
+  (println "unit payload rejected"))
+# Expected: unit payload rejected

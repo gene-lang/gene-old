@@ -71,6 +71,63 @@ test_vm """
   check empty.fields.len == 0
   check empty.field_type_ids.len == 0
 
+test_vm """
+  (enum Shape Point)
+  (var Point Shape/Point)
+  (Point)
+""", proc(r: Value) =
+  check r.kind == VkEnumMember
+  check r.ref.enum_member.name == "Point"
+
+test_vm """
+  (enum Shape Point)
+  (Shape/Point)
+""", proc(r: Value) =
+  check r.kind == VkEnumMember
+  check r.ref.enum_member.name == "Point"
+
+test_vm """
+  (enum Shape (Circle radius))
+  (var Circle Shape/Circle)
+  (Circle 5)
+""", proc(r: Value) =
+  check r.kind == VkEnumValue
+  check r.ref.ev_variant.ref.enum_member.name == "Circle"
+  check r.ref.ev_data == @[5.to_value()]
+
+test_vm """
+  (enum Shape (Rect width height))
+  (var Rect Shape/Rect)
+  (Rect 10 20)
+""", proc(r: Value) =
+  check r.kind == VkEnumValue
+  check r.ref.ev_variant.ref.enum_member.name == "Rect"
+  check r.ref.ev_data == @[10.to_value(), 20.to_value()]
+
+test "enum payload constructor diagnostics use qualified variant names":
+  expect_enum_error("""
+    (enum Shape (Circle radius) (Rect width height) Point)
+    (var Circle Shape/Circle)
+    (Circle)
+  """, "Variant Shape/Circle expects 1 arguments (radius), got 0")
+
+  expect_enum_error("""
+    (enum Shape (Circle radius) (Rect width height) Point)
+    (var Circle Shape/Circle)
+    (Circle 1 2)
+  """, "Variant Shape/Circle expects 1 arguments (radius), got 2")
+
+  expect_enum_error("""
+    (enum Shape (Circle radius) (Rect width height) Point)
+    (Shape/Rect 10)
+  """, "Variant Shape/Rect expects 2 arguments (width, height), got 1")
+
+  expect_enum_error("""
+    (enum Shape (Circle radius) (Rect width height) Point)
+    (var Point Shape/Point)
+    (Point 1)
+  """, "Unit variant Shape/Point expects 0 arguments, got 1")
+
 test "enum declarations reject malformed syntax with targeted diagnostics":
   expect_enum_error("""
     (enum Bad:T:T (Value value))

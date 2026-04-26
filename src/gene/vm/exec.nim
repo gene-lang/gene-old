@@ -87,6 +87,48 @@ proc validate_instance_native_method_arity(meth: Method, positional_count: int, 
     not_allowed(meth.class.name & "." & meth.name & " expects " & $expected &
                 " arguments after self, got " & $positional_count)
 
+proc require_enum_constructor_member(variant: Value): EnumMember {.inline.} =
+  if variant.kind != VkEnumMember:
+    not_allowed("Enum constructor expected VkEnumMember, got " & $variant.kind)
+
+  let variant_ref = variant.ref
+  if variant_ref == nil or variant_ref.enum_member == nil:
+    not_allowed("Malformed enum variant constructor: missing member metadata")
+
+  let member = variant_ref.enum_member
+  if member.parent.kind != VkEnum:
+    not_allowed("Malformed enum variant constructor " & member.name & ": missing enum parent metadata")
+
+  let parent_ref = member.parent.ref
+  if parent_ref == nil or parent_ref.enum_def == nil:
+    not_allowed("Malformed enum variant constructor " & member.name & ": missing enum definition metadata")
+
+  member
+
+proc qualified_enum_variant_name(member: EnumMember): string {.inline.} =
+  member.parent.ref.enum_def.name & "/" & member.name
+
+proc construct_enum_variant(self: ptr VirtualMachine, variant: Value, positional: seq[Value],
+                            keywords: seq[(Key, Value)] = @[]): Value {.inline.} =
+  discard self
+  let member = require_enum_constructor_member(variant)
+  let qualified_name = qualified_enum_variant_name(member)
+
+  if keywords.len > 0:
+    not_allowed("Variant " & qualified_name & " does not accept keyword arguments in this call path")
+
+  if member.fields.len == 0:
+    if positional.len == 0:
+      return variant
+    not_allowed("Unit variant " & qualified_name & " expects 0 arguments, got " & $positional.len)
+
+  let expected = member.fields.len
+  if positional.len != expected:
+    not_allowed("Variant " & qualified_name & " expects " & $expected &
+                " arguments (" & member.fields.join(", ") & "), got " & $positional.len)
+
+  new_enum_value(variant, positional)
+
 proc require_dynamic_method_name(value: Value): string {.inline.} =
   case value.kind
   of VkSymbol, VkString:
@@ -1955,19 +1997,11 @@ proc exec*(self: ptr VirtualMachine): Value =
               self.frame.push(g)
 
           of VkEnumMember:
-            # Data variant constructor: collect args then create VkEnumValue in IkGeneEnd
-            let member = gene_type.ref.enum_member
-            if member.fields.len > 0:
-              # Data variant: collect args via gene children, convert in IkGeneEnd
-              var g = new_gene_value()
-              g.gene.type = gene_type
-              self.frame.push(g)
-            else:
-              # Unit variant called with args — error
-              # But first push gene for the args to be collected, error at IkGeneEnd
-              var g = new_gene_value()
-              g.gene.type = gene_type
-              self.frame.push(g)
+            # Enum variants collect call arguments as a Gene; IkGeneEnd delegates
+            # all constructor validation/allocation to construct_enum_variant.
+            var g = new_gene_value()
+            g.gene.type = gene_type
+            self.frame.push(g)
 
           else:
             # For non-callable types (like integers, strings, etc.),
@@ -2401,17 +2435,7 @@ proc exec*(self: ptr VirtualMachine): Value =
             # Check if this is a gene with an enum variant as its type
             let value = self.frame.current()
             if value.kind == VkGene and value.gene.type.kind == VkEnumMember:
-              let member = value.gene.type.ref.enum_member
-              if member.fields.len > 0:
-                if member.fields.len != value.gene.children.len:
-                  not_allowed("Variant " & member.name & " expects " & $member.fields.len &
-                              " arguments, got " & $value.gene.children.len)
-                self.frame.replace(new_enum_value(value.gene.type, value.gene.children))
-              elif value.gene.children.len == 0:
-                # (Shape/Point) — unit variant in parens, just return the member
-                self.frame.replace(value.gene.type)
-              else:
-                not_allowed("Unit variant " & member.name & " cannot be called with arguments")
+              self.frame.replace(self.construct_enum_variant(value.gene.type, value.gene.children))
             elif value.kind == VkGene and (inst.arg1 and 2'i32) != 0:
               value.gene.frozen = true
             if value.kind == VkGene and (inst.arg1 and 1'i32) != 0:
@@ -4879,6 +4903,9 @@ proc exec*(self: ptr VirtualMachine): Value =
           # Interface call with 0 args - error, need an object to adapt
           raise new_exception(types.Exception, "Interface call requires an object to adapt")
 
+        of VkEnumMember:
+          self.frame.push(self.construct_enum_variant(target, @[]))
+
         of VkBlock:
           let b = target.ref.block
           let compiled = require_published_body(b)
@@ -5165,13 +5192,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           exec_adapter(self)
 
         of VkEnumMember:
-          # Data variant constructor with 1 arg
-          let member = target.ref.enum_member
-          if member.fields.len == 0:
-            not_allowed("Unit variant " & member.name & " cannot be called with arguments")
-          if member.fields.len != 1:
-            not_allowed("Variant " & member.name & " expects " & $member.fields.len & " arguments, got 1")
-          self.frame.push(new_enum_value(target, @[arg]))
+          self.frame.push(self.construct_enum_variant(target, @[arg]))
 
         else:
           not_allowed("IkUnifiedCall1 requires a callable, got " & $target.kind)
@@ -5328,13 +5349,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           self.frame.push(result)
 
         of VkEnumMember:
-          # Data variant constructor with multiple args
-          let member = target.ref.enum_member
-          if member.fields.len == 0:
-            not_allowed("Unit variant " & member.name & " cannot be called with arguments")
-          if member.fields.len != args.len:
-            not_allowed("Variant " & member.name & " expects " & $member.fields.len & " arguments, got " & $args.len)
-          self.frame.push(new_enum_value(target, args))
+          self.frame.push(self.construct_enum_variant(target, args))
 
         else:
           not_allowed("IkUnifiedCall requires a callable, got " & $target.kind)
@@ -5740,6 +5755,9 @@ proc exec*(self: ptr VirtualMachine): Value =
           self.frame.push(target)
           self.frame.push(args[0])
           exec_adapter(self, ctor_args)
+
+        of VkEnumMember:
+          self.frame.push(self.construct_enum_variant(target, args))
 
         else:
           not_allowed("IkUnifiedCallDynamic requires a callable, got " & $target.kind)
