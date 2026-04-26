@@ -1,0 +1,90 @@
+# Public enum ADT example fixture
+
+(do
+  (enum Shape
+    (Circle radius: Int)
+    (Rect width: Int height: Int)
+    Point)
+
+  # Positional construction, keyword construction, and public parent type identity.
+  (var circle (Shape/Circle 5))
+  (var rect_kw (Shape/Rect ^height 4 ^width 3))
+  (var point Shape/Point)
+  (assert ((typeof circle) == "Shape"))
+  (assert ((typeof rect_kw) == "Shape"))
+  (assert ((typeof point) == "Shape"))
+  (println "shape typeof =" (typeof circle))
+  # Expected: shape typeof = Shape
+
+  # Field access should use declared payload names regardless of construction style.
+  (assert ((circle .radius) == 5))
+  (assert ((rect_kw .width) == 3))
+  (assert ((rect_kw .height) == 4))
+  (println "shape fields =" (circle .radius) (rect_kw .width) (rect_kw .height))
+  # Expected: shape fields = 5 3 4
+
+  # Qualified case patterns bind payloads with their declared arity.
+  (println "shape case circle ="
+    (case circle
+      when (Shape/Circle radius)
+        (radius + 1)
+      when (Shape/Rect width height)
+        (width * height)
+      when Shape/Point
+        0
+      else
+        -1))
+  # Expected: shape case circle = 6
+
+  (println "shape case rect ="
+    (case rect_kw
+      when (Shape/Circle radius)
+        radius
+      when (Shape/Rect width height)
+        (width * height)
+      when Shape/Point
+        0
+      else
+        -1))
+  # Expected: shape case rect = 12
+
+  (println "shape case point ="
+    (case point
+      when (Shape/Circle radius)
+        radius
+      when (Shape/Rect width height)
+        (width + height)
+      when Shape/Point
+        "point"))
+  # Expected: shape case point = point
+
+  # Typed payload rejection uses catch * and a stable marker, not internal errors.
+  (try
+    (Shape/Circle "wide")
+  catch *
+    (println "shape typed payload rejected"))
+  # Expected: shape typed payload rejected
+
+  # Built-in Result/Option are enum-backed and keep ? semantics.
+  (fn public_unwrap_ok []
+    ((Ok 9) ?))
+  (fn public_unwrap_some []
+    ((Some "public option") ?))
+  (assert ((public_unwrap_ok) == 9))
+  (assert ((public_unwrap_some) == "public option"))
+  (println "builtin question =" (public_unwrap_ok) (public_unwrap_some))
+  # Expected: builtin question = 9 public option
+
+  (fn public_early_err []
+    (var ignored ((Err "public boom") ?))
+    "after err")
+  (fn public_early_none []
+    (var ignored (None ?))
+    "after none")
+  (assert ((public_early_err) == (Err "public boom")))
+  (assert ((public_early_none) == None))
+  (println "builtin early err type =" (typeof (public_early_err)))
+  # Expected: builtin early err type = Result
+  (println "builtin early none type =" (typeof (public_early_none)))
+  # Expected: builtin early none type = Option
+)

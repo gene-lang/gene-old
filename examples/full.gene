@@ -232,13 +232,13 @@
  else   (println "Other day")
 )
 
-# case with Result-like patterns
+# case with enum-backed built-in Result patterns
 (var r (Ok 42))
 (case r
  when (Ok v)
-  (println "Got Ok:" v)
+  (println "Got enum-backed Ok:" v)
  when (Err e)
-  (println "Got Err:" e)
+  (println "Got enum-backed Err:" e)
 )
 
 # ============================================================================
@@ -476,23 +476,57 @@
 # 13) OPTION/RESULT, ?, ENUMS, REGEX, AND COLLECTION METHODS
 # ============================================================================
 
-# Option / Result
+# Enum-backed Option / Result
 (var ok_val (Ok 42))
 (var err_val (Err "bad"))
 (var some_val (Some "hello"))
 (var none_val None)
-(println "Ok/Err/Some/None =" ok_val err_val some_val none_val)
+(println "enum-backed Ok/Err/Some/None =" ok_val err_val some_val none_val)
 
-# ? early-return operator
+# ? early-return operator for enum-backed Result/Option values
 (fn unwrap_ok []
   (var v ((Ok 7) ?))
   (v * 3)
 )
-(println "unwrap_ok() =" (unwrap_ok))
+(println "enum-backed unwrap_ok() =" (unwrap_ok))
 
 # Enum declaration
 (enum Color red green blue)
 (println "enum member =" Color/red)
+
+# Custom payload enum ADT
+(enum Shape
+  (Circle radius: Int)
+  (Rect width: Int height: Int)
+  Point)
+(var shape_circle (Shape/Circle 5))
+(var shape_rect (Shape/Rect ^height 4 ^width 3))
+(var shape_point Shape/Point)
+(println "Shape circle typeof =" (typeof shape_circle))
+(println "Shape fields =" (shape_circle .radius) (shape_rect .width) (shape_rect .height))
+(println "Shape rect area ="
+  (case shape_rect
+    when (Shape/Circle radius)
+      (radius * radius)
+    when (Shape/Rect width height)
+      (width * height)
+    when Shape/Point
+      0
+    else
+      -1))
+(println "Shape point case ="
+  (case shape_point
+    when (Shape/Circle radius)
+      radius
+    when (Shape/Rect width height)
+      (width + height)
+    when Shape/Point
+      "point"))
+(try
+  (Shape/Circle "wide")
+ catch *
+  (println "Shape/Circle typed payload rejected")
+)
 
 # Regex
 (var re #/(\d+)/)
