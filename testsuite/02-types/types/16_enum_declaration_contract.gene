@@ -21,3 +21,21 @@
 (enum Status ^values [ready done])
 (println Status/ready)
 # Expected: Status/ready
+
+(fn accept_result [r: (Result Int String)] -> String
+  "accepted-result")
+(println (accept_result ok))
+# Expected: accepted-result
+(println (accept_result Result/Empty))
+# Expected: accepted-result
+
+(fn accept_status [s: Status] -> String
+  "accepted-status")
+(println (accept_status Status/ready))
+# Expected: accepted-status
+
+(try
+  (accept_status ok)
+catch *
+  (println "enum boundary rejected unrelated type"))
+# Expected: enum boundary rejected unrelated type

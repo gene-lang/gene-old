@@ -1,4 +1,4 @@
-import unittest
+import unittest, strutils
 
 import ./helpers
 import ../src/gene/parser
@@ -16,6 +16,21 @@ proc test_strict_type_error(code: string) =
     except CatchableError:
       raised = true
     check raised
+
+proc test_strict_type_error_contains(code: string, expected: string) =
+  var code = cleanup(code)
+  test "Strict type checking error contains '" & expected & "': " & code:
+    let checker = tc.new_type_checker(strict = true, module_filename = "test_code")
+    var raised = false
+    var message = ""
+    try:
+      for node in read_all(code):
+        checker.type_check_node(node)
+    except CatchableError as e:
+      raised = true
+      message = e.msg
+    check raised
+    check message.contains(expected)
 
 proc test_strict_type_ok(code: string) =
   var code = cleanup(code)
@@ -509,4 +524,69 @@ suite "Static type checking":
       "ok"
     else
       (x ++ "!"))
+  """
+
+  test_strict_type_ok """
+    (enum Maybe:T
+      (Some value: T)
+      None)
+    (fn passthrough [m: (Maybe Int)] -> (Maybe Int)
+      m)
+  """
+
+  test_strict_type_error_contains """
+    (enum Bad:T:T
+      (Item value: T))
+  """, "duplicate generic parameter T"
+
+  test_strict_type_error_contains """
+    (enum Bad
+      Same
+      Same)
+  """, "duplicate variant Same"
+
+  test_strict_type_error_contains """
+    (enum Bad
+      (Pair left left))
+  """, "duplicate field left"
+
+  test_strict_type_error_contains """
+    (enum Bad
+      (Item value:))
+  """, "missing a type after ':'"
+
+  test_strict_type_error_contains """
+    (enum Bad
+      (Item value: 1))
+  """, "invalid type annotation"
+
+  test_strict_type_error_contains """
+    (enum Bad:T
+      (Item value: MissingType))
+  """, "Unknown type: MissingType"
+
+  test_vm """
+    (enum Result:T:E
+      (Ok value: T)
+      (Err error: E)
+      Empty)
+    (var ok (Result/Ok 42))
+    (fn accept_result [r: (Result Int String)] -> String
+      "accepted")
+    [(accept_result ok) (accept_result Result/Empty)]
+  """, proc(result: Value) =
+    check result.kind == VkArray
+    check array_data(result).len == 2
+    check array_data(result)[0] == "accepted".to_value()
+    check array_data(result)[1] == "accepted".to_value()
+
+  test_vm_error """
+    (enum Result:T:E
+      (Ok value: T)
+      (Err error: E))
+    (enum Status ^values [ready done])
+    (var ok (Result/Ok 42))
+    (fn accept_status [s: Status] -> String
+      "status")
+    (accept_status ok)
   """

@@ -249,10 +249,15 @@ proc validate_string*(v: Value, param_name: string = "argument") {.inline.} =
   if not is_string(v):
     raise new_exception(type_defs.Exception, param_name & " must be String, got " & $v.kind)
 
+proc enum_parent_type_name(value: Value): string {.gcsafe.}
+
 # Get runtime type name as string
 proc runtime_type_name*(v: Value): string =
   ## Get the runtime type name of a value
   ## This uses the NaN tag to determine the type
+  let enum_name = enum_parent_type_name(v)
+  if enum_name.len > 0:
+    return enum_name
   case v.kind
   of VkInt: "Int"
   of VkFloat: "Float"
@@ -284,6 +289,26 @@ proc runtime_type_name*(v: Value): string =
   of VkClass: "Class"
   else: $v.kind
 
+proc enum_parent_type_name(value: Value): string {.gcsafe.} =
+  ## Return the parent enum's canonical name for enum members/values.
+  ## Malformed enum values fall back to the legacy runtime kind behavior.
+  case value.kind
+  of VkEnumMember:
+    if value.ref != nil and value.ref.enum_member != nil:
+      let parent = value.ref.enum_member.parent
+      if parent.kind == VkEnum and parent.ref != nil and parent.ref.enum_def != nil:
+        return parent.ref.enum_def.name
+  of VkEnumValue:
+    if value.ref != nil:
+      let variant = value.ref.ev_variant
+      if variant.kind == VkEnumMember and variant.ref != nil and variant.ref.enum_member != nil:
+        let parent = variant.ref.enum_member.parent
+        if parent.kind == VkEnum and parent.ref != nil and parent.ref.enum_def != nil:
+          return parent.ref.enum_def.name
+  else:
+    discard
+  return ""
+
 proc adt_type_name(value: Value): string =
   if value.kind != VkGene or value.gene == nil:
     return ""
@@ -305,6 +330,9 @@ proc is_named_compatible(value: Value, expected_type: string): bool =
     return value.kind == VkInstance
   let actual = runtime_type_name(value)
   if actual == expected_type:
+    return true
+  let enum_name = enum_parent_type_name(value)
+  if enum_name.len > 0 and enum_name == expected_type:
     return true
   let adt = adt_type_name(value)
   if adt.len > 0 and adt == expected_type:

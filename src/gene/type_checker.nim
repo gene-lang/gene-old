@@ -67,6 +67,8 @@ type
     name*: string
     field_count*: int
     param_index*: int  # -1 when no param binding
+    fields*: seq[string]
+    field_types*: seq[TypeExpr]
 
   AdtDef = ref object
     name*: string
@@ -1025,6 +1027,148 @@ proc try_register_adt(self: TypeChecker, gene: ptr Gene): bool =
     return false
   self.add_adt(name, params, variants)
   return true
+
+proc parse_enum_declaration_name(raw_name: string): tuple[base_name: string, type_params: seq[string]] =
+  let parsed = split_generic_definition_name(raw_name)
+  if raw_name.contains(":") and (parsed.base_name == raw_name or parsed.type_params.len == 0):
+    raise new_exception(types.Exception, "enum generic declaration '" & raw_name & "' has invalid generic parameter syntax")
+  result.base_name = parsed.base_name
+  result.type_params = parsed.type_params
+  if result.base_name.len == 0:
+    raise new_exception(types.Exception, "enum name must not be empty")
+
+  var seen_params = initTable[string, bool]()
+  for param in result.type_params:
+    ensure_user_type_name(param, "enum generic parameter")
+    if seen_params.hasKey(param):
+      raise new_exception(types.Exception, "enum " & result.base_name & " has duplicate generic parameter " & param)
+    seen_params[param] = true
+
+proc enum_type_annotation_valid(v: Value): bool =
+  case v.kind
+  of VkSymbol, VkString:
+    return v.str.len > 0 and not v.str.endsWith(":")
+  of VkGene:
+    return v.gene != nil and (v.gene.`type`.kind == VkSymbol or v.gene.`type`.kind == VkString)
+  else:
+    return false
+
+proc enum_param_index(params: seq[string], type_node: Value): int =
+  if type_node.kind != VkSymbol:
+    return -1
+  for i, param in params:
+    if param == type_node.str:
+      return i
+  -1
+
+proc parse_enum_variant_fields(self: TypeChecker, enum_name: string, variant_gene: ptr Gene,
+                               type_params: seq[string]): tuple[fields: seq[string], field_types: seq[TypeExpr], param_index: int] =
+  let variant_name = variant_gene.`type`.str
+  result.param_index = -1
+  if variant_gene.props.len > 0:
+    raise new_exception(types.Exception, "enum variant " & enum_name & "/" & variant_name & " field declarations must be positional, not properties")
+
+  var seen_fields = initTable[string, bool]()
+  var field_param_indices: seq[int] = @[]
+  var i = 0
+  while i < variant_gene.children.len:
+    let child = variant_gene.children[i]
+    if child.kind != VkSymbol:
+      raise new_exception(types.Exception, "enum variant " & enum_name & "/" & variant_name & " field must be a symbol")
+
+    let token = child.str
+    var field_name = token
+    var field_type = ANY_TYPE
+    var field_param_index = -1
+
+    if token.endsWith(":"):
+      field_name = token[0..^2]
+      if field_name.len == 0:
+        raise new_exception(types.Exception, "enum variant " & enum_name & "/" & variant_name & " has an empty field name")
+      if i + 1 >= variant_gene.children.len:
+        raise new_exception(types.Exception, "enum variant " & enum_name & "/" & variant_name & " field " & field_name & " is missing a type after ':'")
+      let type_node = variant_gene.children[i + 1]
+      if type_node.kind == VkSymbol and type_node.str.endsWith(":"):
+        raise new_exception(types.Exception, "enum variant " & enum_name & "/" & variant_name & " field " & field_name & " is missing a type after ':'")
+      if not enum_type_annotation_valid(type_node):
+        raise new_exception(types.Exception, "enum variant " & enum_name & "/" & variant_name & " field " & field_name & " has an invalid type annotation")
+      field_param_index = enum_param_index(type_params, type_node)
+      field_type = self.parse_type_expr(type_node)
+      i += 2
+    else:
+      i.inc()
+
+    if seen_fields.hasKey(field_name):
+      raise new_exception(types.Exception, "enum variant " & enum_name & "/" & variant_name & " has duplicate field " & field_name)
+    seen_fields[field_name] = true
+    result.fields.add(field_name)
+    result.field_types.add(field_type)
+    field_param_indices.add(field_param_index)
+
+  if result.fields.len == 1 and field_param_indices.len == 1:
+    result.param_index = field_param_indices[0]
+
+proc check_enum(self: TypeChecker, gene: ptr Gene): TypeExpr =
+  if gene.children.len < 1:
+    raise new_exception(types.Exception, "enum expects at least a name")
+
+  let name_node = gene.children[0]
+  if name_node.kind != VkSymbol:
+    raise new_exception(types.Exception, "enum name must be a symbol")
+
+  let parsed_name = parse_enum_declaration_name(name_node.str)
+  let enum_name = parsed_name.base_name
+  let type_params = parsed_name.type_params
+  ensure_user_type_name(enum_name, "enum")
+
+  let enum_type = TypeExpr(kind: TkNamed, name: enum_name)
+  self.types[enum_name] = enum_type
+  discard self.intern_type_desc(enum_type)
+
+  if type_params.len > 0:
+    self.push_type_param_scope(type_params)
+  defer:
+    if type_params.len > 0:
+      self.pop_type_param_scope()
+
+  var variants: seq[AdtVariant] = @[]
+  var seen_variants = initTable[string, bool]()
+
+  proc add_variant(variant: AdtVariant) =
+    if seen_variants.hasKey(variant.name):
+      raise new_exception(types.Exception, "enum " & enum_name & " has duplicate variant " & variant.name)
+    seen_variants[variant.name] = true
+    variants.add(variant)
+
+  if gene.props.hasKey("values".to_key()):
+    let values_array = gene.props["values".to_key()]
+    if values_array.kind != VkArray:
+      raise new_exception(types.Exception, "enum ^values must be an array")
+    for member in array_data(values_array):
+      if member.kind != VkSymbol:
+        raise new_exception(types.Exception, "enum ^values member must be a symbol")
+      add_variant(AdtVariant(name: member.str, field_count: 0, param_index: -1, fields: @[], field_types: @[]))
+  else:
+    for i in 1..<gene.children.len:
+      let member = gene.children[i]
+      if member.kind == VkSymbol:
+        add_variant(AdtVariant(name: member.str, field_count: 0, param_index: -1, fields: @[], field_types: @[]))
+      elif member.kind == VkGene and member.gene != nil:
+        let variant_gene = member.gene
+        if variant_gene.`type`.kind != VkSymbol:
+          raise new_exception(types.Exception, "enum data variant name must be a symbol")
+        let parsed_fields = self.parse_enum_variant_fields(enum_name, variant_gene, type_params)
+        add_variant(AdtVariant(
+          name: variant_gene.`type`.str,
+          field_count: parsed_fields.fields.len,
+          param_index: parsed_fields.param_index,
+          fields: parsed_fields.fields,
+          field_types: parsed_fields.field_types))
+      else:
+        raise new_exception(types.Exception, "enum member must be a symbol or data variant (Name field1 field2)")
+
+  self.add_adt(enum_name, type_params, variants)
+  return enum_type
 
 proc parse_fn_params(self: TypeChecker, v: Value): seq[ParamType] =
   if v.kind != VkArray:
@@ -2010,7 +2154,7 @@ proc check_ifel(self: TypeChecker, gene: ptr Gene): TypeExpr =
 proc is_infix_special_form(expr_type: Value): bool {.inline.} =
   expr_type.kind == VkSymbol and expr_type.str in [
     "var", "if", "ifel", "fn", "do", "loop", "while", "for", "ns", "class",
-    "try", "throw", "import", "export", "interface", "implement", "field", "comptime", "type",
+    "try", "throw", "import", "export", "interface", "implement", "field", "comptime", "type", "enum",
     "object", "$", ".", "->", "@"
   ]
 
@@ -3187,6 +3331,8 @@ proc check_expr(self: TypeChecker, v: Value): TypeExpr =
         elif gene.children.len >= 2 and gene.children[0].kind == VkGene:
           discard self.try_register_adt(gene)
         return ANY_TYPE
+      of "enum":
+        return self.check_enum(gene)
       of "case":
         return self.check_case(gene)
       of "for":
