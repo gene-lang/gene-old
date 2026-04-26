@@ -6,6 +6,7 @@ import types/instruction_metadata
 import types/instructions
 import types/helpers
 import types/interfaces
+import types/type_metadata_verifier
 import ./utils
 
 export type_defs
@@ -16,4 +17,5 @@ export instruction_metadata
 export instructions
 export helpers
 export interfaces
+export type_metadata_verifier
 export utils
