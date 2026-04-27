@@ -439,8 +439,9 @@ proc exec*(self: ptr VirtualMachine): Value =
         if self.frame.scope.isNil:
           not_allowed("IkVar: scope is nil")
         # Type check: first from instruction arg1, then from scope tracker metadata.
-        if inst.arg1 != NO_TYPE_ID and self.type_check and value != NIL and self.cu != nil and self.cu.type_descriptors.len > 0:
-          validate_type(value, inst.arg1.TypeId, self.cu.type_descriptors, "variable")
+        if inst.arg1 != NO_TYPE_ID and self.type_check and (value != NIL or self.strict_nil) and self.cu != nil and self.cu.type_descriptors.len > 0:
+          validate_type(value, inst.arg1.TypeId, self.cu.type_descriptors, "variable",
+            self.runtime_type_error_location(), strict_nil = self.strict_nil)
         else:
           self.validate_local_type_constraint(self.frame.scope.tracker, index, value)
         # Ensure the scope has enough space for the index
@@ -914,9 +915,10 @@ proc exec*(self: ptr VirtualMachine): Value =
               let cls = target.instance_class
               if cls != nil and name in cls.prop_types:
                 let expected_type_id = cls.prop_types[name]
-                if expected_type_id != NO_TYPE_ID and cls.prop_type_descs.len > 0 and value != NIL:
+                if expected_type_id != NO_TYPE_ID and cls.prop_type_descs.len > 0 and (value != NIL or self.strict_nil):
                   let prop_name = get_symbol((cast[uint64](name) and PAYLOAD_MASK).int)
-                  let warning = validate_or_coerce_type(value, expected_type_id, cls.prop_type_descs, "property " & prop_name)
+                  let warning = validate_or_coerce_type(value, expected_type_id, cls.prop_type_descs,
+                    "property " & prop_name, self.runtime_type_error_location(), strict_nil = self.strict_nil)
                   emit_type_warning(warning)
             instance_props(target)[name] = value
           of VkAdapter:
@@ -4922,6 +4924,8 @@ proc exec*(self: ptr VirtualMachine): Value =
         if self.frame.caller_frame == nil:
           return NIL
         else:
+          var result_value = NIL
+          self.validate_return_type_constraint(result_value)
           let returning_frame = self.frame
           self.pop_frame_exception_handlers(returning_frame)
           if self.current_exception != NIL:
@@ -4931,7 +4935,7 @@ proc exec*(self: ptr VirtualMachine): Value =
           inst = self.cu.instructions[self.pc].addr
           self.frame.update(self.frame.caller_frame)
           self.frame.ref_count.dec()
-          self.frame.push(NIL)
+          self.frame.push(result_value)
           continue
 
       of IkReturnTrue:

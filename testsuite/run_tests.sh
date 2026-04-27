@@ -157,6 +157,8 @@ if [ $# -gt 0 ]; then
         # Allow paths relative to testsuite dir
         if [ -f "$test_arg" ]; then
             run_test "$test_arg"
+        elif [[ "$test_arg" == testsuite/* ]] && [ -f "$SCRIPT_DIR/${test_arg#testsuite/}" ]; then
+            run_test "$SCRIPT_DIR/${test_arg#testsuite/}"
         elif [ -f "$SCRIPT_DIR/$test_arg" ]; then
             run_test "$SCRIPT_DIR/$test_arg"
         else

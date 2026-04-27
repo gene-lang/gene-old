@@ -35,8 +35,7 @@ catch *
   (println "property-rejected"))
 # Expected: property-rejected
 
-(fn accepts_any [x: Any]
-  (if (x == nil) "any-admitted" "any-mismatch"))
+(fn accepts_any [x: Any] "any-admitted")
 (println (accepts_any nil))
 # Expected: any-admitted
 

@@ -49,6 +49,19 @@ proc key_to_name(key: Key): string {.inline.} =
   except CatchableError:
     result = "<keyword>"
 
+proc current_strict_nil(): bool {.inline.} =
+  VM != nil and VM.strict_nil
+
+proc current_type_error_location(): string {.inline.} =
+  if VM == nil or VM.cu == nil:
+    return ""
+  var trace: SourceTrace = nil
+  if VM.pc >= 0 and VM.pc < VM.cu.instruction_traces.len:
+    trace = VM.cu.instruction_traces[VM.pc]
+  if trace == nil and VM.cu.trace_root != nil:
+    trace = VM.cu.trace_root
+  trace_location(trace)
+
 proc process_args_core(matcher: RootMatcher, positional: ptr UncheckedArray[Value],
                       pos_count: int, keywords: seq[(Key, Value)],
                       scope: Scope) {.inline.} =
@@ -144,11 +157,14 @@ proc process_args_core(matcher: RootMatcher, positional: ptr UncheckedArray[Valu
 
   # Runtime type validation for annotated parameters
   if matcher.type_check and matcher.has_type_annotations:
+    let strict_nil = current_strict_nil()
+    let location = if strict_nil: current_type_error_location() else: ""
     for i, param in matcher.children:
       if param.type_id != NO_TYPE_ID and matcher.type_descriptors.len > 0 and i < scope.members.len:
         var value = scope.members[i]
-        if value != NIL:  # Don't validate nil/missing args (handled by required check)
-          let warning = validate_or_coerce_type(value, param.type_id, matcher.type_descriptors, key_to_name(param.name_key))
+        if value != NIL or strict_nil:  # Non-strict mode preserves legacy nil/missing arg compatibility.
+          let warning = validate_or_coerce_type(value, param.type_id, matcher.type_descriptors,
+            key_to_name(param.name_key), location = location, strict_nil = strict_nil)
           scope.members[i] = value
           emit_type_warning(warning)
 
@@ -157,11 +173,14 @@ proc process_args_core(matcher: RootMatcher, positional: ptr UncheckedArray[Valu
 # Inline type validation for fast paths
 template validate_fast_path_types(matcher: RootMatcher, scope: Scope) =
   if matcher.type_check and matcher.has_type_annotations:
+    let strict_nil = current_strict_nil()
+    let location = if strict_nil: current_type_error_location() else: ""
     for i, param in matcher.children:
       if param.type_id != NO_TYPE_ID and matcher.type_descriptors.len > 0 and i < scope.members.len:
         var value = scope.members[i]
-        if value != NIL:
-          let warning = validate_or_coerce_type(value, param.type_id, matcher.type_descriptors, key_to_name(param.name_key))
+        if value != NIL or strict_nil:
+          let warning = validate_or_coerce_type(value, param.type_id, matcher.type_descriptors,
+            key_to_name(param.name_key), location = location, strict_nil = strict_nil)
           scope.members[i] = value
           emit_type_warning(warning)
 
