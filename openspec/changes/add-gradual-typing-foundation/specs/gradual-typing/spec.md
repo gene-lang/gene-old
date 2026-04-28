@@ -1,11 +1,12 @@
 ## ADDED Requirements
 
 ### Requirement: Canonical Foundation Documentation
-The gradual typing foundation SHALL have a canonical in-repo design document and discoverability links that distinguish current behavior from the target M006 foundation contract.
+The gradual typing foundation SHALL have a canonical in-repo design document and discoverability links that distinguish implemented M006 foundation behavior from deferred gradual-typing tracks.
 
 #### Scenario: Foundation contract is discoverable from current docs
 - **WHEN** a maintainer reads the current type-system walkthrough, type-system status page, documentation index, or feature-status matrix
 - **THEN** the maintainer can navigate to the gradual typing foundation design without relying on downloaded research reports or historical proposal archaeology
+- **AND** the maintainer can tell that the foundation is implemented while broader gradual-typing work remains Beta or Deferred
 
 ### Requirement: Descriptor Metadata Ownership
 Every typed metadata owner SHALL reference descriptor metadata using `TypeId` values that are valid for that owner's descriptor table, or `NO_TYPE_ID` when the slot is intentionally untyped.
@@ -21,7 +22,7 @@ Source compilation SHALL verify descriptor metadata before successful output is 
 #### Scenario: Source verifier rejects an invalid TypeId
 - **WHEN** source compilation produces typed metadata whose owner references an invalid `TypeId`
 - **THEN** compilation fails before execution or GIR save with `GENE_TYPE_METADATA_INVALID`
-- **AND** the diagnostic identifies phase `source-compile`, owner/path, invalid `TypeId`, descriptor-table length, and source path
+- **AND** the diagnostic identifies phase `source compile`, owner/path, invalid `TypeId`, descriptor-table length, source path, and structural detail
 
 ### Requirement: GIR Descriptor Metadata Verification
 GIR loading SHALL verify descriptor metadata before a loaded unit is exposed to import-time type checking, execution, or runtime validation.
@@ -29,15 +30,17 @@ GIR loading SHALL verify descriptor metadata before a loaded unit is exposed to 
 #### Scenario: GIR verifier rejects corrupted descriptor metadata
 - **WHEN** a GIR file contains a descriptor table or typed metadata owner with an out-of-range descriptor reference
 - **THEN** loading fails before the unit can execute or satisfy an import
-- **AND** the diagnostic identifies phase `gir-load`, owner/path, invalid `TypeId`, descriptor-table length, GIR path, and source path when known
+- **AND** the diagnostic identifies phase `GIR load`, owner/path, invalid `TypeId`, descriptor-table length, the loaded artifact path, and structural detail
 
 ### Requirement: Source and GIR Typing Parity
 A program compiled from source and the same program loaded from current GIR SHALL expose equivalent gradual typing metadata and runtime boundary behavior.
 
-#### Scenario: Source and GIR paths agree on typed boundary enforcement
-- **WHEN** a typed program is run once from source and once from a current GIR cache artifact
-- **THEN** descriptor metadata, type aliases, module type metadata, and runtime typed-boundary results are equivalent
-- **AND** any parity failure reports `GENE_TYPE_METADATA_INVALID` with phase `source-gir-parity`, source path, GIR path, owner/path, and the mismatched descriptor detail
+#### Scenario: Source and GIR paths agree on descriptor metadata summaries
+- **WHEN** a typed program is compiled from source and loaded from a current GIR cache artifact
+- **THEN** deterministic source and loaded descriptor metadata summaries match for descriptor tables, type aliases, module type metadata, and instruction-carried typed metadata
+- **AND** runtime typed-boundary behavior is equivalent for the source and loaded GIR paths
+- **AND** invalid metadata encountered while preparing either side fails through `GENE_TYPE_METADATA_INVALID` with phase `source compile` or `GIR load`
+- **AND** pure parity mismatches identify the fixture and first mismatched source/loaded descriptor metadata summary line without requiring a runtime `source-gir-parity` diagnostic marker
 
 ### Requirement: Default Nil Compatibility
 Default gradual typing mode SHALL preserve existing nil-compatible behavior and SHALL NOT make strict nil checks mandatory.
@@ -68,5 +71,5 @@ The gradual typing foundation SHALL document non-core type-system tracks as defe
 
 #### Scenario: Deferred work is not claimed by the foundation
 - **WHEN** readers inspect the foundation design, tasks, or final evidence
-- **THEN** generic classes, bounds/constraints, monomorphization, full static-only mode, broad flow typing expansion, and deep collection element enforcement are clearly marked as deferred or out of scope
+- **THEN** structured blame diagnostics, broad runtime guard unification, broad flow typing expansion, native typed facts, generic classes, bounds/constraints, monomorphization, full static-only mode, deep collection element enforcement, wrappers, and proxies are clearly marked as deferred or out of scope
 - **AND** the foundation does not expose private checker bridge machinery as public language semantics

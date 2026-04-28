@@ -11,7 +11,7 @@ matrix and stable-core boundary.
 
 ## Active Foundation Contracts
 
-- [Gradual Typing Foundation](gradual-typing.md) — target M006 coherence contract for descriptor metadata verification, source/GIR parity, diagnostics, default nil compatibility, and opt-in strict nil. This is implementation guidance for later slices, not a stable-current behavior claim.
+- [Gradual Typing Foundation](gradual-typing.md) — implemented M006 coherence foundation for descriptor metadata verification, source/GIR parity proof, diagnostics, default nil compatibility, opt-in strict nil, and Deferred tracks. This is the foundation contract for a Beta feature, not a stable-current claim that all gradual-typing work is complete.
 
 ## Spec Companion Docs
 

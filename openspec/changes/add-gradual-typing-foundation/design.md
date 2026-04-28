@@ -2,13 +2,13 @@
 
 Reader: a Gene type-system implementer or reviewer who was not present for M006 planning.
 
-Post-read action: implement or review S02-S05 gradual typing foundation work without relying on downloaded research notes or historical proposal archaeology.
+Post-read action: implement, review, or verify the gradual typing foundation without relying on downloaded research notes or historical proposal archaeology.
 
 ## Context
 
 Gene already has a gradual-first type pipeline: source is parsed, type checked in non-strict mode, compiled with descriptor metadata, optionally serialized to GIR, and executed with runtime boundary validation when type checking is enabled. The core metadata shape is descriptor-first: `TypeId` references index a `TypeDesc` table, and those references are attached to function matchers, scope trackers, class property metadata, runtime type values, compilation units, module type registries, and GIR payloads.
 
-The current implementation still has coherence gaps. Some invalid descriptor references can fall back to `Any`, and GIR loading restores descriptor tables before later runtime paths consume them. That behavior is acceptable as migration history but not as the foundation contract for downstream verifier and parity work.
+M006 turns that existing metadata shape into an enforceable coherence foundation. The implemented foundation verifies descriptor metadata at source compile and GIR load boundaries, proves source/GIR parity through deterministic source and loaded descriptor metadata summaries, and adds an opt-in strict nil scaffold while preserving default gradual nil compatibility.
 
 ## Goals
 
@@ -20,10 +20,10 @@ The current implementation still has coherence gaps. Some invalid descriptor ref
 
 ## Non-Goals
 
-- No runtime verifier implementation is delivered by S01.
 - No historical OpenSpec proposals are edited or treated as current truth.
-- No full static-only mode, generic class system, bounds/constraints, monomorphization, or deep collection element enforcement is required by this foundation.
-- No public split between enum ADTs and private checker bridge machinery is introduced.
+- No full static-only mode, generic class system, bounds/constraints, monomorphization, deep collection element enforcement, wrapper/proxy model, or public checker-bridge semantics is delivered by this foundation.
+- No broad runtime guard unification, structured blame diagnostics, broad flow typing expansion, or native typed-fact lowering is delivered by this foundation.
+- No new runtime `source-gir-parity` diagnostic marker is required for M006; parity remains a deterministic test-gate proof unless a later milestone promotes it to a user-facing runtime boundary.
 
 ## Foundation Contract
 
@@ -42,33 +42,34 @@ The important owners are:
 
 ### Verification phases
 
-S02 owns source-compile verification. It should run after checker descriptors are merged into compiler output and before successful compilation output is accepted or saved.
+Source verification runs after checker descriptors are merged into compiler output and before successful compilation output is accepted or saved. The implemented diagnostic phase label is `source compile`; compile subpaths may use more specific labels such as init, function body, or block body compilation.
 
-S03 owns GIR verification and source/GIR parity. GIR verification should run after GIR metadata is read and before the loaded unit is exposed to import, execution, or runtime validation. Parity should prove source-compiled and GIR-loaded programs use equivalent descriptor metadata and runtime type behavior.
+GIR verification runs after GIR metadata is read and before the loaded unit is exposed to import, execution, or runtime validation. The implemented diagnostic phase label is `GIR load`.
 
-S04 owns opt-in strict nil. Default mode remains gradual-compatible. Strict nil should reject `nil` at typed boundaries unless the expected type is `Any`, `Nil`, or a union containing `Nil`.
+Source/GIR parity is proven by deterministic descriptor metadata summaries generated from a source-compiled unit and the corresponding loaded GIR unit. The parity surface compares descriptor tables, type aliases, module type metadata, and instruction-carried typed metadata. When either side contains invalid metadata, it fails through the source compile or GIR load verifier. When summaries diverge, the parity test reports the fixture and first mismatched source/loaded summary line instead of requiring a separate runtime diagnostic marker.
 
-S05 owns the final foundation gate. It should combine source verifier evidence, GIR verifier evidence, parity checks, strict nil checks, default nil compatibility checks, documentation links, and OpenSpec validation.
+Strict nil is opt-in. Default mode remains gradual-compatible. Strict nil rejects `nil` at typed boundaries unless the expected type is `Any`, `Nil`, `Option[T]`, or a union containing `Nil`.
 
 ### Diagnostic contract
 
 Invalid metadata MUST produce `GENE_TYPE_METADATA_INVALID`. The message or structured diagnostic payload MUST include:
 
-- `phase`: at least `source-compile`, `gir-load`, or `source-gir-parity`.
+- `phase`: currently `source compile`, `GIR load`, or a more specific compile subphase.
 - `owner/path`: the metadata owner and nested path to the bad reference.
 - `invalid TypeId`: the concrete invalid ID.
 - `descriptor-table length`: the table size used for validation.
-- `source path`: the source file when known.
-- `GIR path`: the GIR file when known or when parity is being checked.
+- path context: the source path during source compilation or the GIR artifact path during GIR loading.
+- structural detail explaining why the descriptor reference is invalid.
 
 The verifier MUST NOT silently coerce invalid metadata to `Any`; silent fallback is the failure mode this foundation removes.
 
 ## Risks and Mitigations
 
-- Risk: stricter metadata validation exposes old cache files or migration artifacts. Mitigation: fail before execution with source/GIR paths so users can rebuild caches.
+- Risk: stricter metadata validation exposes old cache files or migration artifacts. Mitigation: fail before execution with path context so users can rebuild caches.
 - Risk: strict nil could break existing gradual code. Mitigation: keep strict nil opt-in and preserve default nil-compatible behavior.
 - Risk: diagnostics become too broad to act on. Mitigation: require phase, owner/path, invalid ID, table length, and path metadata in every invalid-metadata diagnostic.
+- Risk: parity wording overpromises runtime behavior. Mitigation: keep source/GIR parity as deterministic source/loaded descriptor metadata summary evidence in M006 and defer richer user-facing parity diagnostics to a later milestone.
 
 ## Reader-Test Pass
 
-A cold reader can identify what S02, S03, S04, and S05 must implement, what S01 intentionally does not implement, which diagnostics must be observable, and which type-system tracks remain deferred. The design avoids relying on historical proposal files as the source of truth.
+A cold reader can identify what the M006 foundation implements, which diagnostics must be observable, how source/GIR parity is proven, how strict nil admits `Any`, `Nil`, `Option[T]`, and unions containing `Nil`, and which type-system tracks remain deferred. The design avoids relying on historical proposal files as the source of truth.

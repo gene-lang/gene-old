@@ -6,7 +6,7 @@ This document explains the current typing pipeline:
 
 It uses `examples/sample_typed.gene` as the running example.
 
-For the target coherence contract, see [Gradual Typing Foundation](gradual-typing.md). That document defines the M006 source/GIR verifier, parity, diagnostics, and opt-in strict-nil goals; this walkthrough describes what Gene does today.
+For the implemented M006 coherence foundation, see [Gradual Typing Foundation](gradual-typing.md). That document defines the source/GIR verifier, parity proof, diagnostics, default nil compatibility, and opt-in strict-nil surfaces; this walkthrough describes the broader gradual typing pipeline Gene runs today.
 
 ## Quick run commands
 
